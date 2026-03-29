@@ -52,11 +52,11 @@ fn emit_field_parse(
             out.push_str(&format!("{indent}let {} = cur.{read_method}()?;\n", f.name));
         }
         FieldStrategy::BitGroup => {
-            if let Some(ref bg) = f.bitgroup_member {
-                if !emitted_bitgroups.contains(&bg.group_id) {
-                    emitted_bitgroups.push(bg.group_id);
-                    emit_bitgroup_parse(out, all_fields, indent, bg);
-                }
+            if let Some(ref bg) = f.bitgroup_member
+                && !emitted_bitgroups.contains(&bg.group_id)
+            {
+                emitted_bitgroups.push(bg.group_id);
+                emit_bitgroup_parse(out, all_fields, indent, bg);
             }
         }
         FieldStrategy::BytesFixed => {
@@ -184,16 +184,16 @@ fn emit_bitgroup_parse(
 
     // Extract all fields in this group
     for f in all_fields {
-        if let Some(ref mbg) = f.bitgroup_member {
-            if mbg.group_id == group_id {
-                let mask = (1u64 << mbg.member_width_bits) - 1;
-                let shift = mbg.member_offset_bits;
-                let target_type = wire_type_to_rust(&f.wire_type);
-                out.push_str(&format!(
-                    "{indent}let {} = (({var_name} >> {shift}) & 0x{mask:x}) as {target_type};\n",
-                    f.name
-                ));
-            }
+        if let Some(ref mbg) = f.bitgroup_member
+            && mbg.group_id == group_id
+        {
+            let mask = (1u64 << mbg.member_width_bits) - 1;
+            let shift = mbg.member_offset_bits;
+            let target_type = wire_type_to_rust(&f.wire_type);
+            out.push_str(&format!(
+                "{indent}let {} = (({var_name} >> {shift}) & 0x{mask:x}) as {target_type};\n",
+                f.name
+            ));
         }
     }
 }

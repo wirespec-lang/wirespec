@@ -97,10 +97,10 @@ fn collect_field_type_refs(fields: &[CodecField], refs: &mut std::collections::H
         if let Some(ref name) = f.ref_type_name {
             refs.insert(name.clone());
         }
-        if let Some(ref arr) = f.array_spec {
-            if let Some(ref name) = arr.element_ref_type_name {
-                refs.insert(name.clone());
-            }
+        if let Some(ref arr) = f.array_spec
+            && let Some(ref name) = arr.element_ref_type_name
+        {
+            refs.insert(name.clone());
         }
     }
 }
@@ -152,7 +152,7 @@ fn emit_types_in_dependency_order(out: &mut String, module: &CodecModule, prefix
     for (name, _) in &types {
         in_degree.insert(name.clone(), 0);
     }
-    for (_, d) in &deps {
+    for d in deps.values() {
         for dep in d {
             if let Some(count) = in_degree.get_mut(dep) {
                 // dep is depended on by someone, but that doesn't change in_degree
@@ -474,7 +474,7 @@ fn emit_single_field(out: &mut String, f: &CodecField, prefix: &str) {
 fn emit_frame(out: &mut String, frame: &CodecFrame, prefix: &str) {
     // Tag enum
     let tag_type = c_frame_tag_type(prefix, &frame.name);
-    out.push_str(&format!("typedef enum {{\n"));
+    out.push_str("typedef enum {\n");
     for variant in &frame.variants {
         let tag_val = c_frame_tag_value(prefix, &frame.name, &variant.name);
         out.push_str(&format!("    {tag_val} = {},\n", variant.ordinal));
@@ -495,7 +495,7 @@ fn emit_frame(out: &mut String, frame: &CodecFrame, prefix: &str) {
             // Empty variant still needs a placeholder for the union
             out.push_str(&format!("        struct {{ uint8_t _dummy; }} {vname};\n"));
         } else {
-            out.push_str(&format!("        struct {{\n"));
+            out.push_str("        struct {\n");
             for f in &variant.fields {
                 emit_variant_field(out, f, prefix, "            ");
             }
@@ -635,7 +635,7 @@ fn emit_func_decls(out: &mut String, name: &str, prefix: &str) {
 /// Emit complete header declarations for a state machine:
 /// state tag enum, state data struct (tagged union), event tag enum,
 /// event data struct (tagged union), dispatch declaration, init helper.
-fn emit_state_machine_header(out: &mut String, sm: &SemanticStateMachine, prefix: &str) {
+fn _emit_state_machine_header(out: &mut String, sm: &SemanticStateMachine, prefix: &str) {
     emit_state_machine_header_imp(out, sm, prefix, &std::collections::HashMap::new());
 }
 
@@ -702,9 +702,9 @@ fn emit_sm_state_tag_enum(
     let tag_type = format!("{prefix}_{sm_snake}_state_tag_t");
 
     out.push_str("typedef enum {\n");
-    for (i, state) in sm.states.iter().enumerate() {
+    for state in &sm.states {
         let state_upper = to_snake_case(&state.name).to_uppercase();
-        let comma = if i + 1 < sm.states.len() { "," } else { "," };
+        let comma = ",";
         out.push_str(&format!(
             "    {prefix_upper}_{sm_upper}_{state_upper}{comma}\n"
         ));
@@ -712,7 +712,7 @@ fn emit_sm_state_tag_enum(
     out.push_str(&format!("}} {tag_type};\n\n"));
 }
 
-fn emit_sm_state_struct(
+fn _emit_sm_state_struct(
     out: &mut String,
     sm: &SemanticStateMachine,
     prefix: &str,
@@ -770,7 +770,7 @@ fn emit_sm_state_struct_imp(
     out.push_str("};\n\n");
 }
 
-fn emit_sm_state_field(out: &mut String, field: &SemanticStateField, prefix: &str, indent: &str) {
+fn _emit_sm_state_field(out: &mut String, field: &SemanticStateField, prefix: &str, indent: &str) {
     emit_sm_state_field_imp(
         out,
         field,
@@ -791,14 +791,13 @@ fn emit_sm_state_field_imp(
     // Handle array types specially
     if let wirespec_sema::types::SemanticType::Array { count_expr, .. } = &field.ty {
         // For fixed-size arrays in state fields
-        if let Some(count) = count_expr {
-            if let wirespec_sema::expr::SemanticExpr::Literal {
+        if let Some(count) = count_expr
+            && let wirespec_sema::expr::SemanticExpr::Literal {
                 value: wirespec_sema::expr::SemanticLiteral::Int(n),
             } = count.as_ref()
-            {
-                out.push_str(&format!("{indent}{ctype} {}[{n}];\n", field.name));
-                return;
-            }
+        {
+            out.push_str(&format!("{indent}{ctype} {}[{n}];\n", field.name));
+            return;
         }
         // Variable-length array: use a reasonable max
         out.push_str(&format!("{indent}{ctype} {}[256];\n", field.name));
@@ -819,9 +818,9 @@ fn emit_sm_event_tag_enum(
     let tag_type = format!("{prefix}_{sm_snake}_event_tag_t");
 
     out.push_str("typedef enum {\n");
-    for (i, event) in sm.events.iter().enumerate() {
+    for event in &sm.events {
         let event_upper = to_snake_case(&event.name).to_uppercase();
-        let comma = if i + 1 < sm.events.len() { "," } else { "," };
+        let comma = ",";
         out.push_str(&format!(
             "    {prefix_upper}_{sm_upper}_EVENT_{event_upper}{comma}\n"
         ));
@@ -829,7 +828,7 @@ fn emit_sm_event_tag_enum(
     out.push_str(&format!("}} {tag_type};\n\n"));
 }
 
-fn emit_sm_event_struct(
+fn _emit_sm_event_struct(
     out: &mut String,
     sm: &SemanticStateMachine,
     prefix: &str,
@@ -860,7 +859,7 @@ fn emit_sm_event_struct_imp(
     let tname = format!("{prefix}_{sm_snake}_event_t");
     let tag_type = format!("{prefix}_{sm_snake}_event_tag_t");
 
-    out.push_str(&format!("typedef struct {{\n"));
+    out.push_str("typedef struct {\n");
     out.push_str(&format!("    {tag_type} tag;\n"));
     out.push_str("    union {\n");
 

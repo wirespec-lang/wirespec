@@ -203,9 +203,10 @@ fn emit_packet(out: &mut String, packet: &CodecPacket) {
     let has_cksum = packet.checksum_plan.is_some();
     // Parse needs offset tracking for recompute-compare algorithms (CRC, fletcher)
     let parse_needs_offset = has_cksum
-        && packet.checksum_plan.as_ref().map_or(false, |p| {
-            p.input_model == ChecksumInputModel::RecomputeWithSkippedField
-        });
+        && packet
+            .checksum_plan
+            .as_ref()
+            .is_some_and(|p| p.input_model == ChecksumInputModel::RecomputeWithSkippedField);
     // Serialize always needs offset tracking when checksum is present (all algorithms need it)
 
     // Struct definition
@@ -314,14 +315,13 @@ fn emit_parse_items_with_cksum_tracking(
     cksum_field_name: &str,
 ) {
     for item in items {
-        if let CodecItem::Field { field_id } = item {
-            if let Some(f) = fields.iter().find(|f| &f.field_id == field_id) {
-                if f.name == cksum_field_name {
-                    out.push_str(&format!(
-                        "{indent}_cksum_offset = cur.consumed() - _start;\n"
-                    ));
-                }
-            }
+        if let CodecItem::Field { field_id } = item
+            && let Some(f) = fields.iter().find(|f| &f.field_id == field_id)
+            && f.name == cksum_field_name
+        {
+            out.push_str(&format!(
+                "{indent}_cksum_offset = cur.consumed() - _start;\n"
+            ));
         }
         let single_items = [item.clone()];
         parse_emit::emit_parse_items(out, fields, &single_items, indent);
@@ -338,12 +338,11 @@ fn emit_serialize_items_with_cksum_tracking(
     cksum_field_name: &str,
 ) {
     for item in items {
-        if let CodecItem::Field { field_id } = item {
-            if let Some(f) = fields.iter().find(|f| &f.field_id == field_id) {
-                if f.name == cksum_field_name {
-                    out.push_str(&format!("{indent}_cksum_offset = w.written() - _start;\n"));
-                }
-            }
+        if let CodecItem::Field { field_id } = item
+            && let Some(f) = fields.iter().find(|f| &f.field_id == field_id)
+            && f.name == cksum_field_name
+        {
+            out.push_str(&format!("{indent}_cksum_offset = w.written() - _start;\n"));
         }
         let single_items = [item.clone()];
         serialize_emit::emit_serialize_items(out, fields, &single_items, indent, val_prefix);
@@ -1370,21 +1369,20 @@ fn find_action_for_field(
 ) -> Option<String> {
     for action in actions {
         // Check if the target is the destination field with matching name
-        if let SemanticExpr::TransitionPeerRef { reference } = &action.target {
-            if reference.peer == TransitionPeerKind::Dst
-                && !reference.path.is_empty()
-                && reference.path[reference.path.len() - 1] == field_name
-            {
-                let value_str = sm_expr_to_rust_ctx(&action.value, sm_states);
-                return match action.op.as_str() {
-                    "=" => Some(value_str),
-                    "+=" => Some(format!("(*{field_name} + {value_str})")),
-                    "-=" => Some(format!("(*{field_name} - {value_str})")),
-                    "*=" => Some(format!("(*{field_name} * {value_str})")),
-                    "/=" => Some(format!("(*{field_name} / {value_str})")),
-                    _ => Some(value_str),
-                };
-            }
+        if let SemanticExpr::TransitionPeerRef { reference } = &action.target
+            && reference.peer == TransitionPeerKind::Dst
+            && !reference.path.is_empty()
+            && reference.path[reference.path.len() - 1] == field_name
+        {
+            let value_str = sm_expr_to_rust_ctx(&action.value, sm_states);
+            return match action.op.as_str() {
+                "=" => Some(value_str),
+                "+=" => Some(format!("(*{field_name} + {value_str})")),
+                "-=" => Some(format!("(*{field_name} - {value_str})")),
+                "*=" => Some(format!("(*{field_name} * {value_str})")),
+                "/=" => Some(format!("(*{field_name} / {value_str})")),
+                _ => Some(value_str),
+            };
         }
     }
     None

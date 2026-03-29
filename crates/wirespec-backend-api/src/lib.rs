@@ -117,17 +117,9 @@ impl Default for CommonOptions {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CBackendOptions {
     pub emit_fuzz_harness: bool,
-}
-
-impl Default for CBackendOptions {
-    fn default() -> Self {
-        Self {
-            emit_fuzz_harness: false,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Default)]

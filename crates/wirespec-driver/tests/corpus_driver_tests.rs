@@ -20,7 +20,7 @@ fn compile_example(rel_path: &str) -> wirespec_driver::CompileResult {
 fn corpus_quic_varint() {
     let result = compile_example("quic/varint.wire");
     assert_eq!(result.modules.len(), 1);
-    assert!(result.modules[0].codec.varints.len() >= 1);
+    assert!(!result.modules[0].codec.varints.is_empty());
 }
 
 #[test]

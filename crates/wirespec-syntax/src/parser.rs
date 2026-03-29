@@ -737,21 +737,21 @@ impl Parser {
         let mut fields = Vec::new();
         loop {
             // Check for the payload field pattern: NAME ":" "match" ...
-            if let TokenKind::Name(ref fname) = self.peek().clone() {
-                if fname == "payload" {
-                    // Peek ahead: payload : match
-                    let saved = self.pos;
-                    self.advance(); // skip "payload"
-                    if self.at(&TokenKind::Colon) {
-                        self.advance(); // skip ":"
-                        if self.at(&TokenKind::Match) {
-                            // This is the payload match — parse it
-                            break;
-                        }
+            if let TokenKind::Name(fname) = self.peek().clone()
+                && fname == "payload"
+            {
+                // Peek ahead: payload : match
+                let saved = self.pos;
+                self.advance(); // skip "payload"
+                if self.at(&TokenKind::Colon) {
+                    self.advance(); // skip ":"
+                    if self.at(&TokenKind::Match) {
+                        // This is the payload match — parse it
+                        break;
                     }
-                    // Not a payload match, restore
-                    self.pos = saved;
                 }
+                // Not a payload match, restore
+                self.pos = saved;
             }
             fields.push(self.parse_field_item()?);
             self.eat(&TokenKind::Comma);
@@ -1265,26 +1265,25 @@ impl Parser {
         }
 
         // Check for "length:" or "length_or_remaining:" with lookahead
-        if let TokenKind::Name(n) = self.peek().clone() {
-            if (n == "length" || n == "length_or_remaining")
-                && matches!(self.tokens[self.pos + 1].kind, TokenKind::Colon)
-            {
-                self.advance(); // skip "length" / "length_or_remaining"
-                self.advance(); // skip ":"
-                let expr = self.parse_expr()?;
-                let kind = if n == "length" {
-                    AstBytesKind::Length
-                } else {
-                    AstBytesKind::LengthOrRemaining
-                };
-                self.expect(&TokenKind::RBracket)?;
-                return Ok(AstTypeExpr::Bytes {
-                    kind,
-                    fixed_size: None,
-                    size_expr: Some(Box::new(expr)),
-                    span: Some(start),
-                });
-            }
+        if let TokenKind::Name(n) = self.peek().clone()
+            && (n == "length" || n == "length_or_remaining")
+            && matches!(self.tokens[self.pos + 1].kind, TokenKind::Colon)
+        {
+            self.advance(); // skip "length" / "length_or_remaining"
+            self.advance(); // skip ":"
+            let expr = self.parse_expr()?;
+            let kind = if n == "length" {
+                AstBytesKind::Length
+            } else {
+                AstBytesKind::LengthOrRemaining
+            };
+            self.expect(&TokenKind::RBracket)?;
+            return Ok(AstTypeExpr::Bytes {
+                kind,
+                fixed_size: None,
+                size_expr: Some(Box::new(expr)),
+                span: Some(start),
+            });
         }
 
         // bytes[N] — fixed size integer
@@ -1329,14 +1328,12 @@ impl Parser {
 
     fn parse_pattern(&mut self) -> Result<AstPattern> {
         let start = self.span();
-        if self.at(&TokenKind::Name(String::new())) {
-            // Check for wildcard "_"
-            if let TokenKind::Name(ref n) = self.peek().clone() {
-                if n == "_" {
-                    self.advance();
-                    return Ok(AstPattern::Wildcard { span: Some(start) });
-                }
-            }
+        // Check for wildcard "_"
+        if let TokenKind::Name(n) = self.peek().clone()
+            && n == "_"
+        {
+            self.advance();
+            return Ok(AstPattern::Wildcard { span: Some(start) });
         }
 
         let value = self.parse_integer()?;

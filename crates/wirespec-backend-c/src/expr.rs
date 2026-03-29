@@ -28,7 +28,7 @@ pub enum ExprContext {
 /// Thread-local to avoid threading through all expr_to_c calls.
 use std::cell::RefCell;
 thread_local! {
-    static CONST_PREFIX: RefCell<String> = RefCell::new(String::new());
+    static CONST_PREFIX: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
 /// Set the module prefix for const name resolution.
@@ -172,28 +172,27 @@ use wirespec_sema::types::SemanticType;
 /// Check if an expression refers to a bytes type by looking up the field/param
 /// in the SM's state definitions or event definitions.
 fn is_bytes_expr(expr: &SemanticExpr, ctx: &SmExprContext) -> bool {
-    if let SemanticExpr::TransitionPeerRef { reference } = expr {
-        if let Some(field_name) = reference.path.first() {
-            if let Some(sm) = ctx.sm {
-                match reference.peer {
-                    TransitionPeerKind::Src | TransitionPeerKind::Dst => {
-                        // Look up field in states
-                        for state in &sm.states {
-                            for f in &state.fields {
-                                if &f.name == field_name {
-                                    return matches!(&f.ty, SemanticType::Bytes { .. });
-                                }
-                            }
+    if let SemanticExpr::TransitionPeerRef { reference } = expr
+        && let Some(field_name) = reference.path.first()
+        && let Some(sm) = ctx.sm
+    {
+        match reference.peer {
+            TransitionPeerKind::Src | TransitionPeerKind::Dst => {
+                // Look up field in states
+                for state in &sm.states {
+                    for f in &state.fields {
+                        if &f.name == field_name {
+                            return matches!(&f.ty, SemanticType::Bytes { .. });
                         }
                     }
-                    TransitionPeerKind::EventParam => {
-                        // Look up param in events
-                        for event in &sm.events {
-                            for p in &event.params {
-                                if &p.name == field_name {
-                                    return matches!(&p.ty, SemanticType::Bytes { .. });
-                                }
-                            }
+                }
+            }
+            TransitionPeerKind::EventParam => {
+                // Look up param in events
+                for event in &sm.events {
+                    for p in &event.params {
+                        if &p.name == field_name {
+                            return matches!(&p.ty, SemanticType::Bytes { .. });
                         }
                     }
                 }

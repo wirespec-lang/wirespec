@@ -104,25 +104,25 @@ pub fn compile_module(
 
     // Populate imports from AST import declarations + external type registry
     for imp in &ast.imports {
-        if let Some(ref item_name) = imp.name {
-            if let Some(ext) = external_types.get(item_name) {
-                let kind = match ext.kind {
-                    ExternalTypeKind::VarInt => wirespec_sema::ir::ImportedDeclKind::VarInt,
-                    ExternalTypeKind::Packet => wirespec_sema::ir::ImportedDeclKind::Packet,
-                    ExternalTypeKind::Frame => wirespec_sema::ir::ImportedDeclKind::Frame,
-                    ExternalTypeKind::Capsule => wirespec_sema::ir::ImportedDeclKind::Capsule,
-                    ExternalTypeKind::Enum => wirespec_sema::ir::ImportedDeclKind::Enum,
-                    ExternalTypeKind::Flags => wirespec_sema::ir::ImportedDeclKind::Flags,
-                    ExternalTypeKind::StateMachine => wirespec_sema::ir::ImportedDeclKind::Packet,
-                };
-                sem.imports.push(wirespec_sema::ir::ImportedTypeRef {
-                    import_id: format!("import:{}", item_name),
-                    name: item_name.clone(),
-                    source_module: ext.module.clone(),
-                    source_prefix: ext.source_prefix.clone(),
-                    decl_kind: kind,
-                });
-            }
+        if let Some(ref item_name) = imp.name
+            && let Some(ext) = external_types.get(item_name)
+        {
+            let kind = match ext.kind {
+                ExternalTypeKind::VarInt => wirespec_sema::ir::ImportedDeclKind::VarInt,
+                ExternalTypeKind::Packet => wirespec_sema::ir::ImportedDeclKind::Packet,
+                ExternalTypeKind::Frame => wirespec_sema::ir::ImportedDeclKind::Frame,
+                ExternalTypeKind::Capsule => wirespec_sema::ir::ImportedDeclKind::Capsule,
+                ExternalTypeKind::Enum => wirespec_sema::ir::ImportedDeclKind::Enum,
+                ExternalTypeKind::Flags => wirespec_sema::ir::ImportedDeclKind::Flags,
+                ExternalTypeKind::StateMachine => wirespec_sema::ir::ImportedDeclKind::Packet,
+            };
+            sem.imports.push(wirespec_sema::ir::ImportedTypeRef {
+                import_id: format!("import:{}", item_name),
+                name: item_name.clone(),
+                source_module: ext.module.clone(),
+                source_prefix: ext.source_prefix.clone(),
+                decl_kind: kind,
+            });
         }
     }
 

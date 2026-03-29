@@ -16,11 +16,7 @@ pub struct StrategyInput<'a> {
 
 /// Assign field strategy per spec S14 priority order.
 ///
-/// Priority:
-///   1. BitGroup (sub-byte field in a detected bitgroup)
-///   2. Checksum (@checksum annotation present)
-///   3. Conditional (if COND { T })
-///   4-9. Type-based (varint, bytes, struct, array, primitive)
+/// Priority: BitGroup > Checksum > Conditional > type-based (varint, bytes, struct, array, primitive)
 pub fn assign_strategy(input: &StrategyInput) -> FieldStrategy {
     // Priority 1: bitgroup
     if input.has_bitgroup {

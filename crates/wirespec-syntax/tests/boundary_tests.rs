@@ -413,7 +413,7 @@ fn annotations_after_module_decl_are_file_level() {
     // With module decl, annotations between module decl and first item are file-level
     let m = parse("@endian big\nmodule test\n@derive(debug)\npacket P { x: u8 }").unwrap();
     // Both @endian and @derive end up as file-level annotations
-    assert!(m.annotations.len() >= 1, "expected file-level annotations");
+    assert!(!m.annotations.is_empty(), "expected file-level annotations");
     assert_eq!(m.annotations[0].name, "endian");
 }
 

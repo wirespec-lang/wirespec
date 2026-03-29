@@ -257,12 +257,11 @@ fn lower_field(
     let mut strategy = assign_strategy(&strategy_input);
 
     // For VarInt: check encoding to distinguish VarInt vs ContVarInt
-    if strategy == FieldStrategy::VarInt {
-        if let SemanticType::VarIntRef { varint_id, .. } = inner_ty {
-            if ctx.varint_encoding(varint_id) == VarIntEncoding::ContinuationBit {
-                strategy = FieldStrategy::ContVarInt;
-            }
-        }
+    if strategy == FieldStrategy::VarInt
+        && let SemanticType::VarIntRef { varint_id, .. } = inner_ty
+        && ctx.varint_encoding(varint_id) == VarIntEncoding::ContinuationBit
+    {
+        strategy = FieldStrategy::ContVarInt;
     }
 
     // Memory tier
