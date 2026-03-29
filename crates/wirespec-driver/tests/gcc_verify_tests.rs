@@ -36,7 +36,7 @@ fn write_and_gcc(header: &str, source: &str, prefix: &str) -> (bool, String) {
     std::fs::create_dir_all(&dir).unwrap();
 
     let runtime_dir =
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../protospec/runtime");
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../runtime");
 
     let h_path = dir.join(format!("{prefix}.h"));
     let c_path = dir.join(format!("{prefix}.c"));

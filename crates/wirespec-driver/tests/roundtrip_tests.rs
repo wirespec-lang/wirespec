@@ -14,7 +14,7 @@ use wirespec_sema::ComplianceProfile;
 use wirespec_syntax::parse;
 
 fn runtime_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../protospec/runtime")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../runtime")
 }
 
 fn generate_c_files(wspec_src: &str, prefix: &str, outdir: &Path) {

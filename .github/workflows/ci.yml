@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Check & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-action/setup@v1
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Build
+        run: cargo build --workspace
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: GCC example verification
+        run: |
+          for f in examples/net/udp.wire examples/net/tcp.wire examples/net/ethernet.wire \
+                   examples/quic/varint.wire examples/test/bits_groups.wire \
+                   examples/ble/att.wire examples/mqtt/mqtt.wire \
+                   examples/ip/ipv4.wire examples/tls/tls13.wire; do
+            name=$(echo $f | tr '/' '_' | sed 's/.wire//')
+            outdir="/tmp/ci-gcc/$name"
+            mkdir -p "$outdir"
+            ./target/release/wirespec compile "$f" -o "$outdir" -t c -I examples --recursive 2>/dev/null
+            cfile=$(ls "$outdir"/*.c 2>/dev/null | head -1)
+            if [ -n "$cfile" ]; then
+              gcc -Wall -Wextra -Werror -std=c11 -fsyntax-only \
+                -I "$outdir" -I runtime "$cfile"
+              echo "✅ $f"
+            fi
+          done

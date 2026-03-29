@@ -30,7 +30,7 @@ fn generate_and_gcc(src: &str, prefix: &str) {
     std::fs::create_dir_all(&dir).unwrap();
 
     let runtime = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../protospec/runtime");
+        .join("../../runtime");
 
     std::fs::write(dir.join(format!("{prefix}.h")), &header).unwrap();
     std::fs::write(dir.join(format!("{prefix}.c")), &source).unwrap();
