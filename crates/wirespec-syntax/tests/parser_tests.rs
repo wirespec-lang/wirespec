@@ -452,10 +452,10 @@ fn parse_packet_with_fill_array() {
     .unwrap();
     match &m.items[0] {
         AstTopItem::Packet(p) => {
-            if let AstFieldItem::Field(f) = &p.fields[0] {
-                if let AstTypeExpr::Array { count, .. } = &f.type_expr {
-                    assert!(matches!(count, AstArrayCount::Fill));
-                }
+            if let AstFieldItem::Field(f) = &p.fields[0]
+                && let AstTypeExpr::Array { count, .. } = &f.type_expr
+            {
+                assert!(matches!(count, AstArrayCount::Fill));
             }
         }
         _ => panic!("expected packet"),

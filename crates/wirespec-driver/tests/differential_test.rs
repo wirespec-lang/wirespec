@@ -158,22 +158,22 @@ fn extract_type_names(header: &str) -> BTreeSet<String> {
     for line in header.lines() {
         let trimmed = line.trim();
         // "typedef struct foo_bar foo_bar_t;" pattern
-        if trimmed.starts_with("typedef struct ") || trimmed.starts_with("typedef union ") {
-            if let Some(name) = trimmed.split_whitespace().nth(2) {
-                // Filter out "{" which appears when the typedef spans multiple lines
-                if name != "{" && !name.is_empty() {
-                    types.insert(name.to_string());
-                }
+        if (trimmed.starts_with("typedef struct ") || trimmed.starts_with("typedef union "))
+            && let Some(name) = trimmed.split_whitespace().nth(2)
+        {
+            // Filter out "{" which appears when the typedef spans multiple lines
+            if name != "{" && !name.is_empty() {
+                types.insert(name.to_string());
             }
         }
         // Also look for "struct foo_bar {" pattern
-        if trimmed.starts_with("struct ") && trimmed.ends_with('{') {
-            if let Some(name) = trimmed
+        if trimmed.starts_with("struct ")
+            && trimmed.ends_with('{')
+            && let Some(name) = trimmed
                 .strip_prefix("struct ")
                 .and_then(|s| s.strip_suffix(" {"))
-            {
-                types.insert(name.to_string());
-            }
+        {
+            types.insert(name.to_string());
         }
     }
     types

@@ -8,6 +8,15 @@ use crate::expr::{ExprContext, expr_to_c};
 use crate::names::*;
 use crate::type_map::*;
 
+/// Bundles the "threading" parameters used throughout field-parse emission,
+/// keeping individual function signatures under the clippy arg-count limit.
+struct FieldParseCtx<'a> {
+    prefix: &'a str,
+    indent: &'a str,
+    struct_prefix: &'a str,
+    expr_ctx: &'a ExprContext,
+}
+
 /// Returns true if the wire type is a signed integer that needs a cast
 /// when passed to the unsigned cursor-read / write functions.
 fn needs_signed_cast(wt: &WireType) -> bool {
@@ -64,21 +73,18 @@ pub fn emit_parse_items_with_ctx(
 ) {
     // Track which bitgroups we've already emitted
     let mut emitted_bitgroups: Vec<u32> = Vec::new();
+    let ctx = FieldParseCtx {
+        prefix,
+        indent,
+        struct_prefix,
+        expr_ctx,
+    };
 
     for item in items {
         match item {
             CodecItem::Field { field_id } => {
                 if let Some(f) = fields.iter().find(|f| &f.field_id == field_id) {
-                    emit_field_parse_with_ctx(
-                        out,
-                        f,
-                        fields,
-                        prefix,
-                        indent,
-                        struct_prefix,
-                        &mut emitted_bitgroups,
-                        expr_ctx,
-                    );
+                    emit_field_parse_with_ctx(out, f, fields, &ctx, &mut emitted_bitgroups);
                 }
             }
             CodecItem::Derived(d) => {
@@ -107,28 +113,26 @@ fn emit_field_parse(
     struct_prefix: &str,
     emitted_bitgroups: &mut Vec<u32>,
 ) {
-    emit_field_parse_with_ctx(
-        out,
-        f,
-        all_fields,
+    let ctx = FieldParseCtx {
         prefix,
         indent,
         struct_prefix,
-        emitted_bitgroups,
-        &ExprContext::Parse,
-    );
+        expr_ctx: &ExprContext::Parse,
+    };
+    emit_field_parse_with_ctx(out, f, all_fields, &ctx, emitted_bitgroups);
 }
 
 fn emit_field_parse_with_ctx(
     out: &mut String,
     f: &CodecField,
     all_fields: &[CodecField],
-    prefix: &str,
-    indent: &str,
-    struct_prefix: &str,
+    ctx: &FieldParseCtx<'_>,
     emitted_bitgroups: &mut Vec<u32>,
-    expr_ctx: &ExprContext,
 ) {
+    let prefix = ctx.prefix;
+    let indent = ctx.indent;
+    let struct_prefix = ctx.struct_prefix;
+    let expr_ctx = ctx.expr_ctx;
     match f.strategy {
         FieldStrategy::Primitive | FieldStrategy::Checksum => {
             let read_fn = cursor_read_fn(&f.wire_type, f.endianness);
@@ -147,13 +151,13 @@ fn emit_field_parse_with_ctx(
             out.push_str(&format!("{indent}if (r != WIRESPEC_OK) return r;\n"));
         }
         FieldStrategy::BitGroup => {
-            if let Some(ref bg) = f.bitgroup_member {
-                if !emitted_bitgroups.contains(&bg.group_id) {
-                    emitted_bitgroups.push(bg.group_id);
-                    emit_bitgroup_parse(out, f, all_fields, prefix, indent, struct_prefix, bg);
-                }
-                // If already emitted, this field was handled as part of the group
+            if let Some(ref bg) = f.bitgroup_member
+                && !emitted_bitgroups.contains(&bg.group_id)
+            {
+                emitted_bitgroups.push(bg.group_id);
+                emit_bitgroup_parse(out, f, all_fields, prefix, indent, struct_prefix, bg);
             }
+            // If already emitted, this field was handled as part of the group
         }
         FieldStrategy::BytesFixed => {
             if let Some(BytesSpec::Fixed { size }) = &f.bytes_spec {
@@ -224,15 +228,11 @@ fn emit_field_parse_with_ctx(
                 // Parse the inner field
                 let inner_wt = f.inner_wire_type.as_ref().unwrap_or(&f.wire_type);
                 // Check if the inner type is a struct reference
-                if f.ref_type_name.is_some() && matches!(inner_wt, WireType::Struct(_)) {
-                    let ref_name = f.ref_type_name.as_ref().unwrap();
-                    let parse_fn = c_func_name(prefix, ref_name, "parse_cursor");
-                    out.push_str(&format!(
-                        "{indent}    r = {parse_fn}(cur, &{struct_prefix}{});\n",
-                        f.name
-                    ));
-                } else if f.ref_type_name.is_some()
-                    && matches!(inner_wt, WireType::VarInt | WireType::ContVarInt)
+                if f.ref_type_name.is_some()
+                    && matches!(
+                        inner_wt,
+                        WireType::Struct(_) | WireType::VarInt | WireType::ContVarInt
+                    )
                 {
                     let ref_name = f.ref_type_name.as_ref().unwrap();
                     let parse_fn = c_func_name(prefix, ref_name, "parse_cursor");
@@ -305,22 +305,22 @@ fn emit_bitgroup_parse(
 
     // Extract all fields in this group
     for f in all_fields {
-        if let Some(ref mbg) = f.bitgroup_member {
-            if mbg.group_id == group_id {
-                let mask = (1u64 << mbg.member_width_bits) - 1;
-                let shift = mbg.member_offset_bits;
-                let ctype = wire_type_to_c(&f.wire_type, "");
-                // Use the simplest unsigned type for the cast
-                let cast_type = if ctype.contains("int") {
-                    &ctype
-                } else {
-                    "uint8_t"
-                };
-                out.push_str(&format!(
+        if let Some(ref mbg) = f.bitgroup_member
+            && mbg.group_id == group_id
+        {
+            let mask = (1u64 << mbg.member_width_bits) - 1;
+            let shift = mbg.member_offset_bits;
+            let ctype = wire_type_to_c(&f.wire_type, "");
+            // Use the simplest unsigned type for the cast
+            let cast_type = if ctype.contains("int") {
+                &ctype
+            } else {
+                "uint8_t"
+            };
+            out.push_str(&format!(
                     "{indent}    {struct_prefix}{} = ({cast_type})(({var_name} >> {shift}) & 0x{mask:x});\n",
                     f.name
                 ));
-            }
         }
     }
 
@@ -848,16 +848,13 @@ fn emit_capsule_field_parse(
             // `&sub` to use the sub-cursor.
             let mut tmp = String::new();
             let mut dummy_bg = Vec::new();
-            emit_field_parse_with_ctx(
-                &mut tmp,
-                f,
-                all_fields,
+            let ctx = FieldParseCtx {
                 prefix,
                 indent,
                 struct_prefix,
-                &mut dummy_bg,
                 expr_ctx,
-            );
+            };
+            emit_field_parse_with_ctx(&mut tmp, f, all_fields, &ctx, &mut dummy_bg);
             // Replace cursor variable: (cur, -> (&sub, and cur-> -> sub.
             let tmp = tmp.replace("(cur, ", "(&sub, ");
             let tmp = tmp.replace("cur->", "sub.");

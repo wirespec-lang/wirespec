@@ -22,24 +22,22 @@ fn resolve_enum_fields(fields: &[CodecField], enums: &[SemanticEnum]) -> Vec<Cod
     fields
         .iter()
         .map(|f| {
-            if f.strategy == FieldStrategy::Struct {
-                if let WireType::Enum(ref name) = f.wire_type {
-                    if let Some(e) = enums.iter().find(|e| &e.name == name) {
-                        let underlying_wt = semantic_type_to_wire_type_simple(&e.underlying_type);
-                        let mut f2 = f.clone();
-                        f2.strategy = FieldStrategy::Primitive;
-                        f2.wire_type = underlying_wt;
-                        f2.ref_type_name = None;
-                        // Propagate endianness from the enum's underlying type
-                        if let wirespec_sema::types::SemanticType::Primitive {
-                            endianness, ..
-                        } = &e.underlying_type
-                        {
-                            f2.endianness = *endianness;
-                        }
-                        return f2;
-                    }
+            if f.strategy == FieldStrategy::Struct
+                && let WireType::Enum(ref name) = f.wire_type
+                && let Some(e) = enums.iter().find(|e| &e.name == name)
+            {
+                let underlying_wt = semantic_type_to_wire_type_simple(&e.underlying_type);
+                let mut f2 = f.clone();
+                f2.strategy = FieldStrategy::Primitive;
+                f2.wire_type = underlying_wt;
+                f2.ref_type_name = None;
+                // Propagate endianness from the enum's underlying type
+                if let wirespec_sema::types::SemanticType::Primitive { endianness, .. } =
+                    &e.underlying_type
+                {
+                    f2.endianness = *endianness;
                 }
+                return f2;
             }
             f.clone()
         })
@@ -83,9 +81,10 @@ pub fn emit_source(module: &CodecModule, prefix: &str) -> String {
         let tname = c_type_name(prefix, &packet.name);
         let cursor_fn = c_func_name(prefix, &packet.name, "parse_cursor");
         let has_cksum = packet.checksum_plan.is_some()
-            && packet.checksum_plan.as_ref().map_or(false, |p| {
-                p.input_model == ChecksumInputModel::RecomputeWithSkippedField
-            });
+            && packet
+                .checksum_plan
+                .as_ref()
+                .is_some_and(|p| p.input_model == ChecksumInputModel::RecomputeWithSkippedField);
         if has_cksum {
             out.push_str(&format!(
                 "static wirespec_result_t {cursor_fn}(wirespec_cursor_t *cur, {tname} *out, size_t *_cksum_offset_out);\n"
@@ -158,9 +157,10 @@ fn emit_packet_parse(out: &mut String, packet: &CodecPacket, prefix: &str, enums
 
     let has_cksum = packet.checksum_plan.is_some();
     let needs_offset = has_cksum
-        && packet.checksum_plan.as_ref().map_or(false, |p| {
-            p.input_model == ChecksumInputModel::RecomputeWithSkippedField
-        });
+        && packet
+            .checksum_plan
+            .as_ref()
+            .is_some_and(|p| p.input_model == ChecksumInputModel::RecomputeWithSkippedField);
 
     // Static cursor-based parse
     if needs_offset {
@@ -819,7 +819,7 @@ fn emit_action(out: &mut String, action: &SemanticAction, ctx: &SmExprContext, i
             let is_array_field =
                 if let SemanticExpr::TransitionPeerRef { reference } = &action.target {
                     if let Some(field_name) = reference.path.first() {
-                        ctx.sm.map_or(false, |sm| {
+                        ctx.sm.is_some_and(|sm| {
                             sm.states.iter().any(|s| {
                                 s.fields.iter().any(|f| {
                                     &f.name == field_name
@@ -908,7 +908,7 @@ fn emit_delegate(
         // to the child event tag type.
         let delegate_param_snake = to_snake_case(&delegate.event_name);
         let child_event_tag_type = format!("{prefix}_{child_snake}_event_tag_t");
-        let parent_event_snake = to_snake_case(&_ctx.event_snake);
+        let parent_event_snake = to_snake_case(_ctx.event_snake);
         out.push_str(&format!("{indent}{child_event_type} _child_ev;\n"));
         out.push_str(&format!(
             "{indent}_child_ev.tag = ({child_event_tag_type})event->{parent_event_snake}.{delegate_param_snake};\n"
@@ -1040,15 +1040,8 @@ fn emit_varint_prefix_match(out: &mut String, vi: &SemanticVarInt, prefix: &str)
     for (i, branch) in vi.branches.iter().enumerate() {
         let total = branch.total_bytes as usize;
         let prefix_marker = branch.prefix_value << (8 - prefix_bits);
-        let is_last = i == vi.branches.len() - 1;
-
         if i == 0 {
             out.push_str(&format!("    if (val <= {}ULL) {{\n", branch.max_value));
-        } else if !is_last {
-            out.push_str(&format!(
-                "    }} else if (val <= {}ULL) {{\n",
-                branch.max_value
-            ));
         } else {
             out.push_str(&format!(
                 "    }} else if (val <= {}ULL) {{\n",
@@ -1265,14 +1258,13 @@ fn emit_parse_items_with_cksum(
     cksum_field_name: &str,
 ) {
     for item in items {
-        if let CodecItem::Field { field_id } = item {
-            if let Some(f) = fields.iter().find(|f| &f.field_id == field_id) {
-                if f.name == cksum_field_name {
-                    out.push_str(&format!(
-                        "{indent}_cksum_offset = wirespec_cursor_consumed(cur);\n"
-                    ));
-                }
-            }
+        if let CodecItem::Field { field_id } = item
+            && let Some(f) = fields.iter().find(|f| &f.field_id == field_id)
+            && f.name == cksum_field_name
+        {
+            out.push_str(&format!(
+                "{indent}_cksum_offset = wirespec_cursor_consumed(cur);\n"
+            ));
         }
         let single_items = [item.clone()];
         parse_emit::emit_parse_items(out, fields, &single_items, prefix, indent, struct_prefix);
@@ -1289,12 +1281,11 @@ fn emit_serialize_items_with_cksum(
     cksum_field_name: &str,
 ) {
     for item in items {
-        if let CodecItem::Field { field_id } = item {
-            if let Some(f) = fields.iter().find(|f| &f.field_id == field_id) {
-                if f.name == cksum_field_name {
-                    out.push_str(&format!("{indent}_cksum_offset = pos;\n"));
-                }
-            }
+        if let CodecItem::Field { field_id } = item
+            && let Some(f) = fields.iter().find(|f| &f.field_id == field_id)
+            && f.name == cksum_field_name
+        {
+            out.push_str(&format!("{indent}_cksum_offset = pos;\n"));
         }
         let single_items = [item.clone()];
         serialize_emit::emit_serialize_items(out, fields, &single_items, prefix, indent);

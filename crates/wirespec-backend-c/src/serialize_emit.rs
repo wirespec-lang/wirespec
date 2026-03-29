@@ -77,11 +77,11 @@ fn emit_field_serialize(
             out.push_str(&format!("{indent}if (r != WIRESPEC_OK) return r;\n"));
         }
         FieldStrategy::BitGroup => {
-            if let Some(ref bg) = f.bitgroup_member {
-                if !emitted_bitgroups.contains(&bg.group_id) {
-                    emitted_bitgroups.push(bg.group_id);
-                    emit_bitgroup_serialize(out, all_fields, prefix, indent, bg);
-                }
+            if let Some(ref bg) = f.bitgroup_member
+                && !emitted_bitgroups.contains(&bg.group_id)
+            {
+                emitted_bitgroups.push(bg.group_id);
+                emit_bitgroup_serialize(out, all_fields, prefix, indent, bg);
             }
         }
         FieldStrategy::BytesFixed
@@ -192,16 +192,16 @@ fn emit_bitgroup_serialize(
 
     // Combine all fields in this group with shift+OR
     for f in all_fields {
-        if let Some(ref mbg) = f.bitgroup_member {
-            if mbg.group_id == group_id {
-                let mask = (1u64 << mbg.member_width_bits) - 1;
-                let shift = mbg.member_offset_bits;
-                let cast_type = container_type;
-                out.push_str(&format!(
-                    "{indent}    {var_name} |= (({cast_type})(val->{} & 0x{mask:x})) << {shift};\n",
-                    f.name
-                ));
-            }
+        if let Some(ref mbg) = f.bitgroup_member
+            && mbg.group_id == group_id
+        {
+            let mask = (1u64 << mbg.member_width_bits) - 1;
+            let shift = mbg.member_offset_bits;
+            let cast_type = container_type;
+            out.push_str(&format!(
+                "{indent}    {var_name} |= (({cast_type})(val->{} & 0x{mask:x})) << {shift};\n",
+                f.name
+            ));
         }
     }
 
@@ -376,38 +376,38 @@ fn emit_variant_field_serialize(
             out.push_str(&format!("{indent}if (r != WIRESPEC_OK) return r;\n"));
         }
         FieldStrategy::BitGroup => {
-            if let Some(ref bg) = f.bitgroup_member {
-                if !emitted_bitgroups.contains(&bg.group_id) {
-                    emitted_bitgroups.push(bg.group_id);
-                    // Emit bitgroup serialize with variant prefix
-                    let group_id = bg.group_id;
-                    let total_bits = bg.total_bits;
-                    let container_type = bitgroup_c_type(total_bits);
-                    let write_fn_name = bitgroup_write_fn(total_bits, bg.group_endianness);
-                    let var_name = format!("_bg{group_id}");
+            if let Some(ref bg) = f.bitgroup_member
+                && !emitted_bitgroups.contains(&bg.group_id)
+            {
+                emitted_bitgroups.push(bg.group_id);
+                // Emit bitgroup serialize with variant prefix
+                let group_id = bg.group_id;
+                let total_bits = bg.total_bits;
+                let container_type = bitgroup_c_type(total_bits);
+                let write_fn_name = bitgroup_write_fn(total_bits, bg.group_endianness);
+                let var_name = format!("_bg{group_id}");
 
-                    out.push_str(&format!("{indent}{{\n"));
-                    out.push_str(&format!("{indent}    {container_type} {var_name} = 0;\n"));
+                out.push_str(&format!("{indent}{{\n"));
+                out.push_str(&format!("{indent}    {container_type} {var_name} = 0;\n"));
 
-                    for af in all_fields {
-                        if let Some(ref mbg) = af.bitgroup_member {
-                            if mbg.group_id == group_id {
-                                let mask = (1u64 << mbg.member_width_bits) - 1;
-                                let shift = mbg.member_offset_bits;
-                                out.push_str(&format!(
+                for af in all_fields {
+                    if let Some(ref mbg) = af.bitgroup_member
+                        && mbg.group_id == group_id
+                    {
+                        let mask = (1u64 << mbg.member_width_bits) - 1;
+                        let shift = mbg.member_offset_bits;
+                        out.push_str(&format!(
                                     "{indent}    {var_name} |= (({container_type})({val_prefix}{} & 0x{mask:x})) << {shift};\n",
                                     af.name
                                 ));
-                            }
-                        }
                     }
-
-                    out.push_str(&format!(
-                        "{indent}    r = {write_fn_name}(buf, cap, &pos, {var_name});\n"
-                    ));
-                    out.push_str(&format!("{indent}    if (r != WIRESPEC_OK) return r;\n"));
-                    out.push_str(&format!("{indent}}}\n"));
                 }
+
+                out.push_str(&format!(
+                    "{indent}    r = {write_fn_name}(buf, cap, &pos, {var_name});\n"
+                ));
+                out.push_str(&format!("{indent}    if (r != WIRESPEC_OK) return r;\n"));
+                out.push_str(&format!("{indent}}}\n"));
             }
         }
         FieldStrategy::BytesFixed
@@ -583,12 +583,12 @@ fn emit_field_serialized_len(
             }
         }
         FieldStrategy::BitGroup => {
-            if let Some(ref bg) = f.bitgroup_member {
-                if !emitted_bitgroups.contains(&bg.group_id) {
-                    emitted_bitgroups.push(bg.group_id);
-                    let bytes = (bg.total_bits + 7) / 8;
-                    out.push_str(&format!("{indent}len += {bytes};\n"));
-                }
+            if let Some(ref bg) = f.bitgroup_member
+                && !emitted_bitgroups.contains(&bg.group_id)
+            {
+                emitted_bitgroups.push(bg.group_id);
+                let bytes = bg.total_bits.div_ceil(8);
+                out.push_str(&format!("{indent}len += {bytes};\n"));
             }
         }
         FieldStrategy::BytesFixed => {

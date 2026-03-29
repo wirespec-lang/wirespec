@@ -209,26 +209,17 @@ fn resolve_field_endianness(
 /// Resolve endianness for a type.
 fn resolve_type_endianness(ty: &SemanticType, module_endianness: Endianness) -> Option<Endianness> {
     match ty {
-        SemanticType::Primitive {
-            endianness: Some(e),
-            ..
-        } => Some(*e),
-        SemanticType::Primitive {
-            endianness: None,
-            wire,
-        } => {
-            match wire {
-                PrimitiveWireType::U16
-                | PrimitiveWireType::I16
-                | PrimitiveWireType::U24
-                | PrimitiveWireType::U32
-                | PrimitiveWireType::I32
-                | PrimitiveWireType::U64
-                | PrimitiveWireType::I64 => Some(module_endianness),
-                // Single-byte or sub-byte: no endianness
-                _ => None,
-            }
-        }
+        SemanticType::Primitive { endianness, wire } => match (endianness, wire) {
+            (Some(e), _) => Some(*e),
+            (None, PrimitiveWireType::U16)
+            | (None, PrimitiveWireType::I16)
+            | (None, PrimitiveWireType::U24)
+            | (None, PrimitiveWireType::U32)
+            | (None, PrimitiveWireType::I32)
+            | (None, PrimitiveWireType::U64)
+            | (None, PrimitiveWireType::I64) => Some(module_endianness),
+            _ => None,
+        },
         // EnumRef underlying type may need endianness, but that's resolved
         // when the enum's wire type is lowered
         _ => None,

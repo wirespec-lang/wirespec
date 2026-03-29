@@ -68,15 +68,15 @@ pub fn validate_checksum_field_type(
     field_name: &str,
 ) -> SemaResult<()> {
     let required = crate::profile::checksum_required_type(algorithm);
-    if let Some(req) = required {
-        if field_type_name != req {
-            return Err(SemaError::new(
-                ErrorKind::InvalidChecksumType,
-                format!(
-                    "@checksum({algorithm}) requires field type '{req}', but '{field_name}' has type '{field_type_name}'"
-                ),
-            ));
-        }
+    if let Some(req) = required
+        && field_type_name != req
+    {
+        return Err(SemaError::new(
+            ErrorKind::InvalidChecksumType,
+            format!(
+                "@checksum({algorithm}) requires field type '{req}', but '{field_name}' has type '{field_type_name}'"
+            ),
+        ));
     }
     Ok(())
 }
@@ -94,9 +94,9 @@ pub fn validate_checksum_profile(
                 profile.as_str()
             ),
         )
-        .with_hint(format!(
-            "use --profile phase2_extended_current to enable extension algorithms"
-        )));
+        .with_hint(
+            "use --profile phase2_extended_current to enable extension algorithms".to_string(),
+        ));
     }
     Ok(())
 }

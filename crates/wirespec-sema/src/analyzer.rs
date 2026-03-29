@@ -196,31 +196,28 @@ impl Analyzer {
     fn parse_endianness(&self, ast: &AstModule) -> Endianness {
         // Check module-level annotations
         for ann in &ast.annotations {
-            if ann.name == "endian" {
-                if let Some(AstAnnotationArg::Identifier(val)) = ann.args.first() {
-                    return match val.as_str() {
-                        "little" => Endianness::Little,
-                        _ => Endianness::Big,
-                    };
-                }
+            if ann.name == "endian"
+                && let Some(AstAnnotationArg::Identifier(val)) = ann.args.first()
+            {
+                return match val.as_str() {
+                    "little" => Endianness::Little,
+                    _ => Endianness::Big,
+                };
             }
         }
         // Check item-level annotations (pre-module)
         for item in &ast.items {
-            match item {
-                AstTopItem::Packet(p) => {
-                    for ann in &p.annotations {
-                        if ann.name == "endian" {
-                            if let Some(AstAnnotationArg::Identifier(val)) = ann.args.first() {
-                                return match val.as_str() {
-                                    "little" => Endianness::Little,
-                                    _ => Endianness::Big,
-                                };
-                            }
-                        }
+            if let AstTopItem::Packet(p) = item {
+                for ann in &p.annotations {
+                    if ann.name == "endian"
+                        && let Some(AstAnnotationArg::Identifier(val)) = ann.args.first()
+                    {
+                        return match val.as_str() {
+                            "little" => Endianness::Little,
+                            _ => Endianness::Big,
+                        };
                     }
                 }
-                _ => {}
             }
         }
         Endianness::Big
@@ -340,8 +337,7 @@ impl Analyzer {
         let members = e
             .members
             .iter()
-            .enumerate()
-            .map(|(_i, m)| SemanticEnumMember {
+            .map(|m| SemanticEnumMember {
                 member_id: format!("{}/member:{}", enum_id, m.name),
                 name: m.name.clone(),
                 value: m.value,
@@ -365,8 +361,7 @@ impl Analyzer {
         let members = f
             .members
             .iter()
-            .enumerate()
-            .map(|(_i, m)| SemanticEnumMember {
+            .map(|m| SemanticEnumMember {
                 member_id: format!("{}/member:{}", enum_id, m.name),
                 name: m.name.clone(),
                 value: m.value,
@@ -440,7 +435,7 @@ impl Analyzer {
                 _ => 0,
             };
             let total_bits = prefix_bits as u16 + value_bits as u16;
-            let total_bytes = ((total_bits + 7) / 8) as u8;
+            let total_bytes = total_bits.div_ceil(8) as u8;
             let max_value = if value_bits >= 64 {
                 u64::MAX
             } else {
@@ -531,18 +526,16 @@ impl Analyzer {
                         size_expr: Some(expr),
                         ..
                     } = &f.type_expr
+                        && let AstExpr::NameRef { name, .. } = &**expr
+                        && !optional_fields.contains(name.as_str())
                     {
-                        if let AstExpr::NameRef { name, .. } = &**expr {
-                            if !optional_fields.contains(name.as_str()) {
-                                return Err(SemaError::new(
+                        return Err(SemaError::new(
                                     ErrorKind::InvalidLengthOrRemaining,
                                     format!(
                                         "bytes[length_or_remaining: {name}]: '{name}' must be an optional field"
                                     ),
                                 )
                                 .with_span(f.span));
-                            }
-                        }
                     }
                     let sem = self.lower_field(f, &scope_id, field_idx, &declared)?;
                     Self::validate_integer_like_size_ref(&f.type_expr, &fields)?;
@@ -840,18 +833,16 @@ impl Analyzer {
                         size_expr: Some(expr),
                         ..
                     } = &f.type_expr
+                        && let AstExpr::NameRef { name, .. } = &**expr
+                        && !optional_fields.contains(name.as_str())
                     {
-                        if let AstExpr::NameRef { name, .. } = &**expr {
-                            if !optional_fields.contains(name.as_str()) {
-                                return Err(SemaError::new(
+                        return Err(SemaError::new(
                                     ErrorKind::InvalidLengthOrRemaining,
                                     format!(
                                         "bytes[length_or_remaining: {name}]: '{name}' must be an optional field"
                                     ),
                                 )
                                 .with_span(f.span));
-                            }
-                        }
                     }
                     let sem = self.lower_field(f, &scope_id, field_idx, &declared)?;
                     Self::validate_integer_like_size_ref(&f.type_expr, &fields)?;
@@ -971,16 +962,16 @@ impl Analyzer {
         let mut checksum_algorithm = None;
         let mut max_elements = None;
         for ann in &field.annotations {
-            if ann.name == "checksum" {
-                if let Some(AstAnnotationArg::Identifier(algo)) = ann.args.first() {
-                    validate_checksum_profile(algo, self.profile)?;
-                    checksum_algorithm = Some(algo.clone());
-                }
+            if ann.name == "checksum"
+                && let Some(AstAnnotationArg::Identifier(algo)) = ann.args.first()
+            {
+                validate_checksum_profile(algo, self.profile)?;
+                checksum_algorithm = Some(algo.clone());
             }
-            if ann.name == "max_len" {
-                if let Some(AstAnnotationArg::Int(n)) = ann.args.first() {
-                    max_elements = Some(*n as u32);
-                }
+            if ann.name == "max_len"
+                && let Some(AstAnnotationArg::Int(n)) = ann.args.first()
+            {
+                max_elements = Some(*n as u32);
             }
         }
 
@@ -1028,17 +1019,18 @@ impl Analyzer {
                 size_expr: Some(expr),
                 ..
             } => {
-                if let AstExpr::NameRef { name, span } = &**expr {
-                    if let Some(field) = lowered_fields.iter().find(|f| &f.name == name) {
-                        let ty = match &field.presence {
-                            FieldPresence::Conditional { .. } => {
-                                // For optional fields, the underlying type is what matters
-                                &field.ty
-                            }
-                            _ => &field.ty,
-                        };
-                        if !ty.is_integer_like() {
-                            return Err(SemaError::new(
+                if let AstExpr::NameRef { name, span } = &**expr
+                    && let Some(field) = lowered_fields.iter().find(|f| &f.name == name)
+                {
+                    let ty = match &field.presence {
+                        FieldPresence::Conditional { .. } => {
+                            // For optional fields, the underlying type is what matters
+                            &field.ty
+                        }
+                        _ => &field.ty,
+                    };
+                    if !ty.is_integer_like() {
+                        return Err(SemaError::new(
                                 ErrorKind::InvalidBytesLength,
                                 format!(
                                     "bytes length reference '{name}' must be an integer-like type"
@@ -1049,7 +1041,6 @@ impl Analyzer {
                                 "integer-like types: u8, u16, u24, u32, u64, i8..i64, VarInt, bits[N], enum"
                                     .to_string(),
                             ));
-                        }
                     }
                 }
                 Ok(())
@@ -1058,10 +1049,11 @@ impl Analyzer {
                 count: AstArrayCount::Expr(expr),
                 ..
             } => {
-                if let AstExpr::NameRef { name, span } = expr {
-                    if let Some(field) = lowered_fields.iter().find(|f| &f.name == name) {
-                        if !field.ty.is_integer_like() {
-                            return Err(SemaError::new(
+                if let AstExpr::NameRef { name, span } = expr
+                    && let Some(field) = lowered_fields.iter().find(|f| &f.name == name)
+                    && !field.ty.is_integer_like()
+                {
+                    return Err(SemaError::new(
                                 ErrorKind::InvalidArrayCount,
                                 format!(
                                     "array count reference '{name}' must be an integer-like type"
@@ -1072,8 +1064,6 @@ impl Analyzer {
                                 "integer-like types: u8, u16, u24, u32, u64, i8..i64, VarInt, bits[N], enum"
                                     .to_string(),
                             ));
-                        }
-                    }
                 }
                 Ok(())
             }
@@ -1294,7 +1284,7 @@ impl Analyzer {
         expr: &AstExpr,
         declared: &[String],
         const_names: &[String],
-        scope_id: &str,
+        _scope_id: &str,
     ) -> SemanticExpr {
         match expr {
             AstExpr::Int { value, .. } => SemanticExpr::Literal {
@@ -1355,21 +1345,21 @@ impl Analyzer {
             },
             AstExpr::MemberAccess { base, field, .. } => {
                 // Check if base is NameRef("src") or NameRef("dst")
-                if let AstExpr::NameRef { name, .. } = base.as_ref() {
-                    if name == "src" || name == "dst" {
-                        let peer = if name == "src" {
-                            TransitionPeerKind::Src
-                        } else {
-                            TransitionPeerKind::Dst
-                        };
-                        return SemanticExpr::TransitionPeerRef {
-                            reference: TransitionPeerRef {
-                                peer,
-                                event_param_id: None,
-                                path: vec![field.clone()],
-                            },
-                        };
-                    }
+                if let AstExpr::NameRef { name, .. } = base.as_ref()
+                    && (name == "src" || name == "dst")
+                {
+                    let peer = if name == "src" {
+                        TransitionPeerKind::Src
+                    } else {
+                        TransitionPeerKind::Dst
+                    };
+                    return SemanticExpr::TransitionPeerRef {
+                        reference: TransitionPeerRef {
+                            peer,
+                            event_param_id: None,
+                            path: vec![field.clone()],
+                        },
+                    };
                 }
                 // Otherwise create a ValueRef with dotted path
                 let base_name = extract_base_name(base);
@@ -1837,12 +1827,11 @@ impl Analyzer {
                 // Collect field names assigned in action block
                 let mut assigned_fields: HashSet<&str> = HashSet::new();
                 for action in &t.actions {
-                    if let SemanticExpr::TransitionPeerRef { reference } = &action.target {
-                        if reference.peer == TransitionPeerKind::Dst {
-                            if let Some(field_name) = reference.path.first() {
-                                assigned_fields.insert(field_name.as_str());
-                            }
-                        }
+                    if let SemanticExpr::TransitionPeerRef { reference } = &action.target
+                        && reference.peer == TransitionPeerKind::Dst
+                        && let Some(field_name) = reference.path.first()
+                    {
+                        assigned_fields.insert(field_name.as_str());
                     }
                 }
 
@@ -2030,11 +2019,11 @@ fn resolve_guard_sm_names(expr: &mut SemanticExpr, states: &[SemanticState]) {
                 SemanticExpr::Slice { base, .. } => Some(base.as_ref()),
                 _ => None,
             };
-            if let Some(fe) = field_expr {
-                if let Some(child_sm) = extract_child_sm_name(fe, states) {
-                    *sm_name = child_sm.clone();
-                    *sm_id = format!("sm:{child_sm}");
-                }
+            if let Some(fe) = field_expr
+                && let Some(child_sm) = extract_child_sm_name(fe, states)
+            {
+                *sm_name = child_sm.clone();
+                *sm_id = format!("sm:{child_sm}");
             }
             resolve_guard_sm_names(collection, states);
         }
@@ -2052,14 +2041,14 @@ fn resolve_guard_sm_names(expr: &mut SemanticExpr, states: &[SemanticState]) {
 /// Extract the child SM name from a field reference expression by looking
 /// up the field in the state definitions.
 fn extract_child_sm_name(expr: &SemanticExpr, states: &[SemanticState]) -> Option<String> {
-    if let SemanticExpr::TransitionPeerRef { reference } = expr {
-        if let Some(field_name) = reference.path.first() {
-            // Search all states for this field
-            for state in states {
-                for field in &state.fields {
-                    if &field.name == field_name {
-                        return field.child_sm_name.clone();
-                    }
+    if let SemanticExpr::TransitionPeerRef { reference } = expr
+        && let Some(field_name) = reference.path.first()
+    {
+        // Search all states for this field
+        for state in states {
+            for field in &state.fields {
+                if &field.name == field_name {
+                    return field.child_sm_name.clone();
                 }
             }
         }

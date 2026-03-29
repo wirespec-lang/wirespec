@@ -36,13 +36,13 @@ pub fn detect_bitgroups(
     let mut current_indices: Vec<usize> = Vec::new();
     let mut current_bits: u16 = 0;
 
-    for i in 0..fields.len() {
-        if is_bit_field(&fields[i]) {
-            if let Some(width) = fields[i].wire_width_bits {
-                current_indices.push(i);
-                current_bits += width;
-                continue;
-            }
+    for (i, field) in fields.iter().enumerate() {
+        if is_bit_field(field)
+            && let Some(width) = field.wire_width_bits
+        {
+            current_indices.push(i);
+            current_bits += width;
+            continue;
         }
         // Non-bit field: finalize current group if any
         if !current_indices.is_empty() {
@@ -102,7 +102,7 @@ fn finalize_group(
             msg: format!("bitgroup sums to {total_bits} bits, exceeds maximum 64"),
         });
     }
-    if total_bits % 8 != 0 {
+    if !total_bits.is_multiple_of(8) {
         return Err(BitGroupError {
             msg: format!("bitgroup sums to {total_bits} bits, must be multiple of 8"),
         });

@@ -169,13 +169,8 @@ impl<'src> Lexer<'src> {
             let ch = self.peek();
             if ch == b' ' || ch == b'\t' || ch == b'\r' || ch == b'\n' {
                 self.pos += 1;
-            } else if ch == b'#' {
-                // Line comment
-                while self.pos < self.source.len() && self.source[self.pos] != b'\n' {
-                    self.pos += 1;
-                }
-            } else if ch == b'/' && self.peek_at(1) == b'/' {
-                // Line comment
+            } else if ch == b'#' || (ch == b'/' && self.peek_at(1) == b'/') {
+                // Line comment (# or //)
                 while self.pos < self.source.len() && self.source[self.pos] != b'\n' {
                     self.pos += 1;
                 }

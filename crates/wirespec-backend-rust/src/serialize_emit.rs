@@ -56,11 +56,11 @@ fn emit_field_serialize(
             ));
         }
         FieldStrategy::BitGroup => {
-            if let Some(ref bg) = f.bitgroup_member {
-                if !emitted_bitgroups.contains(&bg.group_id) {
-                    emitted_bitgroups.push(bg.group_id);
-                    emit_bitgroup_serialize(out, all_fields, indent, val_prefix, bg);
-                }
+            if let Some(ref bg) = f.bitgroup_member
+                && !emitted_bitgroups.contains(&bg.group_id)
+            {
+                emitted_bitgroups.push(bg.group_id);
+                emit_bitgroup_serialize(out, all_fields, indent, val_prefix, bg);
             }
         }
         FieldStrategy::BytesFixed
@@ -139,15 +139,15 @@ fn emit_bitgroup_serialize(
     ));
 
     for f in all_fields {
-        if let Some(ref mbg) = f.bitgroup_member {
-            if mbg.group_id == group_id {
-                let mask = (1u64 << mbg.member_width_bits) - 1;
-                let shift = mbg.member_offset_bits;
-                out.push_str(&format!(
+        if let Some(ref mbg) = f.bitgroup_member
+            && mbg.group_id == group_id
+        {
+            let mask = (1u64 << mbg.member_width_bits) - 1;
+            let shift = mbg.member_offset_bits;
+            out.push_str(&format!(
                     "{indent}{var_name} |= (({val_prefix}{} as {container_type}) & 0x{mask:x}) << {shift};\n",
                     f.name
                 ));
-            }
         }
     }
 
@@ -226,12 +226,12 @@ fn emit_field_serialized_len(
             }
         }
         FieldStrategy::BitGroup => {
-            if let Some(ref bg) = f.bitgroup_member {
-                if !emitted_bitgroups.contains(&bg.group_id) {
-                    emitted_bitgroups.push(bg.group_id);
-                    let bytes = (bg.total_bits + 7) / 8;
-                    out.push_str(&format!("{indent}len += {bytes};\n"));
-                }
+            if let Some(ref bg) = f.bitgroup_member
+                && !emitted_bitgroups.contains(&bg.group_id)
+            {
+                emitted_bitgroups.push(bg.group_id);
+                let bytes = bg.total_bits.div_ceil(8);
+                out.push_str(&format!("{indent}len += {bytes};\n"));
             }
         }
         FieldStrategy::BytesFixed => {
@@ -440,32 +440,32 @@ fn emit_variant_field_serialize(
             out.push_str(&format!("{indent}w.{write_method}(*{})?;\n", f.name));
         }
         FieldStrategy::BitGroup => {
-            if let Some(ref bg) = f.bitgroup_member {
-                if !emitted_bitgroups.contains(&bg.group_id) {
-                    emitted_bitgroups.push(bg.group_id);
-                    let container_type = bitgroup_rust_type(bg.total_bits);
-                    let write_method = bitgroup_write_method(bg.total_bits, bg.group_endianness);
-                    let var_name = format!("_bg{}", bg.group_id);
+            if let Some(ref bg) = f.bitgroup_member
+                && !emitted_bitgroups.contains(&bg.group_id)
+            {
+                emitted_bitgroups.push(bg.group_id);
+                let container_type = bitgroup_rust_type(bg.total_bits);
+                let write_method = bitgroup_write_method(bg.total_bits, bg.group_endianness);
+                let var_name = format!("_bg{}", bg.group_id);
 
-                    out.push_str(&format!(
-                        "{indent}let mut {var_name}: {container_type} = 0;\n"
-                    ));
+                out.push_str(&format!(
+                    "{indent}let mut {var_name}: {container_type} = 0;\n"
+                ));
 
-                    for af in all_fields {
-                        if let Some(ref mbg) = af.bitgroup_member {
-                            if mbg.group_id == bg.group_id {
-                                let mask = (1u64 << mbg.member_width_bits) - 1;
-                                let shift = mbg.member_offset_bits;
-                                out.push_str(&format!(
+                for af in all_fields {
+                    if let Some(ref mbg) = af.bitgroup_member
+                        && mbg.group_id == bg.group_id
+                    {
+                        let mask = (1u64 << mbg.member_width_bits) - 1;
+                        let shift = mbg.member_offset_bits;
+                        out.push_str(&format!(
                                     "{indent}{var_name} |= ((*{} as {container_type}) & 0x{mask:x}) << {shift};\n",
                                     af.name
                                 ));
-                            }
-                        }
                     }
-
-                    out.push_str(&format!("{indent}w.{write_method}({var_name})?;\n"));
                 }
+
+                out.push_str(&format!("{indent}w.{write_method}({var_name})?;\n"));
             }
         }
         FieldStrategy::BytesFixed
@@ -535,12 +535,12 @@ fn emit_variant_field_serialized_len(
             }
         }
         FieldStrategy::BitGroup => {
-            if let Some(ref bg) = f.bitgroup_member {
-                if !emitted_bitgroups.contains(&bg.group_id) {
-                    emitted_bitgroups.push(bg.group_id);
-                    let bytes = (bg.total_bits + 7) / 8;
-                    out.push_str(&format!("{indent}len += {bytes};\n"));
-                }
+            if let Some(ref bg) = f.bitgroup_member
+                && !emitted_bitgroups.contains(&bg.group_id)
+            {
+                emitted_bitgroups.push(bg.group_id);
+                let bytes = bg.total_bits.div_ceil(8);
+                out.push_str(&format!("{indent}len += {bytes};\n"));
             }
         }
         FieldStrategy::BytesFixed => {
@@ -561,10 +561,10 @@ fn emit_variant_field_serialized_len(
             }
         }
         FieldStrategy::Array => {
-            if let Some(ref arr) = f.array_spec {
-                if let Some(w) = wire_type_byte_width(&arr.element_wire_type) {
-                    out.push_str(&format!("{indent}len += *{}_count * {w};\n", f.name));
-                }
+            if let Some(ref arr) = f.array_spec
+                && let Some(w) = wire_type_byte_width(&arr.element_wire_type)
+            {
+                out.push_str(&format!("{indent}len += *{}_count * {w};\n", f.name));
             }
         }
         FieldStrategy::Struct => {

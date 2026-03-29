@@ -23,7 +23,7 @@ fn layout_file(path: &str) -> wirespec_layout::ir::LayoutModule {
 #[test]
 fn corpus_quic_varint() {
     let m = layout_file("../../protospec/examples/quic/varint.wire");
-    assert!(m.varints.len() >= 1);
+    assert!(!m.varints.is_empty());
 }
 
 #[test]

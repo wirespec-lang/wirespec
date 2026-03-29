@@ -1,9 +1,10 @@
 // crates/wirespec-sema/src/profile.rs
 
 /// Compliance profile per COMPLIANCE_PROFILE_SPEC.md
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ComplianceProfile {
     Phase2StrictV1_0,
+    #[default]
     Phase2ExtendedCurrent,
 }
 
@@ -26,13 +27,6 @@ impl ComplianceProfile {
             Self::Phase2StrictV1_0 => false,
             Self::Phase2ExtendedCurrent => true,
         }
-    }
-}
-
-impl Default for ComplianceProfile {
-    fn default() -> Self {
-        // Migration default: extended current
-        Self::Phase2ExtendedCurrent
     }
 }
 
