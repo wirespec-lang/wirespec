@@ -4,3 +4,9 @@ if [ $? -ne 0 ]; then
     echo "error: cargo fmt check failed. Run 'cargo fmt --all' to fix."
     exit 1
 fi
+
+cargo clippy --workspace --all-targets -- -D warnings
+if [ $? -ne 0 ]; then
+    echo "error: clippy check failed."
+    exit 1
+fi
