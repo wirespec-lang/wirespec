@@ -45,6 +45,9 @@ jobs:
       - name: Build release
         run: cargo build --release
 
+      - name: Rustc example verification
+        run: cargo test -p wirespec-driver --test rustc_verify_tests -- --nocapture
+
       - name: GCC example verification
         run: |
           for f in examples/net/udp.wspec examples/net/tcp.wspec examples/net/ethernet.wspec \
