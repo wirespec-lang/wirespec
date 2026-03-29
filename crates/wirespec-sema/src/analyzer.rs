@@ -334,6 +334,17 @@ impl Analyzer {
     fn lower_enum_decl(&mut self, e: &AstEnumDecl, is_flags: bool) -> SemaResult<SemanticEnum> {
         let underlying_type = self.resolve_named_type(&e.underlying_type, e.span)?;
         let enum_id = format!("enum:{}", e.name);
+        // Check for duplicate member names
+        let mut seen_names = std::collections::HashSet::new();
+        for m in &e.members {
+            if !seen_names.insert(&m.name) {
+                return Err(SemaError::new(
+                    ErrorKind::DuplicateDefinition,
+                    format!("duplicate member '{}' in enum '{}'", m.name, e.name),
+                )
+                .with_span(m.span));
+            }
+        }
         let members = e
             .members
             .iter()
@@ -358,6 +369,17 @@ impl Analyzer {
     fn lower_flags_decl(&mut self, f: &AstFlagsDecl) -> SemaResult<SemanticEnum> {
         let underlying_type = self.resolve_named_type(&f.underlying_type, f.span)?;
         let enum_id = format!("enum:{}", f.name);
+        // Check for duplicate member names
+        let mut seen_names = std::collections::HashSet::new();
+        for m in &f.members {
+            if !seen_names.insert(&m.name) {
+                return Err(SemaError::new(
+                    ErrorKind::DuplicateDefinition,
+                    format!("duplicate member '{}' in flags '{}'", m.name, f.name),
+                )
+                .with_span(m.span));
+            }
+        }
         let members = f
             .members
             .iter()
