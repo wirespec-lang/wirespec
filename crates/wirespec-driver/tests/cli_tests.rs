@@ -305,15 +305,15 @@ fn cli_check_help() {
 
 #[test]
 fn cli_compile_wire_extension() {
-    // Test that .wire files also work (not just .wspec)
+    // Test that .wspec files also work (not just .wspec)
     let dir = TempDir::new().unwrap();
     let out_dir = TempDir::new().unwrap();
     write_file(
         &dir,
-        "proto.wire",
+        "proto.wspec",
         "module proto\n@endian big\npacket Msg { tag: u8 }",
     );
-    let input = dir.path().join("proto.wire");
+    let input = dir.path().join("proto.wspec");
 
     let output = wirespec_bin()
         .args([

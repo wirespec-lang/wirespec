@@ -1,6 +1,6 @@
 // crates/wirespec-codec/tests/corpus_codec_tests.rs
 //
-// Corpus integration tests: real .wire files through the full pipeline
+// Corpus integration tests: real .wspec files through the full pipeline
 // (parse -> sema -> layout -> codec).
 
 use wirespec_codec::ir;
@@ -25,13 +25,13 @@ fn codec_file(path: &str) -> ir::CodecModule {
 
 #[test]
 fn corpus_quic_varint() {
-    let c = codec_file("../../examples/quic/varint.wire");
+    let c = codec_file("../../examples/quic/varint.wspec");
     assert!(!c.varints.is_empty());
 }
 
 #[test]
 fn corpus_udp() {
-    let c = codec_file("../../examples/net/udp.wire");
+    let c = codec_file("../../examples/net/udp.wspec");
     assert_eq!(c.packets.len(), 1);
     // UDP has require -> items should include it
     assert!(c.packets[0].items.len() >= 5);
@@ -39,7 +39,7 @@ fn corpus_udp() {
 
 #[test]
 fn corpus_tcp() {
-    let c = codec_file("../../examples/net/tcp.wire");
+    let c = codec_file("../../examples/net/tcp.wspec");
     assert_eq!(c.packets.len(), 1);
     // TCP has bitgroup fields
     assert!(
@@ -52,24 +52,24 @@ fn corpus_tcp() {
 
 #[test]
 fn corpus_ethernet() {
-    let c = codec_file("../../examples/net/ethernet.wire");
+    let c = codec_file("../../examples/net/ethernet.wspec");
     assert_eq!(c.packets.len(), 1);
 }
 
 #[test]
 fn corpus_bits_groups() {
-    let c = codec_file("../../examples/test/bits_groups.wire");
+    let c = codec_file("../../examples/test/bits_groups.wspec");
     assert_eq!(c.packets.len(), 2);
 }
 
 #[test]
 fn corpus_ble_att() {
-    let c = codec_file("../../examples/ble/att.wire");
+    let c = codec_file("../../examples/ble/att.wspec");
     assert!(!c.frames.is_empty());
 }
 
 #[test]
 fn corpus_mqtt() {
-    let c = codec_file("../../examples/mqtt/mqtt.wire");
+    let c = codec_file("../../examples/mqtt/mqtt.wspec");
     assert!(!c.capsules.is_empty());
 }

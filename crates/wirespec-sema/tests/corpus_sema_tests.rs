@@ -1,4 +1,4 @@
-//! Integration tests: parse + analyze real .wire example files.
+//! Integration tests: parse + analyze real .wspec example files.
 //!
 //! Files that use `import` are marked `#[ignore]` because the sema crate
 //! does not yet include a module resolver.
@@ -23,7 +23,7 @@ fn analyze_file(path: &str) -> Result<wirespec_sema::SemanticModule, String> {
 
 #[test]
 fn corpus_quic_varint() {
-    let sem = analyze_file("../../examples/quic/varint.wire")
+    let sem = analyze_file("../../examples/quic/varint.wspec")
         .expect("quic/varint.wire should analyze successfully");
     assert_eq!(sem.module_name, "quic.varint");
     assert!(
@@ -34,7 +34,7 @@ fn corpus_quic_varint() {
 
 #[test]
 fn corpus_net_udp() {
-    let sem = analyze_file("../../examples/net/udp.wire")
+    let sem = analyze_file("../../examples/net/udp.wspec")
         .expect("net/udp.wire should analyze successfully");
     assert_eq!(sem.module_name, "net.udp");
     assert_eq!(sem.packets.len(), 1);
@@ -43,7 +43,7 @@ fn corpus_net_udp() {
 
 #[test]
 fn corpus_net_tcp() {
-    let sem = analyze_file("../../examples/net/tcp.wire")
+    let sem = analyze_file("../../examples/net/tcp.wspec")
         .expect("net/tcp.wire should analyze successfully");
     assert_eq!(sem.module_name, "net.tcp");
     assert_eq!(sem.packets.len(), 1);
@@ -52,7 +52,7 @@ fn corpus_net_tcp() {
 
 #[test]
 fn corpus_net_ethernet() {
-    let sem = analyze_file("../../examples/net/ethernet.wire")
+    let sem = analyze_file("../../examples/net/ethernet.wspec")
         .expect("net/ethernet.wire should analyze successfully");
     assert_eq!(sem.module_name, "net.ethernet");
     assert_eq!(sem.packets.len(), 1);
@@ -61,7 +61,7 @@ fn corpus_net_ethernet() {
 
 #[test]
 fn corpus_test_bits_groups() {
-    let sem = analyze_file("../../examples/test/bits_groups.wire")
+    let sem = analyze_file("../../examples/test/bits_groups.wspec")
         .expect("test/bits_groups.wire should analyze successfully");
     assert_eq!(sem.module_name, "test.bits_groups");
     assert_eq!(sem.packets.len(), 2, "should have BitTest and BitTest32");
@@ -69,7 +69,7 @@ fn corpus_test_bits_groups() {
 
 #[test]
 fn corpus_quic_frames() {
-    let sem = analyze_file("../../examples/quic/frames.wire")
+    let sem = analyze_file("../../examples/quic/frames.wspec")
         .expect("quic/frames.wire should analyze successfully");
     assert_eq!(sem.module_name, "quic.frames");
     assert!(!sem.frames.is_empty(), "should contain at least one frame");
@@ -77,7 +77,7 @@ fn corpus_quic_frames() {
 
 #[test]
 fn corpus_ble_att() {
-    let sem = analyze_file("../../examples/ble/att.wire")
+    let sem = analyze_file("../../examples/ble/att.wspec")
         .expect("ble/att.wire should analyze successfully");
     assert_eq!(sem.module_name, "ble.att");
     assert!(!sem.frames.is_empty(), "should contain AttPdu frame");
@@ -85,7 +85,7 @@ fn corpus_ble_att() {
 
 #[test]
 fn corpus_mqtt() {
-    let sem = analyze_file("../../examples/mqtt/mqtt.wire")
+    let sem = analyze_file("../../examples/mqtt/mqtt.wspec")
         .expect("mqtt/mqtt.wire should analyze successfully");
     assert_eq!(sem.module_name, "mqtt");
     assert!(
@@ -98,7 +98,7 @@ fn corpus_mqtt() {
 
 #[test]
 fn corpus_mpquic_path() {
-    let sem = analyze_file("../../examples/mpquic/path.wire")
+    let sem = analyze_file("../../examples/mpquic/path.wspec")
         .expect("mpquic/path.wire should analyze successfully");
     assert!(!sem.state_machines.is_empty());
 }

@@ -212,38 +212,23 @@ fn extract_module_from_import(module_path: &str, _has_name: bool) -> String {
 }
 
 /// Find a module file by dotted name in include paths.
-/// `quic.varint` -> search for `quic/varint.wspec` then `quic/varint.wire` in each path.
+/// `quic.varint` -> search for `quic/varint.wspec` in each path.
 pub fn find_module(module_name: &str, search_paths: &[PathBuf]) -> Result<PathBuf, ResolveError> {
-    let rel_path_wspec = module_name.replace('.', "/") + ".wspec";
-    let rel_path_wire = module_name.replace('.', "/") + ".wire";
+    let rel_path = module_name.replace('.', "/") + ".wspec";
 
-    // Search .wspec first, then .wire, across all paths
     for base in search_paths {
-        let candidate = base.join(&rel_path_wspec);
-        if candidate.exists() {
-            return Ok(candidate);
-        }
-    }
-    for base in search_paths {
-        let candidate = base.join(&rel_path_wire);
+        let candidate = base.join(&rel_path);
         if candidate.exists() {
             return Ok(candidate);
         }
     }
 
-    // Fallback: single-component name -> dir/name.wspec or dir/name.wire
+    // Fallback: single-component name -> dir/name.wspec
     let parts: Vec<&str> = module_name.split('.').collect();
     if parts.len() == 1 {
-        let fallback_wspec = format!("{0}/{0}.wspec", parts[0]);
-        let fallback_wire = format!("{0}/{0}.wire", parts[0]);
+        let fallback = format!("{0}/{0}.wspec", parts[0]);
         for base in search_paths {
-            let candidate = base.join(&fallback_wspec);
-            if candidate.exists() {
-                return Ok(candidate);
-            }
-        }
-        for base in search_paths {
-            let candidate = base.join(&fallback_wire);
+            let candidate = base.join(&fallback);
             if candidate.exists() {
                 return Ok(candidate);
             }

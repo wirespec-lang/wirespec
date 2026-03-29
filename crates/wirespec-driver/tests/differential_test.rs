@@ -296,35 +296,35 @@ fn compare_outputs(name: &str, wspec_path: &str) {
 
 #[test]
 fn differential_udp() {
-    compare_outputs("UDP", "net/udp.wire");
+    compare_outputs("UDP", "net/udp.wspec");
 }
 
 #[test]
 fn differential_tcp() {
-    compare_outputs("TCP", "net/tcp.wire");
+    compare_outputs("TCP", "net/tcp.wspec");
 }
 
 #[test]
 fn differential_ethernet() {
-    compare_outputs("Ethernet", "net/ethernet.wire");
+    compare_outputs("Ethernet", "net/ethernet.wspec");
 }
 
 #[test]
 fn differential_varint() {
-    compare_outputs("QUIC VarInt", "quic/varint.wire");
+    compare_outputs("QUIC VarInt", "quic/varint.wspec");
 }
 
 #[test]
 fn differential_bits_groups() {
-    compare_outputs("Bits Groups", "test/bits_groups.wire");
+    compare_outputs("Bits Groups", "test/bits_groups.wspec");
 }
 
 #[test]
 fn differential_ble_att() {
-    compare_outputs("BLE ATT", "ble/att.wire");
+    compare_outputs("BLE ATT", "ble/att.wspec");
 }
 
 #[test]
 fn differential_mqtt() {
-    compare_outputs("MQTT", "mqtt/mqtt.wire");
+    compare_outputs("MQTT", "mqtt/mqtt.wspec");
 }

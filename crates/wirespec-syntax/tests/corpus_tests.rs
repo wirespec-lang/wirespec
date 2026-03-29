@@ -11,14 +11,14 @@ fn parse_file(path: &str) -> wirespec_syntax::ast::AstModule {
 
 #[test]
 fn parse_quic_varint() {
-    let m = parse_file("../../examples/quic/varint.wire");
+    let m = parse_file("../../examples/quic/varint.wspec");
     assert!(m.module_decl.is_some());
     assert!(!m.items.is_empty());
 }
 
 #[test]
 fn parse_quic_frames() {
-    let m = parse_file("../../examples/quic/frames.wire");
+    let m = parse_file("../../examples/quic/frames.wspec");
     assert!(m.module_decl.is_some());
     // Should have VarInt type, const, packets, and QuicFrame
     assert!(m.items.len() >= 4);
@@ -26,19 +26,19 @@ fn parse_quic_frames() {
 
 #[test]
 fn parse_udp() {
-    let m = parse_file("../../examples/net/udp.wire");
+    let m = parse_file("../../examples/net/udp.wspec");
     assert!(m.module_decl.is_some());
 }
 
 #[test]
 fn parse_tcp() {
-    let m = parse_file("../../examples/net/tcp.wire");
+    let m = parse_file("../../examples/net/tcp.wspec");
     assert!(m.module_decl.is_some());
 }
 
 #[test]
 fn parse_mqtt() {
-    let m = parse_file("../../examples/mqtt/mqtt.wire");
+    let m = parse_file("../../examples/mqtt/mqtt.wspec");
     assert!(m.module_decl.is_some());
     // Should have MqttLength varint, MqttString, MqttBytes, MqttPacket capsule
     assert!(m.items.len() >= 4);
@@ -46,26 +46,26 @@ fn parse_mqtt() {
 
 #[test]
 fn parse_ble_att() {
-    let m = parse_file("../../examples/ble/att.wire");
+    let m = parse_file("../../examples/ble/att.wspec");
     assert!(m.module_decl.is_some());
 }
 
 #[test]
 fn parse_ethernet() {
-    let m = parse_file("../../examples/net/ethernet.wire");
+    let m = parse_file("../../examples/net/ethernet.wspec");
     assert!(m.module_decl.is_some());
 }
 
 #[test]
 fn parse_bits_groups() {
-    let m = parse_file("../../examples/test/bits_groups.wire");
+    let m = parse_file("../../examples/test/bits_groups.wspec");
     assert!(m.module_decl.is_some());
     assert_eq!(m.items.len(), 2);
 }
 
 #[test]
 fn parse_mpquic_path() {
-    let m = parse_file("../../examples/mpquic/path.wire");
+    let m = parse_file("../../examples/mpquic/path.wspec");
     assert!(m.module_decl.is_some());
     // Has PathState state machine
     assert_eq!(m.items.len(), 1);
