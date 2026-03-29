@@ -180,11 +180,19 @@ fn emit_array_serialize(
                 f.name
             ));
         }
-        _ => {
-            out.push_str(&format!(
-                "{indent}    /* unsupported array element strategy */\n"
-            ));
+        FieldStrategy::VarInt | FieldStrategy::ContVarInt => {
+            if let Some(ref ref_name) = arr.element_ref_type_name {
+                let serialize_fn = format!("{}_serialize", crate::names::to_snake_case(ref_name));
+                out.push_str(&format!(
+                    "{indent}    {serialize_fn}({val_prefix}{}[_i], w)?;\n",
+                    f.name
+                ));
+            }
         }
+        _ => unreachable!(
+            "unexpected array element strategy: {:?}",
+            arr.element_strategy
+        ),
     }
 
     out.push_str(&format!("{indent}}}\n"));
@@ -327,13 +335,7 @@ pub fn emit_frame_serialize_body(out: &mut String, frame: &CodecFrame, indent: &
             // Destructure variant fields
             out.push_str(&format!("{indent}    Self::{variant_name} {{ "));
             let field_names: Vec<String> = collect_variant_field_names(variant);
-            out.push_str(
-                &field_names
-                    .iter()
-                    .map(|n| format!("ref {n}"))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            );
+            out.push_str(&field_names.join(", "));
             out.push_str(" } => {\n");
 
             // Serialize each field
@@ -364,13 +366,7 @@ pub fn emit_frame_serialized_len_body(out: &mut String, frame: &CodecFrame, inde
         } else {
             out.push_str(&format!("{indent}    Self::{variant_name} {{ "));
             let field_names: Vec<String> = collect_variant_field_names(variant);
-            out.push_str(
-                &field_names
-                    .iter()
-                    .map(|n| format!("ref {n}"))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            );
+            out.push_str(&field_names.join(", "));
             out.push_str(" } => {\n");
 
             let inner_indent = format!("{indent}        ");

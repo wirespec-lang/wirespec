@@ -10,8 +10,74 @@ use crate::type_map::*;
 use wirespec_codec::ir::*;
 use wirespec_sema::expr::{SemanticExpr, SemanticLiteral, TransitionPeerKind};
 use wirespec_sema::ir::*;
+use wirespec_sema::types::PrimitiveWireType;
 
 const MAX_ARRAY_ELEMENTS: u32 = 256;
+
+/// Resolve enum fields: change strategy from Struct to Primitive and set
+/// wire_type to the enum's underlying primitive type. This allows the
+/// standard primitive read/write codegen path to handle enum fields.
+fn resolve_enum_fields(fields: &[CodecField], enums: &[SemanticEnum]) -> Vec<CodecField> {
+    fields
+        .iter()
+        .map(|f| {
+            if f.strategy == FieldStrategy::Struct
+                && let WireType::Enum(ref name) = f.wire_type
+                && let Some(e) = enums.iter().find(|e| &e.name == name)
+            {
+                let underlying_wt = semantic_type_to_wire_type_simple(&e.underlying_type);
+                let mut f2 = f.clone();
+                f2.strategy = FieldStrategy::Primitive;
+                f2.wire_type = underlying_wt;
+                f2.ref_type_name = None;
+                // Propagate endianness from the enum's underlying type
+                if let wirespec_sema::types::SemanticType::Primitive { endianness, .. } =
+                    &e.underlying_type
+                {
+                    f2.endianness = *endianness;
+                }
+                return f2;
+            }
+            f.clone()
+        })
+        .collect()
+}
+
+/// Simple mapping from SemanticType (Primitive only) to WireType.
+fn semantic_type_to_wire_type_simple(ty: &wirespec_sema::types::SemanticType) -> WireType {
+    use wirespec_sema::types::SemanticType;
+    match ty {
+        SemanticType::Primitive { wire, .. } => match wire {
+            PrimitiveWireType::U8 => WireType::U8,
+            PrimitiveWireType::U16 => WireType::U16,
+            PrimitiveWireType::U24 => WireType::U24,
+            PrimitiveWireType::U32 => WireType::U32,
+            PrimitiveWireType::U64 => WireType::U64,
+            PrimitiveWireType::I8 => WireType::I8,
+            PrimitiveWireType::I16 => WireType::I16,
+            PrimitiveWireType::I32 => WireType::I32,
+            PrimitiveWireType::I64 => WireType::I64,
+            PrimitiveWireType::Bool => WireType::Bool,
+            PrimitiveWireType::Bit => WireType::Bit,
+        },
+        _ => WireType::U8, // fallback for unexpected types
+    }
+}
+
+/// Resolve enum fields in variant scopes (for frames and capsules).
+fn resolve_enum_variants(
+    variants: &[CodecVariantScope],
+    enums: &[SemanticEnum],
+) -> Vec<CodecVariantScope> {
+    variants
+        .iter()
+        .map(|v| {
+            let mut v2 = v.clone();
+            v2.fields = resolve_enum_fields(&v.fields, enums);
+            v2
+        })
+        .collect()
+}
 
 /// Check if any field in a list uses bytes (needs lifetime `<'a>`).
 fn fields_need_lifetime(fields: &[CodecField]) -> bool {
@@ -32,6 +98,10 @@ fn fields_need_lifetime(fields: &[CodecField]) -> bool {
                 }
             }
             FieldStrategy::Struct => {
+                // Enum refs are type aliases for primitives, no lifetime needed
+                if matches!(f.wire_type, WireType::Enum(_)) {
+                    continue;
+                }
                 // Named struct types might have lifetimes; conservative
                 return true;
             }
@@ -103,17 +173,17 @@ pub fn emit_source(module: &CodecModule, _prefix: &str) -> String {
 
     // Packets
     for packet in &module.packets {
-        emit_packet(&mut out, packet);
+        emit_packet(&mut out, packet, &module.enums);
     }
 
     // Frames
     for frame in &module.frames {
-        emit_frame(&mut out, frame);
+        emit_frame(&mut out, frame, &module.enums);
     }
 
     // Capsules
     for capsule in &module.capsules {
-        emit_capsule(&mut out, capsule);
+        emit_capsule(&mut out, capsule, &module.enums);
     }
 
     // State Machines
@@ -195,10 +265,13 @@ fn emit_enum(out: &mut String, e: &wirespec_sema::ir::SemanticEnum) {
 
 // ── Packets ──
 
-fn emit_packet(out: &mut String, packet: &CodecPacket) {
+fn emit_packet(out: &mut String, packet: &CodecPacket, enums: &[SemanticEnum]) {
     let type_name = to_pascal_case(&packet.name);
     let needs_lt = packet_needs_lifetime(packet);
     let lt = lifetime_suffix(needs_lt);
+
+    // Resolve enum fields for parse/serialize code (struct declaration keeps original types)
+    let resolved_fields = resolve_enum_fields(&packet.fields, enums);
 
     let has_cksum = packet.checksum_plan.is_some();
     // Parse needs offset tracking for recompute-compare algorithms (CRC, fletcher)
@@ -209,7 +282,7 @@ fn emit_packet(out: &mut String, packet: &CodecPacket) {
             .is_some_and(|p| p.input_model == ChecksumInputModel::RecomputeWithSkippedField);
     // Serialize always needs offset tracking when checksum is present (all algorithms need it)
 
-    // Struct definition
+    // Struct definition (uses original fields to preserve enum type aliases)
     out.push_str("#[derive(Debug, Clone, PartialEq)]\n");
     out.push_str(&format!("pub struct {type_name}{lt} {{\n"));
     emit_struct_fields(out, &packet.fields, &packet.items);
@@ -218,7 +291,7 @@ fn emit_packet(out: &mut String, packet: &CodecPacket) {
     // Impl block
     out.push_str(&format!("impl{lt} {type_name}{lt} {{\n"));
 
-    // parse method
+    // parse method (uses resolved fields)
     out.push_str(&format!(
         "    pub fn parse(cur: &mut Cursor{}) -> Result<Self> {{\n",
         if needs_lt { "<'a>" } else { "<'_>" }
@@ -237,13 +310,13 @@ fn emit_packet(out: &mut String, packet: &CodecPacket) {
         let cksum_plan = packet.checksum_plan.as_ref().unwrap();
         emit_parse_items_with_cksum_tracking(
             out,
-            &packet.fields,
+            &resolved_fields,
             &packet.items,
             "        ",
             &cksum_plan.field_name,
         );
     } else {
-        parse_emit::emit_parse_items(out, &packet.fields, &packet.items, "        ");
+        parse_emit::emit_parse_items(out, &resolved_fields, &packet.items, "        ");
     }
 
     // Checksum verify after parse, before returning
@@ -253,11 +326,11 @@ fn emit_packet(out: &mut String, packet: &CodecPacket) {
 
     // Return Ok(Self { ... })
     out.push_str("        Ok(Self {\n");
-    emit_struct_init_fields(out, &packet.fields, &packet.items, "            ");
+    emit_struct_init_fields(out, &resolved_fields, &packet.items, "            ");
     out.push_str("        })\n");
     out.push_str("    }\n\n");
 
-    // serialize method
+    // serialize method (uses resolved fields)
     out.push_str("    pub fn serialize(&self, w: &mut Writer<'_>) -> Result<()> {\n");
 
     if has_cksum {
@@ -266,7 +339,7 @@ fn emit_packet(out: &mut String, packet: &CodecPacket) {
         let cksum_plan = packet.checksum_plan.as_ref().unwrap();
         emit_serialize_items_with_cksum_tracking(
             out,
-            &packet.fields,
+            &resolved_fields,
             &packet.items,
             "        ",
             "self.",
@@ -275,7 +348,7 @@ fn emit_packet(out: &mut String, packet: &CodecPacket) {
     } else {
         serialize_emit::emit_serialize_items(
             out,
-            &packet.fields,
+            &resolved_fields,
             &packet.items,
             "        ",
             "self.",
@@ -290,12 +363,12 @@ fn emit_packet(out: &mut String, packet: &CodecPacket) {
     out.push_str("        Ok(())\n");
     out.push_str("    }\n\n");
 
-    // serialized_len method
+    // serialized_len method (uses resolved fields)
     out.push_str("    pub fn serialized_len(&self) -> usize {\n");
     out.push_str("        let mut len = 0usize;\n");
     serialize_emit::emit_serialized_len_items(
         out,
-        &packet.fields,
+        &resolved_fields,
         &packet.items,
         "        ",
         "self.",
@@ -385,9 +458,7 @@ fn emit_checksum_verify_rust(out: &mut String, plan: &ChecksumPlan, indent: &str
             out.push_str(&format!("{indent}}}\n"));
         }
         None => {
-            out.push_str(&format!(
-                "{indent}// TODO: unsupported checksum algorithm '{algo}'\n"
-            ));
+            unreachable!("unknown checksum algorithm: {algo}");
         }
     }
 }
@@ -429,22 +500,23 @@ fn emit_checksum_compute_rust(out: &mut String, plan: &ChecksumPlan, indent: &st
             out.push_str(&format!("{indent}}}\n"));
         }
         None => {
-            out.push_str(&format!(
-                "{indent}// TODO: unsupported checksum algorithm '{algo}'\n"
-            ));
+            unreachable!("unknown checksum algorithm: {algo}");
         }
     }
 }
 
 // ── Frames ──
 
-fn emit_frame(out: &mut String, frame: &CodecFrame) {
+fn emit_frame(out: &mut String, frame: &CodecFrame, enums: &[SemanticEnum]) {
     let type_name = to_pascal_case(&frame.name);
     let needs_lt = frame_needs_lifetime(frame);
     let lt = lifetime_suffix(needs_lt);
     let tag_type = wire_type_to_rust(&frame.tag.wire_type);
 
-    // Enum definition
+    // Resolve enum fields in variants for parse/serialize
+    let resolved_variants = resolve_enum_variants(&frame.variants, enums);
+
+    // Enum definition (uses original fields to preserve types)
     out.push_str("#[derive(Debug, Clone, PartialEq)]\n");
     out.push_str(&format!("pub enum {type_name}{lt} {{\n"));
     for variant in &frame.variants {
@@ -464,6 +536,14 @@ fn emit_frame(out: &mut String, frame: &CodecFrame) {
     }
     out.push_str("}\n\n");
 
+    // Create a resolved frame for parse/serialize
+    let resolved_frame = CodecFrame {
+        frame_id: frame.frame_id.clone(),
+        name: frame.name.clone(),
+        tag: frame.tag.clone(),
+        variants: resolved_variants,
+    };
+
     // Impl block
     out.push_str(&format!("impl{lt} {type_name}{lt} {{\n"));
 
@@ -472,21 +552,21 @@ fn emit_frame(out: &mut String, frame: &CodecFrame) {
         "    pub fn parse(cur: &mut Cursor{}) -> Result<(Self, {tag_type})> {{\n",
         if needs_lt { "<'a>" } else { "<'_>" }
     ));
-    parse_emit::emit_frame_parse_body(out, frame, "        ");
+    parse_emit::emit_frame_parse_body(out, &resolved_frame, "        ");
     out.push_str("    }\n\n");
 
     // serialize method — tag is passed in
     out.push_str(&format!(
         "    pub fn serialize(&self, tag: {tag_type}, w: &mut Writer<'_>) -> Result<()> {{\n"
     ));
-    serialize_emit::emit_frame_serialize_body(out, frame, "        ");
+    serialize_emit::emit_frame_serialize_body(out, &resolved_frame, "        ");
     out.push_str("        Ok(())\n");
     out.push_str("    }\n\n");
 
     // serialized_len method
     out.push_str("    pub fn serialized_len(&self) -> usize {\n");
     out.push_str("        let mut len = 0usize;\n");
-    serialize_emit::emit_frame_serialized_len_body(out, frame, "        ");
+    serialize_emit::emit_frame_serialized_len_body(out, &resolved_frame, "        ");
     out.push_str("        len\n");
     out.push_str("    }\n");
 
@@ -495,12 +575,16 @@ fn emit_frame(out: &mut String, frame: &CodecFrame) {
 
 // ── Capsules ──
 
-fn emit_capsule(out: &mut String, capsule: &CodecCapsule) {
+fn emit_capsule(out: &mut String, capsule: &CodecCapsule, enums: &[SemanticEnum]) {
     let type_name = to_pascal_case(&capsule.name);
     let needs_lt = capsule_needs_lifetime(capsule);
     let lt = lifetime_suffix(needs_lt);
 
-    // Struct definition (header fields + payload enum)
+    // Resolve enum fields for parse/serialize
+    let resolved_header_fields = resolve_enum_fields(&capsule.header_fields, enums);
+    let resolved_variants = resolve_enum_variants(&capsule.variants, enums);
+
+    // Struct definition (header fields + payload enum) -- uses original fields
     out.push_str("#[derive(Debug, Clone, PartialEq)]\n");
     out.push_str(&format!("pub struct {type_name}{lt} {{\n"));
     // Header fields
@@ -509,7 +593,7 @@ fn emit_capsule(out: &mut String, capsule: &CodecCapsule) {
     out.push_str(&format!("    pub payload: {type_name}Payload{lt},\n"));
     out.push_str("}\n\n");
 
-    // Payload enum
+    // Payload enum -- uses original fields
     out.push_str("#[derive(Debug, Clone, PartialEq)]\n");
     out.push_str(&format!("pub enum {type_name}Payload{lt} {{\n"));
     for variant in &capsule.variants {
@@ -524,6 +608,19 @@ fn emit_capsule(out: &mut String, capsule: &CodecCapsule) {
     }
     out.push_str("}\n\n");
 
+    // Create resolved capsule for parse/serialize
+    let resolved_capsule = CodecCapsule {
+        capsule_id: capsule.capsule_id.clone(),
+        name: capsule.name.clone(),
+        tag: capsule.tag.clone(),
+        within_field: capsule.within_field.clone(),
+        tag_expr: capsule.tag_expr.clone(),
+        header_fields: resolved_header_fields.clone(),
+        header_items: capsule.header_items.clone(),
+        header_checksum_plan: capsule.header_checksum_plan.clone(),
+        variants: resolved_variants,
+    };
+
     // Impl block
     out.push_str(&format!("impl{lt} {type_name}{lt} {{\n"));
 
@@ -532,14 +629,14 @@ fn emit_capsule(out: &mut String, capsule: &CodecCapsule) {
         "    pub fn parse(cur: &mut Cursor{}) -> Result<Self> {{\n",
         if needs_lt { "<'a>" } else { "<'_>" }
     ));
-    parse_emit::emit_capsule_parse_body(out, capsule, "        ");
+    parse_emit::emit_capsule_parse_body(out, &resolved_capsule, "        ");
     out.push_str("    }\n\n");
 
     // serialize method
     out.push_str("    pub fn serialize(&self, w: &mut Writer<'_>) -> Result<()> {\n");
     serialize_emit::emit_serialize_items(
         out,
-        &capsule.header_fields,
+        &resolved_header_fields,
         &capsule.header_items,
         "        ",
         "self.",
@@ -552,7 +649,7 @@ fn emit_capsule(out: &mut String, capsule: &CodecCapsule) {
     out.push_str("        let mut len = 0usize;\n");
     serialize_emit::emit_serialized_len_items(
         out,
-        &capsule.header_fields,
+        &resolved_header_fields,
         &capsule.header_items,
         "        ",
         "self.",

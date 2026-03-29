@@ -163,6 +163,36 @@ impl<'a> Cursor<'a> {
         Ok(u64::from_le_bytes(buf))
     }
 
+    // ── Signed reads ──
+
+    pub fn read_i8(&mut self) -> Result<i8> {
+        self.read_u8().map(|v| v as i8)
+    }
+
+    pub fn read_i16be(&mut self) -> Result<i16> {
+        self.read_u16be().map(|v| v as i16)
+    }
+
+    pub fn read_i16le(&mut self) -> Result<i16> {
+        self.read_u16le().map(|v| v as i16)
+    }
+
+    pub fn read_i32be(&mut self) -> Result<i32> {
+        self.read_u32be().map(|v| v as i32)
+    }
+
+    pub fn read_i32le(&mut self) -> Result<i32> {
+        self.read_u32le().map(|v| v as i32)
+    }
+
+    pub fn read_i64be(&mut self) -> Result<i64> {
+        self.read_u64be().map(|v| v as i64)
+    }
+
+    pub fn read_i64le(&mut self) -> Result<i64> {
+        self.read_u64le().map(|v| v as i64)
+    }
+
     // ── Bytes / remaining ──
 
     pub fn read_bytes(&mut self, n: usize) -> Result<&'a [u8]> {
@@ -291,6 +321,36 @@ impl<'a> Writer<'a> {
         self.buf[self.pos..self.pos + 8].copy_from_slice(&bytes);
         self.pos += 8;
         Ok(())
+    }
+
+    // ── Signed writes ──
+
+    pub fn write_i8(&mut self, v: i8) -> Result<()> {
+        self.write_u8(v as u8)
+    }
+
+    pub fn write_i16be(&mut self, v: i16) -> Result<()> {
+        self.write_u16be(v as u16)
+    }
+
+    pub fn write_i16le(&mut self, v: i16) -> Result<()> {
+        self.write_u16le(v as u16)
+    }
+
+    pub fn write_i32be(&mut self, v: i32) -> Result<()> {
+        self.write_u32be(v as u32)
+    }
+
+    pub fn write_i32le(&mut self, v: i32) -> Result<()> {
+        self.write_u32le(v as u32)
+    }
+
+    pub fn write_i64be(&mut self, v: i64) -> Result<()> {
+        self.write_u64be(v as u64)
+    }
+
+    pub fn write_i64le(&mut self, v: i64) -> Result<()> {
+        self.write_u64le(v as u64)
     }
 
     // ── Bytes ──

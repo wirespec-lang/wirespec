@@ -4,7 +4,7 @@
 
 use wirespec_codec::ir::*;
 
-use crate::expr::{ExprContext, expr_to_rust, extract_field_name};
+use crate::expr::{ExprContext, expr_to_rust, expr_to_rust_bool, extract_field_name};
 use crate::names::to_pascal_case;
 use crate::type_map::*;
 
@@ -93,7 +93,7 @@ fn emit_field_parse(
         }
         FieldStrategy::Conditional => {
             if let Some(ref cond) = f.condition {
-                let cond_str = expr_to_rust(cond, &ExprContext::Parse);
+                let cond_str = expr_to_rust_bool(cond, &ExprContext::Parse);
                 let inner_wt = f.inner_wire_type.as_ref().unwrap_or(&f.wire_type);
 
                 match inner_wt {
@@ -199,10 +199,11 @@ fn emit_bitgroup_parse(
 }
 
 fn emit_array_parse(out: &mut String, f: &CodecField, arr: &ArraySpec, indent: &str) {
+    let max_elems = f.max_elements.unwrap_or(256);
+    let elem_type = wire_type_to_rust(&arr.element_wire_type);
+
     if let Some(ref count_expr) = arr.count_expr {
         let count_str = expr_to_rust(count_expr, &ExprContext::Parse);
-        let max_elems = f.max_elements.unwrap_or(256);
-        let elem_type = wire_type_to_rust(&arr.element_wire_type);
 
         out.push_str(&format!(
             "{indent}let {}_count = {count_str} as usize;\n",
@@ -221,31 +222,66 @@ fn emit_array_parse(out: &mut String, f: &CodecField, arr: &ArraySpec, indent: &
 
         out.push_str(&format!("{indent}for _i in 0..{}_count {{\n", f.name));
 
-        match arr.element_strategy {
-            FieldStrategy::Primitive => {
-                let read_method = cursor_read_method(&arr.element_wire_type, None);
+        emit_array_element_read_indexed(out, f, arr, indent, "_i");
+
+        out.push_str(&format!("{indent}}}\n"));
+    } else {
+        // Fill array: read elements until remaining is exhausted
+        out.push_str(&format!(
+            "{indent}let mut {} = [<{elem_type}>::default(); {max_elems}];\n",
+            f.name
+        ));
+        out.push_str(&format!("{indent}let mut {}_count: usize = 0;\n", f.name));
+        out.push_str(&format!("{indent}while cur.remaining() > 0 {{\n"));
+        out.push_str(&format!(
+            "{indent}    if {}_count >= {max_elems} {{ return Err(Error::Capacity); }}\n",
+            f.name
+        ));
+
+        emit_array_element_read_indexed(out, f, arr, indent, &format!("{}_count", f.name));
+
+        out.push_str(&format!("{indent}    {}_count += 1;\n", f.name));
+        out.push_str(&format!("{indent}}}\n"));
+    }
+}
+
+fn emit_array_element_read_indexed(
+    out: &mut String,
+    f: &CodecField,
+    arr: &ArraySpec,
+    indent: &str,
+    idx: &str,
+) {
+    match arr.element_strategy {
+        FieldStrategy::Primitive => {
+            let read_method = cursor_read_method(&arr.element_wire_type, None);
+            out.push_str(&format!(
+                "{indent}    {}[{idx}] = cur.{read_method}()?;\n",
+                f.name
+            ));
+        }
+        FieldStrategy::Struct => {
+            if let Some(ref ref_name) = arr.element_ref_type_name {
+                let type_name = to_pascal_case(ref_name);
                 out.push_str(&format!(
-                    "{indent}    {}[_i] = cur.{read_method}()?;\n",
+                    "{indent}    {}[{idx}] = {type_name}::parse(cur)?;\n",
                     f.name
                 ));
             }
-            FieldStrategy::Struct => {
-                if let Some(ref ref_name) = arr.element_ref_type_name {
-                    let type_name = to_pascal_case(ref_name);
-                    out.push_str(&format!(
-                        "{indent}    {}[_i] = {type_name}::parse(cur)?;\n",
-                        f.name
-                    ));
-                }
-            }
-            _ => {
+        }
+        FieldStrategy::VarInt | FieldStrategy::ContVarInt => {
+            if let Some(ref ref_name) = arr.element_ref_type_name {
+                let parse_fn = format!("{}_parse", crate::names::to_snake_case(ref_name));
                 out.push_str(&format!(
-                    "{indent}    /* unsupported array element strategy */\n"
+                    "{indent}    {}[{idx}] = {parse_fn}(cur)?;\n",
+                    f.name
                 ));
             }
         }
-
-        out.push_str(&format!("{indent}}}\n"));
+        _ => unreachable!(
+            "unexpected array element strategy: {:?}",
+            arr.element_strategy
+        ),
     }
 }
 
@@ -347,6 +383,9 @@ fn emit_variant_parse_arm(out: &mut String, variant: &CodecVariantScope, indent:
 
 /// Emit parse for capsule (header fields + sub-cursor dispatch).
 pub fn emit_capsule_parse_body(out: &mut String, capsule: &CodecCapsule, indent: &str) {
+    let type_name = to_pascal_case(&capsule.name);
+    let payload_type = format!("{type_name}Payload");
+
     // Parse header fields
     emit_parse_items(out, &capsule.header_fields, &capsule.header_items, indent);
 
@@ -361,19 +400,48 @@ pub fn emit_capsule_parse_body(out: &mut String, capsule: &CodecCapsule, indent:
         "{indent}let mut sub = cur.sub_cursor({within_expr} as usize)?;\n"
     ));
 
-    // Read tag for dispatch
+    // Read tag for dispatch, producing the payload enum
     let tag_field_name = &capsule.tag.field_name;
-    out.push_str(&format!("{indent}match {tag_field_name} {{\n"));
+    out.push_str(&format!(
+        "{indent}let payload = match {tag_field_name} {{\n"
+    ));
 
     for variant in &capsule.variants {
-        emit_capsule_variant_arm(out, variant, indent);
+        emit_capsule_variant_arm(out, variant, indent, &payload_type);
     }
 
-    out.push_str(&format!("{indent}}}\n"));
+    out.push_str(&format!("{indent}}};\n"));
+
+    // Construct and return the struct
+    out.push_str(&format!("{indent}Ok(Self {{\n"));
+    for item in &capsule.header_items {
+        match item {
+            CodecItem::Field { field_id } => {
+                if let Some(f) = capsule
+                    .header_fields
+                    .iter()
+                    .find(|f| &f.field_id == field_id)
+                {
+                    out.push_str(&format!("{indent}    {},\n", f.name));
+                }
+            }
+            CodecItem::Derived(d) => {
+                out.push_str(&format!("{indent}    {},\n", d.name));
+            }
+            CodecItem::Require(_) => {}
+        }
+    }
+    out.push_str(&format!("{indent}    payload,\n"));
+    out.push_str(&format!("{indent}}})\n"));
 }
 
-fn emit_capsule_variant_arm(out: &mut String, variant: &CodecVariantScope, indent: &str) {
-    let _variant_name = to_pascal_case(&variant.name);
+fn emit_capsule_variant_arm(
+    out: &mut String,
+    variant: &CodecVariantScope,
+    indent: &str,
+    payload_type: &str,
+) {
+    let variant_name = to_pascal_case(&variant.name);
     let inner_indent = format!("{indent}        ");
 
     match &variant.pattern {
@@ -389,8 +457,30 @@ fn emit_capsule_variant_arm(out: &mut String, variant: &CodecVariantScope, inden
     }
 
     // Parse variant fields using &mut sub cursor
-    // We use "sub" instead of "cur" for capsule variant fields
     emit_capsule_variant_parse_items(out, &variant.fields, &variant.items, &inner_indent);
+
+    // Construct the payload enum variant
+    if variant.fields.is_empty() {
+        out.push_str(&format!("{inner_indent}{payload_type}::{variant_name}\n"));
+    } else {
+        out.push_str(&format!(
+            "{inner_indent}{payload_type}::{variant_name} {{\n"
+        ));
+        for item in &variant.items {
+            match item {
+                CodecItem::Field { field_id } => {
+                    if let Some(f) = variant.fields.iter().find(|f| &f.field_id == field_id) {
+                        out.push_str(&format!("{inner_indent}    {},\n", f.name));
+                    }
+                }
+                CodecItem::Derived(d) => {
+                    out.push_str(&format!("{inner_indent}    {},\n", d.name));
+                }
+                CodecItem::Require(_) => {}
+            }
+        }
+        out.push_str(&format!("{inner_indent}}}\n"));
+    }
 
     out.push_str(&format!("{indent}    }}\n"));
 }

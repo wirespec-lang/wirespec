@@ -87,7 +87,34 @@ pub fn expr_to_rust(expr: &CodecExpr, ctx: &ExprContext) -> String {
         | CodecExpr::StateConstructor { .. }
         | CodecExpr::Fill { .. }
         | CodecExpr::Slice { .. }
-        | CodecExpr::All { .. } => "/* unsupported expr */".into(),
+        | CodecExpr::All { .. } => unreachable!("SM expression in non-SM context"),
+    }
+}
+
+/// Check whether a CodecExpr is known to produce a boolean result.
+fn expr_is_boolean(expr: &CodecExpr) -> bool {
+    match expr {
+        CodecExpr::Binary { op, .. } => matches!(
+            op.as_str(),
+            "==" | "!=" | "<" | ">" | "<=" | ">=" | "and" | "or" | "&&" | "||"
+        ),
+        CodecExpr::Unary { op, .. } => op == "!",
+        CodecExpr::Literal {
+            value: LiteralValue::Bool(_),
+        } => true,
+        _ => false,
+    }
+}
+
+/// Convert a CodecExpr to a Rust boolean expression.
+/// If the expression is not inherently boolean (e.g. bitwise `&`),
+/// wraps it with `!= 0` so Rust's `if` is satisfied.
+pub fn expr_to_rust_bool(expr: &CodecExpr, ctx: &ExprContext) -> String {
+    let s = expr_to_rust(expr, ctx);
+    if expr_is_boolean(expr) {
+        s
+    } else {
+        format!("({s}) != 0")
     }
 }
 

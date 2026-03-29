@@ -20,3 +20,4 @@ wirespec-backend-rust = { path = "../wirespec-backend-rust" }
 
 [dev-dependencies]
 tempfile = "3"
+wirespec-rt = { path = "../wirespec-rt" }

@@ -388,6 +388,7 @@ dependencies = [
  "wirespec-backend-rust",
  "wirespec-codec",
  "wirespec-layout",
+ "wirespec-rt",
  "wirespec-sema",
  "wirespec-syntax",
 ]
