@@ -18,7 +18,7 @@ use wirespec_backend_api::*;
 use wirespec_sema::ComplianceProfile;
 
 fn examples_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../protospec/examples")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples")
 }
 
 fn protospec_dir() -> PathBuf {

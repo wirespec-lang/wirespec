@@ -3,7 +3,7 @@ use wirespec_driver::{CompileRequest, compile};
 use wirespec_sema::ComplianceProfile;
 
 fn examples_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../protospec/examples")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples")
 }
 
 fn compile_example(rel_path: &str) -> wirespec_driver::CompileResult {
