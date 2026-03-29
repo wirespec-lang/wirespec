@@ -41,3 +41,23 @@ fn error_duplicate_flags_member_name() {
 fn ok_distinct_enum_members() {
     expect_ok("enum E: u8 { A = 0, B = 1, C = 2 }");
 }
+
+#[test]
+fn error_enum_value_overflow_u8() {
+    expect_error("enum E: u8 { X = 256 }", ErrorKind::TypeMismatch);
+}
+
+#[test]
+fn error_enum_value_overflow_u16() {
+    expect_error("enum E: u16 { X = 65536 }", ErrorKind::TypeMismatch);
+}
+
+#[test]
+fn ok_enum_value_max_u8() {
+    expect_ok("enum E: u8 { X = 255 }");
+}
+
+#[test]
+fn ok_enum_value_max_u16() {
+    expect_ok("enum E: u16 { X = 65535 }");
+}

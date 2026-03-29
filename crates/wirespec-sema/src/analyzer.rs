@@ -345,6 +345,35 @@ impl Analyzer {
                 .with_span(m.span));
             }
         }
+        // Check member values fit underlying type
+        use crate::types::PrimitiveWireType;
+        let max_value = match &underlying_type {
+            SemanticType::Primitive { wire, .. } => match wire {
+                PrimitiveWireType::U8 => Some(u8::MAX as i128),
+                PrimitiveWireType::U16 => Some(u16::MAX as i128),
+                PrimitiveWireType::U32 => Some(u32::MAX as i128),
+                PrimitiveWireType::U64 => Some(u64::MAX as i128),
+                PrimitiveWireType::I8 => Some(i8::MAX as i128),
+                PrimitiveWireType::I16 => Some(i16::MAX as i128),
+                PrimitiveWireType::I32 => Some(i32::MAX as i128),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(max) = max_value {
+            for m in &e.members {
+                if (m.value as i128) < 0 || (m.value as i128) > max {
+                    return Err(SemaError::new(
+                        ErrorKind::TypeMismatch,
+                        format!(
+                            "member '{}' value {} does not fit underlying type in '{}'",
+                            m.name, m.value, e.name
+                        ),
+                    )
+                    .with_span(m.span));
+                }
+            }
+        }
         let members = e
             .members
             .iter()
@@ -378,6 +407,35 @@ impl Analyzer {
                     format!("duplicate member '{}' in flags '{}'", m.name, f.name),
                 )
                 .with_span(m.span));
+            }
+        }
+        // Check member values fit underlying type
+        use crate::types::PrimitiveWireType;
+        let max_value = match &underlying_type {
+            SemanticType::Primitive { wire, .. } => match wire {
+                PrimitiveWireType::U8 => Some(u8::MAX as i128),
+                PrimitiveWireType::U16 => Some(u16::MAX as i128),
+                PrimitiveWireType::U32 => Some(u32::MAX as i128),
+                PrimitiveWireType::U64 => Some(u64::MAX as i128),
+                PrimitiveWireType::I8 => Some(i8::MAX as i128),
+                PrimitiveWireType::I16 => Some(i16::MAX as i128),
+                PrimitiveWireType::I32 => Some(i32::MAX as i128),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(max) = max_value {
+            for m in &f.members {
+                if (m.value as i128) < 0 || (m.value as i128) > max {
+                    return Err(SemaError::new(
+                        ErrorKind::TypeMismatch,
+                        format!(
+                            "member '{}' value {} does not fit underlying type in '{}'",
+                            m.name, m.value, f.name
+                        ),
+                    )
+                    .with_span(m.span));
+                }
             }
         }
         let members = f
