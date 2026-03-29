@@ -9,5 +9,5 @@ pub mod driver;
 pub mod pipeline;
 pub mod resolve;
 
-pub use driver::{compile, CompileRequest, CompileResult, CompiledModule};
-pub use pipeline::{compile_module, ExternalType, ExternalTypeKind, ExternalTypes};
+pub use driver::{CompileRequest, CompileResult, CompiledModule, compile};
+pub use pipeline::{ExternalType, ExternalTypeKind, ExternalTypes, compile_module};

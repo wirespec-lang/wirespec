@@ -229,7 +229,17 @@ impl Analyzer {
     // ── Pass 1: registration ──
 
     fn check_reserved(name: &str) -> SemaResult<()> {
-        const RESERVED_IDENTIFIERS: &[&str] = &["bool", "null", "fill", "remaining", "in_state", "all", "child_state_changed", "src", "dst"];
+        const RESERVED_IDENTIFIERS: &[&str] = &[
+            "bool",
+            "null",
+            "fill",
+            "remaining",
+            "in_state",
+            "all",
+            "child_state_changed",
+            "src",
+            "dst",
+        ];
         if RESERVED_IDENTIFIERS.contains(&name) {
             return Err(SemaError::new(
                 ErrorKind::ReservedIdentifier,
@@ -241,9 +251,9 @@ impl Analyzer {
 
     fn try_register(&mut self, name: &str, kind: DeclKind) -> SemaResult<()> {
         Self::check_reserved(name)?;
-        self.registry.register(name, kind).map_err(|msg| {
-            SemaError::new(ErrorKind::DuplicateDefinition, msg)
-        })
+        self.registry
+            .register(name, kind)
+            .map_err(|msg| SemaError::new(ErrorKind::DuplicateDefinition, msg))
     }
 
     fn register_all(&mut self, ast: &AstModule) -> SemaResult<()> {
@@ -324,11 +334,7 @@ impl Analyzer {
         })
     }
 
-    fn lower_enum_decl(
-        &mut self,
-        e: &AstEnumDecl,
-        is_flags: bool,
-    ) -> SemaResult<SemanticEnum> {
+    fn lower_enum_decl(&mut self, e: &AstEnumDecl, is_flags: bool) -> SemaResult<SemanticEnum> {
         let underlying_type = self.resolve_named_type(&e.underlying_type, e.span)?;
         let enum_id = format!("enum:{}", e.name);
         let members = e
@@ -393,7 +399,10 @@ impl Analyzer {
         if fields.len() < 2 {
             return Err(SemaError::new(
                 ErrorKind::TypeMismatch,
-                format!("type '{}' has too few fields for VarInt prefix-match pattern", name),
+                format!(
+                    "type '{}' has too few fields for VarInt prefix-match pattern",
+                    name
+                ),
             ));
         }
 
@@ -474,10 +483,7 @@ impl Analyzer {
         })
     }
 
-    fn lower_continuation_varint(
-        &self,
-        cv: &AstContinuationVarIntDecl,
-    ) -> SemanticVarInt {
+    fn lower_continuation_varint(&self, cv: &AstContinuationVarIntDecl) -> SemanticVarInt {
         let byte_order = match cv.byte_order.as_str() {
             "little" => Endianness::Little,
             _ => Endianness::Big,
@@ -506,7 +512,8 @@ impl Analyzer {
         let mut requires = Vec::new();
         let mut items = Vec::new();
         let mut declared: Vec<String> = Vec::new();
-        let mut optional_fields: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut optional_fields: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
         let mut field_idx: usize = 0;
         let mut derived_idx: usize = 0;
         let mut require_idx: usize = 0;
@@ -575,11 +582,17 @@ impl Analyzer {
                 name: f.name.clone(),
                 is_remaining: matches!(
                     &f.ty,
-                    SemanticType::Bytes { bytes_kind: SemanticBytesKind::Remaining, .. }
+                    SemanticType::Bytes {
+                        bytes_kind: SemanticBytesKind::Remaining,
+                        ..
+                    }
                 ),
                 is_fill: matches!(
                     &f.ty,
-                    SemanticType::Array { count_expr: None, .. }
+                    SemanticType::Array {
+                        count_expr: None,
+                        ..
+                    }
                 ),
                 is_wire: true,
             })
@@ -628,12 +641,18 @@ impl Analyzer {
         self.first_error()?;
 
         // Finding 8: match exhaustiveness — require wildcard branch
-        let has_wildcard = variants.iter().any(|v| matches!(&v.pattern, SemanticPattern::Wildcard));
+        let has_wildcard = variants
+            .iter()
+            .any(|v| matches!(&v.pattern, SemanticPattern::Wildcard));
         if !has_wildcard {
             return Err(SemaError::new(
                 ErrorKind::TypeMismatch,
-                format!("frame '{}': match is not exhaustive, add a wildcard (_) branch", f.name),
-            ).with_span(f.span));
+                format!(
+                    "frame '{}': match is not exhaustive, add a wildcard (_) branch",
+                    f.name
+                ),
+            )
+            .with_span(f.span));
         }
 
         Ok(SemanticFrame {
@@ -714,16 +733,14 @@ impl Analyzer {
 
         // Determine tag type from selector
         let tag_type = match &tag_selector {
-            CapsuleTagSelector::Field { field_name, .. } => {
-                header_fields
-                    .iter()
-                    .find(|hf| hf.name == *field_name)
-                    .map(|hf| hf.ty.clone())
-                    .unwrap_or(SemanticType::Primitive {
-                        wire: PrimitiveWireType::U8,
-                        endianness: None,
-                    })
-            }
+            CapsuleTagSelector::Field { field_name, .. } => header_fields
+                .iter()
+                .find(|hf| hf.name == *field_name)
+                .map(|hf| hf.ty.clone())
+                .unwrap_or(SemanticType::Primitive {
+                    wire: PrimitiveWireType::U8,
+                    endianness: None,
+                }),
             CapsuleTagSelector::Expr { .. } => SemanticType::Primitive {
                 wire: PrimitiveWireType::U8,
                 endianness: None,
@@ -756,12 +773,18 @@ impl Analyzer {
         self.first_error()?;
 
         // Finding 8: match exhaustiveness — require wildcard branch
-        let has_wildcard = variants.iter().any(|v| matches!(&v.pattern, SemanticPattern::Wildcard));
+        let has_wildcard = variants
+            .iter()
+            .any(|v| matches!(&v.pattern, SemanticPattern::Wildcard));
         if !has_wildcard {
             return Err(SemaError::new(
                 ErrorKind::TypeMismatch,
-                format!("capsule '{}': match is not exhaustive, add a wildcard (_) branch", c.name),
-            ).with_span(c.span));
+                format!(
+                    "capsule '{}': match is not exhaustive, add a wildcard (_) branch",
+                    c.name
+                ),
+            )
+            .with_span(c.span));
         }
 
         Ok(SemanticCapsule {
@@ -798,7 +821,8 @@ impl Analyzer {
         let mut requires = Vec::new();
         let mut items = Vec::new();
         let mut declared: Vec<String> = parent_declared.to_vec();
-        let mut optional_fields: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut optional_fields: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
         let mut field_idx: usize = 0;
         let mut derived_idx: usize = 0;
         let mut require_idx: usize = 0;
@@ -865,11 +889,17 @@ impl Analyzer {
                 name: f.name.clone(),
                 is_remaining: matches!(
                     &f.ty,
-                    SemanticType::Bytes { bytes_kind: SemanticBytesKind::Remaining, .. }
+                    SemanticType::Bytes {
+                        bytes_kind: SemanticBytesKind::Remaining,
+                        ..
+                    }
                 ),
                 is_fill: matches!(
                     &f.ty,
-                    SemanticType::Array { count_expr: None, .. }
+                    SemanticType::Array {
+                        count_expr: None,
+                        ..
+                    }
                 ),
                 is_wire: true,
             })
@@ -880,7 +910,10 @@ impl Analyzer {
             .iter()
             .filter_map(|f| f.checksum_algorithm.as_deref())
             .collect();
-        validate_single_checksum(&checksum_fields, &format!("variant '{}'", branch.variant_name))?;
+        validate_single_checksum(
+            &checksum_fields,
+            &format!("variant '{}'", branch.variant_name),
+        )?;
 
         Ok(SemanticVariantScope {
             scope_id,
@@ -909,7 +942,11 @@ impl Analyzer {
         let (ty, presence) = self.resolve_type_expr(&field.type_expr)?;
 
         // bool is a semantic type, not a wire type — reject in wire field context
-        if let SemanticType::Primitive { wire: PrimitiveWireType::Bool, .. } = &ty {
+        if let SemanticType::Primitive {
+            wire: PrimitiveWireType::Bool,
+            ..
+        } = &ty
+        {
             return Err(SemaError::new(
                 ErrorKind::TypeMismatch,
                 format!("'bool' is a semantic type, not a wire type; use 'u8' or 'bits[1]' for field '{}'", field.name),
@@ -1087,9 +1124,10 @@ impl Analyzer {
         span: Option<wirespec_syntax::span::Span>,
     ) -> SemaResult<SemanticType> {
         match self.registry.resolve_type_name(name) {
-            Some(ResolvedType::Primitive(wire, endian)) => {
-                Ok(SemanticType::Primitive { wire, endianness: endian })
-            }
+            Some(ResolvedType::Primitive(wire, endian)) => Ok(SemanticType::Primitive {
+                wire,
+                endianness: endian,
+            }),
             Some(ResolvedType::UserDefined(resolved_name, kind)) => match kind {
                 DeclKind::VarInt => Ok(SemanticType::VarIntRef {
                     varint_id: format!("varint:{}", resolved_name),
@@ -1121,7 +1159,10 @@ impl Analyzer {
                     // State machines can't be used as field types
                     Err(SemaError::new(
                         ErrorKind::TypeMismatch,
-                        format!("state machine '{}' cannot be used as a field type", resolved_name),
+                        format!(
+                            "state machine '{}' cannot be used as a field type",
+                            resolved_name
+                        ),
                     )
                     .with_span(span))
                 }
@@ -1136,8 +1177,7 @@ impl Analyzer {
             },
             None => {
                 let all_type_names = self.registry.all_names();
-                let candidate_strs: Vec<&str> =
-                    all_type_names.iter().map(|s| s.as_str()).collect();
+                let candidate_strs: Vec<&str> = all_type_names.iter().map(|s| s.as_str()).collect();
                 let hint = suggest_similar(name, &candidate_strs, 2)
                     .map(|suggestion| format!("did you mean '{suggestion}'?"));
 
@@ -1164,9 +1204,7 @@ impl Analyzer {
                 Ok((ty, FieldPresence::Always))
             }
             AstTypeExpr::Bits { width, .. } => Ok((
-                SemanticType::Bits {
-                    width_bits: *width,
-                },
+                SemanticType::Bits { width_bits: *width },
                 FieldPresence::Always,
             )),
             AstTypeExpr::Bytes {
@@ -1181,9 +1219,9 @@ impl Analyzer {
                     AstBytesKind::Remaining => SemanticBytesKind::Remaining,
                     AstBytesKind::LengthOrRemaining => SemanticBytesKind::LengthOrRemaining,
                 };
-                let sem_size_expr = size_expr.as_ref().map(|e| {
-                    Box::new(self.lower_expr(e, &[], &[]))
-                });
+                let sem_size_expr = size_expr
+                    .as_ref()
+                    .map(|e| Box::new(self.lower_expr(e, &[], &[])));
                 Ok((
                     SemanticType::Bytes {
                         bytes_kind,
@@ -1223,10 +1261,7 @@ impl Analyzer {
             } => {
                 let (ty, _) = self.resolve_type_expr(inner_type)?;
                 let cond = self.lower_expr(condition, &[], &[]);
-                Ok((
-                    ty,
-                    FieldPresence::Conditional { condition: cond },
-                ))
+                Ok((ty, FieldPresence::Conditional { condition: cond }))
             }
             AstTypeExpr::Match { branches, .. } => {
                 // For match type expressions used outside varint context,
@@ -1318,9 +1353,7 @@ impl Analyzer {
                 expr: Box::new(self.lower_expr(inner, declared, const_names)),
                 default: Box::new(self.lower_expr(default, declared, const_names)),
             },
-            AstExpr::MemberAccess {
-                base, field, ..
-            } => {
+            AstExpr::MemberAccess { base, field, .. } => {
                 // Check if base is NameRef("src") or NameRef("dst")
                 if let AstExpr::NameRef { name, .. } = base.as_ref() {
                     if name == "src" || name == "dst" {
@@ -1347,15 +1380,11 @@ impl Analyzer {
                     },
                 }
             }
-            AstExpr::Subscript {
-                base, index, ..
-            } => SemanticExpr::Subscript {
+            AstExpr::Subscript { base, index, .. } => SemanticExpr::Subscript {
                 base: Box::new(self.lower_expr(base, declared, const_names)),
                 index: Box::new(self.lower_expr(index, declared, const_names)),
             },
-            AstExpr::Fill {
-                value, count, ..
-            } => SemanticExpr::Fill {
+            AstExpr::Fill { value, count, .. } => SemanticExpr::Fill {
                 value: Box::new(self.lower_expr(value, declared, const_names)),
                 count: Box::new(self.lower_expr(count, declared, const_names)),
             },
@@ -1435,12 +1464,12 @@ impl Analyzer {
                 .iter()
                 .enumerate()
                 .map(|(i, f)| {
-                    let ty = self
-                        .resolve_state_field_type(&f.type_expr)
-                        .unwrap_or(SemanticType::Primitive {
+                    let ty = self.resolve_state_field_type(&f.type_expr).unwrap_or(
+                        SemanticType::Primitive {
                             wire: PrimitiveWireType::U8,
                             endianness: None,
-                        });
+                        },
+                    );
                     let default_value = f.default_value.as_ref().map(|dv| match dv {
                         AstLiteralValue::Int(v) => SemanticLiteral::Int(*v),
                         AstLiteralValue::Bool(b) => SemanticLiteral::Bool(*b),
@@ -1449,11 +1478,16 @@ impl Analyzer {
                     });
                     // Detect child state machine references (direct or array element)
                     let sm_ref_type = match &ty {
-                        SemanticType::PacketRef { packet_id, name: ref_name } => {
-                            Some((packet_id, ref_name))
-                        }
+                        SemanticType::PacketRef {
+                            packet_id,
+                            name: ref_name,
+                        } => Some((packet_id, ref_name)),
                         SemanticType::Array { element_type, .. } => {
-                            if let SemanticType::PacketRef { packet_id, name: ref_name } = element_type.as_ref() {
+                            if let SemanticType::PacketRef {
+                                packet_id,
+                                name: ref_name,
+                            } = element_type.as_ref()
+                            {
                                 Some((packet_id, ref_name))
                             } else {
                                 None
@@ -1461,15 +1495,16 @@ impl Analyzer {
                         }
                         _ => None,
                     };
-                    let (child_sm_id, child_sm_name) = if let Some((packet_id, ref_name)) = sm_ref_type {
-                        if packet_id.starts_with("sm:") {
-                            (Some(packet_id.clone()), Some(ref_name.clone()))
+                    let (child_sm_id, child_sm_name) =
+                        if let Some((packet_id, ref_name)) = sm_ref_type {
+                            if packet_id.starts_with("sm:") {
+                                (Some(packet_id.clone()), Some(ref_name.clone()))
+                            } else {
+                                (None, None)
+                            }
                         } else {
                             (None, None)
-                        }
-                    } else {
-                        (None, None)
-                    };
+                        };
                     SemanticStateField {
                         field_id: format!("{}.field[{}]", state_id, i),
                         name: f.name.clone(),
@@ -1543,12 +1578,12 @@ impl Analyzer {
                         .iter()
                         .enumerate()
                         .map(|(i, p)| {
-                            let ty = self
-                                .resolve_state_field_type(&p.type_expr)
-                                .unwrap_or(SemanticType::Primitive {
+                            let ty = self.resolve_state_field_type(&p.type_expr).unwrap_or(
+                                SemanticType::Primitive {
                                     wire: PrimitiveWireType::U8,
                                     endianness: None,
-                                });
+                                },
+                            );
                             SemanticEventParam {
                                 param_id: format!("{}.param[{}]", event_id, i),
                                 name: p.name.clone(),
@@ -1575,10 +1610,10 @@ impl Analyzer {
         let mut transitions = Vec::new();
         let mut transition_idx: usize = 0;
 
-
         // Finding 7: Collect concrete (state, event) pairs so wildcard expansion
         // skips states that already have a concrete transition for the same event.
-        let mut concrete_pairs: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+        let mut concrete_pairs: std::collections::HashSet<(String, String)> =
+            std::collections::HashSet::new();
         for t in &sm.transitions {
             if t.src_state != "*" {
                 for ev in &t.events {
@@ -1660,15 +1695,12 @@ impl Analyzer {
                 .collect();
 
             // Guard — resolve event params and child SM names for InState/All
-            let guard = t
-                .guard
-                .as_ref()
-                .map(|g| {
-                    let mut lowered = self.lower_expr(g, &[], &[]);
-                    resolve_event_params(&mut lowered, &event_param_names);
-                    resolve_guard_sm_names(&mut lowered, &states);
-                    lowered
-                });
+            let guard = t.guard.as_ref().map(|g| {
+                let mut lowered = self.lower_expr(g, &[], &[]);
+                resolve_event_params(&mut lowered, &event_param_names);
+                resolve_guard_sm_names(&mut lowered, &states);
+                lowered
+            });
 
             // Actions — resolve event params in action expressions
             let actions: Vec<SemanticAction> = t
@@ -1712,7 +1744,8 @@ impl Analyzer {
                 for ev in &t.events {
                     // Finding 7: skip wildcard expansion for (state, event) pairs
                     // that already have a concrete transition (concrete overrides wildcard).
-                    if is_wildcard && concrete_pairs.contains(&(src_name.clone(), ev.name.clone())) {
+                    if is_wildcard && concrete_pairs.contains(&(src_name.clone(), ev.name.clone()))
+                    {
                         continue;
                     }
                     let event_id = event_map
@@ -1774,7 +1807,10 @@ impl Analyzer {
                     if !state.is_terminal && !states_with_transitions.contains(&state.name) {
                         return Err(SemaError::new(
                             ErrorKind::SmUnhandledEvent,
-                            format!("non-terminal state '{}' has no outgoing transitions", state.name),
+                            format!(
+                                "non-terminal state '{}' has no outgoing transitions",
+                                state.name
+                            ),
                         ));
                     }
                 }
@@ -1812,7 +1848,9 @@ impl Analyzer {
 
                 // Check each dst field without a default value is assigned
                 for field in &dst_state.fields {
-                    if field.default_value.is_none() && !assigned_fields.contains(field.name.as_str()) {
+                    if field.default_value.is_none()
+                        && !assigned_fields.contains(field.name.as_str())
+                    {
                         return Err(SemaError::new(
                             ErrorKind::SmMissingAssignment,
                             format!(
@@ -1847,10 +1885,7 @@ impl Analyzer {
     /// Resolve a type expression used in state fields (simplified: only Named types).
     /// Unlike `resolve_named_type`, this allows `DeclKind::StateMachine` references
     /// (child SM fields in parent SM states).
-    fn resolve_state_field_type(
-        &mut self,
-        texpr: &AstTypeExpr,
-    ) -> SemaResult<SemanticType> {
+    fn resolve_state_field_type(&mut self, texpr: &AstTypeExpr) -> SemaResult<SemanticType> {
         match texpr {
             AstTypeExpr::Named { name, span } => {
                 // Try resolve_named_type first; if it fails because the type is a
@@ -1860,8 +1895,10 @@ impl Analyzer {
                     Ok(ty) => Ok(ty),
                     Err(e) if e.kind == ErrorKind::TypeMismatch => {
                         // Check if this is a state machine type
-                        if let Some(ResolvedType::UserDefined(resolved_name, DeclKind::StateMachine)) =
-                            self.registry.resolve_type_name(name)
+                        if let Some(ResolvedType::UserDefined(
+                            resolved_name,
+                            DeclKind::StateMachine,
+                        )) = self.registry.resolve_type_name(name)
                         {
                             // State machine types are valid in state field context
                             Ok(SemanticType::PacketRef {
@@ -1875,9 +1912,7 @@ impl Analyzer {
                     Err(e) => Err(e),
                 }
             }
-            AstTypeExpr::Bits { width, .. } => Ok(SemanticType::Bits {
-                width_bits: *width,
-            }),
+            AstTypeExpr::Bits { width, .. } => Ok(SemanticType::Bits { width_bits: *width }),
             AstTypeExpr::Array {
                 element_type,
                 count,
@@ -1901,7 +1936,7 @@ impl Analyzer {
                     count_expr,
                     within_expr: sem_within,
                 })
-            },
+            }
             _ => {
                 let (ty, _) = self.resolve_type_expr(texpr)?;
                 Ok(ty)
@@ -1969,10 +2004,7 @@ fn resolve_event_params(expr: &mut SemanticExpr, param_names: &[String]) {
 
 /// Resolve empty `sm_name`/`sm_id` in InState/All expressions by looking up
 /// the referenced field's child SM type from the source states.
-fn resolve_guard_sm_names(
-    expr: &mut SemanticExpr,
-    states: &[SemanticState],
-) {
+fn resolve_guard_sm_names(expr: &mut SemanticExpr, states: &[SemanticState]) {
     match expr {
         SemanticExpr::InState {
             expr: inner,
@@ -2019,10 +2051,7 @@ fn resolve_guard_sm_names(
 
 /// Extract the child SM name from a field reference expression by looking
 /// up the field in the state definitions.
-fn extract_child_sm_name(
-    expr: &SemanticExpr,
-    states: &[SemanticState],
-) -> Option<String> {
+fn extract_child_sm_name(expr: &SemanticExpr, states: &[SemanticState]) -> Option<String> {
     if let SemanticExpr::TransitionPeerRef { reference } = expr {
         if let Some(field_name) = reference.path.first() {
             // Search all states for this field
@@ -2133,9 +2162,7 @@ fn collect_type_expr_refs(texpr: &AstTypeExpr, out: &mut Vec<String>) {
             // Named types are resolved through the registry, not field refs
         }
         AstTypeExpr::Bits { .. } => {}
-        AstTypeExpr::Bytes {
-            size_expr, ..
-        } => {
+        AstTypeExpr::Bytes { size_expr, .. } => {
             if let Some(expr) = size_expr {
                 collect_expr_refs(expr, out);
             }

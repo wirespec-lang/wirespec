@@ -213,10 +213,7 @@ fn extract_module_from_import(module_path: &str, _has_name: bool) -> String {
 
 /// Find a module file by dotted name in include paths.
 /// `quic.varint` -> search for `quic/varint.wspec` then `quic/varint.wire` in each path.
-pub fn find_module(
-    module_name: &str,
-    search_paths: &[PathBuf],
-) -> Result<PathBuf, ResolveError> {
+pub fn find_module(module_name: &str, search_paths: &[PathBuf]) -> Result<PathBuf, ResolveError> {
     let rel_path_wspec = module_name.replace('.', "/") + ".wspec";
     let rel_path_wire = module_name.replace('.', "/") + ".wire";
 

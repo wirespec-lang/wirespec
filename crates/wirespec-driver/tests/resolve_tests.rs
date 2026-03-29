@@ -106,16 +106,8 @@ fn resolve_deduplicates_shared_deps() {
     // a imports b and c; both b and c import d -- d should appear once
     let dir = TempDir::new().unwrap();
     write_file(&dir, "d.wspec", "module d\npacket D { x: u8 }");
-    write_file(
-        &dir,
-        "b.wspec",
-        "module b\nimport d.D\npacket B { x: D }",
-    );
-    write_file(
-        &dir,
-        "c.wspec",
-        "module c\nimport d.D\npacket C { x: D }",
-    );
+    write_file(&dir, "b.wspec", "module b\nimport d.D\npacket B { x: D }");
+    write_file(&dir, "c.wspec", "module c\nimport d.D\npacket C { x: D }");
     let entry = write_file(
         &dir,
         "a.wspec",

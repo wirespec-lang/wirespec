@@ -6,7 +6,7 @@ use wirespec_sema::types::Endianness;
 #[test]
 fn no_bit_fields_no_groups() {
     let fields = vec![
-        mock_layout_field("x", None, "scope"),  // u8, no bit_width
+        mock_layout_field("x", None, "scope"), // u8, no bit_width
         mock_layout_field("y", None, "scope"),
     ];
     let (groups, updated) = detect_bitgroups(&fields, "scope", Endianness::Big).unwrap();
@@ -63,7 +63,7 @@ fn non_bit_field_breaks_group() {
     let fields = vec![
         mock_layout_field("a", Some(4), "scope"),
         mock_layout_field("b", Some(4), "scope"),
-        mock_layout_field("middle", None, "scope"),  // u16 breaks
+        mock_layout_field("middle", None, "scope"), // u16 breaks
         mock_layout_field("c", Some(8), "scope"),
     ];
     let (groups, _) = detect_bitgroups(&fields, "scope", Endianness::Big).unwrap();

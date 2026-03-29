@@ -5,17 +5,21 @@
 
 use wirespec_codec::ir;
 use wirespec_codec::lower;
-use wirespec_sema::{analyze, ComplianceProfile};
+use wirespec_sema::{ComplianceProfile, analyze};
 use wirespec_syntax::parse;
 
 fn codec_file(path: &str) -> ir::CodecModule {
     let source =
         std::fs::read_to_string(path).unwrap_or_else(|e| panic!("Failed to read {path}: {e}"));
     let ast = parse(&source).unwrap_or_else(|e| panic!("Failed to parse {path}: {e}"));
-    let sem = analyze(&ast, ComplianceProfile::Phase2ExtendedCurrent, &Default::default())
-        .unwrap_or_else(|e| panic!("Failed to analyze {path}: {e}"));
-    let layout = wirespec_layout::lower(&sem)
-        .unwrap_or_else(|e| panic!("Failed to layout {path}: {e}"));
+    let sem = analyze(
+        &ast,
+        ComplianceProfile::Phase2ExtendedCurrent,
+        &Default::default(),
+    )
+    .unwrap_or_else(|e| panic!("Failed to analyze {path}: {e}"));
+    let layout =
+        wirespec_layout::lower(&sem).unwrap_or_else(|e| panic!("Failed to layout {path}: {e}"));
     lower(&layout).unwrap_or_else(|e| panic!("Failed to codec {path}: {e}"))
 }
 

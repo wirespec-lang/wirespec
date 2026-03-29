@@ -3,17 +3,20 @@
 //! Files that use `import` are marked `#[ignore]` because the sema crate
 //! does not yet include a module resolver.
 
-use wirespec_sema::analyze;
 use wirespec_sema::ComplianceProfile;
+use wirespec_sema::analyze;
 use wirespec_syntax::parse;
 
 fn analyze_file(path: &str) -> Result<wirespec_sema::SemanticModule, String> {
-    let source = std::fs::read_to_string(path)
-        .map_err(|e| format!("failed to read {path}: {e}"))?;
-    let ast = parse(&source)
-        .map_err(|e| format!("parse error in {path}: {e}"))?;
-    analyze(&ast, ComplianceProfile::Phase2ExtendedCurrent, &Default::default())
-        .map_err(|e| format!("sema error in {path}: {e}"))
+    let source =
+        std::fs::read_to_string(path).map_err(|e| format!("failed to read {path}: {e}"))?;
+    let ast = parse(&source).map_err(|e| format!("parse error in {path}: {e}"))?;
+    analyze(
+        &ast,
+        ComplianceProfile::Phase2ExtendedCurrent,
+        &Default::default(),
+    )
+    .map_err(|e| format!("sema error in {path}: {e}"))
 }
 
 // ── Files without imports (should work) ──
@@ -23,7 +26,10 @@ fn corpus_quic_varint() {
     let sem = analyze_file("../../protospec/examples/quic/varint.wire")
         .expect("quic/varint.wire should analyze successfully");
     assert_eq!(sem.module_name, "quic.varint");
-    assert!(!sem.varints.is_empty(), "should contain at least one varint");
+    assert!(
+        !sem.varints.is_empty(),
+        "should contain at least one varint"
+    );
 }
 
 #[test]
@@ -82,7 +88,10 @@ fn corpus_mqtt() {
     let sem = analyze_file("../../protospec/examples/mqtt/mqtt.wire")
         .expect("mqtt/mqtt.wire should analyze successfully");
     assert_eq!(sem.module_name, "mqtt");
-    assert!(!sem.capsules.is_empty(), "should contain MqttPacket capsule");
+    assert!(
+        !sem.capsules.is_empty(),
+        "should contain MqttPacket capsule"
+    );
 }
 
 // ── Files that use `import` (no resolver yet) ──

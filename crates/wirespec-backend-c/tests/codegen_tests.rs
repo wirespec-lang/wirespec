@@ -5,8 +5,12 @@ use wirespec_backend_c::*;
 
 fn generate_c(src: &str) -> (String, String) {
     let ast = wirespec_syntax::parse(src).unwrap();
-    let sem =
-        wirespec_sema::analyze(&ast, wirespec_sema::ComplianceProfile::default(), &Default::default()).unwrap();
+    let sem = wirespec_sema::analyze(
+        &ast,
+        wirespec_sema::ComplianceProfile::default(),
+        &Default::default(),
+    )
+    .unwrap();
     let layout = wirespec_layout::lower(&sem).unwrap();
     let codec = wirespec_codec::lower(&layout).unwrap();
 
@@ -23,18 +27,19 @@ fn generate_c(src: &str) -> (String, String) {
     };
 
     let lowered = backend.lower(&codec, &ctx).unwrap();
-    (lowered.header_content.clone(), lowered.source_content.clone())
+    (
+        lowered.header_content.clone(),
+        lowered.source_content.clone(),
+    )
 }
 
 #[test]
 fn codegen_simple_packet_header() {
-    let (header, _) =
-        generate_c("packet UdpDatagram { src_port: u16, dst_port: u16, length: u16, checksum: u16 }");
-    assert!(header.contains("typedef struct"), "missing typedef struct");
-    assert!(
-        header.contains("test_udp_datagram_t"),
-        "missing type name"
+    let (header, _) = generate_c(
+        "packet UdpDatagram { src_port: u16, dst_port: u16, length: u16, checksum: u16 }",
     );
+    assert!(header.contains("typedef struct"), "missing typedef struct");
+    assert!(header.contains("test_udp_datagram_t"), "missing type name");
     assert!(
         header.contains("uint16_t src_port"),
         "missing src_port field"
@@ -60,10 +65,7 @@ fn codegen_simple_packet_source() {
         source.contains("wirespec_cursor_read_u16be"),
         "missing u16be cursor read"
     );
-    assert!(
-        source.contains("wirespec_write_u8"),
-        "missing u8 write"
-    );
+    assert!(source.contains("wirespec_write_u8"), "missing u8 write");
     assert!(
         source.contains("wirespec_write_u16be"),
         "missing u16be write"
@@ -81,16 +83,12 @@ fn codegen_packet_with_require() {
 
 #[test]
 fn codegen_packet_with_optional() {
-    let (header, source) =
-        generate_c("packet P { flags: u8, extra: if flags & 0x01 { u16 } }");
+    let (header, source) = generate_c("packet P { flags: u8, extra: if flags & 0x01 { u16 } }");
     assert!(
         header.contains("bool has_extra"),
         "missing has_extra flag in header"
     );
-    assert!(
-        source.contains("has_extra"),
-        "missing has_extra in source"
-    );
+    assert!(source.contains("has_extra"), "missing has_extra in source");
 }
 
 #[test]
@@ -156,8 +154,7 @@ fn codegen_capsule() {
 
 #[test]
 fn codegen_derived_field() {
-    let (header, _) =
-        generate_c("packet P { flags: u8, let is_set: bool = (flags & 1) != 0 }");
+    let (header, _) = generate_c("packet P { flags: u8, let is_set: bool = (flags & 1) != 0 }");
     assert!(
         header.contains("bool is_set"),
         "missing derived field in header"
@@ -181,8 +178,12 @@ fn codegen_enum() {
 #[test]
 fn codegen_artifact_emission() {
     let ast = wirespec_syntax::parse("packet P { x: u8 }").unwrap();
-    let sem =
-        wirespec_sema::analyze(&ast, wirespec_sema::ComplianceProfile::default(), &Default::default()).unwrap();
+    let sem = wirespec_sema::analyze(
+        &ast,
+        wirespec_sema::ComplianceProfile::default(),
+        &Default::default(),
+    )
+    .unwrap();
     let layout = wirespec_layout::lower(&sem).unwrap();
     let codec = wirespec_codec::lower(&layout).unwrap();
 
@@ -278,10 +279,19 @@ fn codegen_frame_default_case() {
 fn codegen_varint_prefix_match() {
     let src = r#"type VarInt = { prefix: bits[2], value: match prefix { 0b00 => bits[6], 0b01 => bits[14], 0b10 => bits[30], 0b11 => bits[62] } }"#;
     let (header, source) = generate_c(src);
-    assert!(header.contains("typedef uint64_t"), "missing VarInt typedef");
+    assert!(
+        header.contains("typedef uint64_t"),
+        "missing VarInt typedef"
+    );
     assert!(header.contains("_parse"), "missing parse declaration");
-    assert!(header.contains("_serialize"), "missing serialize declaration");
-    assert!(header.contains("_wire_size"), "missing wire_size declaration");
+    assert!(
+        header.contains("_serialize"),
+        "missing serialize declaration"
+    );
+    assert!(
+        header.contains("_wire_size"),
+        "missing wire_size declaration"
+    );
     assert!(source.contains("prefix"), "missing prefix in parse");
 }
 
@@ -289,7 +299,10 @@ fn codegen_varint_prefix_match() {
 fn codegen_cont_varint() {
     let src = r#"type MqttLen = varint { continuation_bit: msb, value_bits: 7, max_bytes: 4, byte_order: little }"#;
     let (header, source) = generate_c(src);
-    assert!(header.contains("typedef uint64_t"), "missing VarInt typedef");
+    assert!(
+        header.contains("typedef uint64_t"),
+        "missing VarInt typedef"
+    );
     assert!(
         source.contains("0x80") || source.contains("0x7F") || source.contains("0x7f"),
         "missing continuation bit mask"
@@ -331,7 +344,10 @@ fn codegen_enum_typedef_define() {
     let src = "enum E: u8 { A = 0, B = 1 }\npacket P { x: u8 }";
     let (header, _) = generate_c(src);
     assert!(header.contains("typedef"), "missing typedef for enum");
-    assert!(header.contains("#define"), "missing #define for enum members");
+    assert!(
+        header.contains("#define"),
+        "missing #define for enum members"
+    );
 }
 
 // ── State machine codegen tests ──
@@ -423,10 +439,7 @@ fn codegen_state_machine_header() {
     );
 
     // Init helper
-    assert!(
-        header.contains("_init"),
-        "missing init helper function"
-    );
+    assert!(header.contains("_init"), "missing init helper function");
     assert!(
         header.contains("static inline void"),
         "init helper should be static inline"
@@ -505,10 +518,7 @@ fn codegen_state_machine_with_guard() {
         source.contains("dst.a.count"),
         "action should set dst.a.count"
     );
-    assert!(
-        source.contains("src_tag"),
-        "dispatch should use src_tag"
-    );
+    assert!(source.contains("src_tag"), "dispatch should use src_tag");
     assert!(
         source.contains("WIRESPEC_OK"),
         "dispatch should return WIRESPEC_OK"
@@ -525,7 +535,10 @@ fn codegen_state_machine_with_guard() {
 fn codegen_enum_little_endian() {
     let src = "@endian little\nmodule test\nenum E: u16 { A = 1 }\npacket P { code: E }";
     let (_, source) = generate_c(src);
-    assert!(source.contains("read_u16le"), "enum field should use read_u16le, not read_u16be");
+    assert!(
+        source.contains("read_u16le"),
+        "enum field should use read_u16le, not read_u16be"
+    );
 }
 
 // ── Range pattern safeguard tests ──
@@ -551,8 +564,12 @@ fn codegen_frame_range_pattern() {
 #[test]
 fn codegen_fuzz_harness() {
     let ast = wirespec_syntax::parse("packet P { x: u8, y: u16 }").unwrap();
-    let sem =
-        wirespec_sema::analyze(&ast, wirespec_sema::ComplianceProfile::default(), &Default::default()).unwrap();
+    let sem = wirespec_sema::analyze(
+        &ast,
+        wirespec_sema::ComplianceProfile::default(),
+        &Default::default(),
+    )
+    .unwrap();
     let layout = wirespec_layout::lower(&sem).unwrap();
     let codec = wirespec_codec::lower(&layout).unwrap();
 
@@ -563,7 +580,9 @@ fn codegen_fuzz_harness() {
         source_prefixes: Default::default(),
         compliance_profile: "phase2_extended_current".into(),
         common_options: CommonOptions::default(),
-        target_options: Box::new(CBackendOptions { emit_fuzz_harness: true }),
+        target_options: Box::new(CBackendOptions {
+            emit_fuzz_harness: true,
+        }),
         checksum_bindings: Arc::new(checksum_binding::CChecksumBindings),
         is_entry_module: true,
     };
@@ -574,19 +593,35 @@ fn codegen_fuzz_harness() {
     assert_eq!(sink.artifacts.len(), 3, "sink should have 3 artifacts");
 
     let fuzz_content = String::from_utf8_lossy(&sink.artifacts[2].1);
-    assert!(fuzz_content.contains("LLVMFuzzerTestOneInput"), "missing LLVMFuzzerTestOneInput");
-    assert!(fuzz_content.contains("__builtin_trap"), "missing __builtin_trap");
+    assert!(
+        fuzz_content.contains("LLVMFuzzerTestOneInput"),
+        "missing LLVMFuzzerTestOneInput"
+    );
+    assert!(
+        fuzz_content.contains("__builtin_trap"),
+        "missing __builtin_trap"
+    );
     assert!(fuzz_content.contains("memcmp"), "missing memcmp");
-    assert!(fuzz_content.contains("test_p_parse"), "missing parse function name");
-    assert!(fuzz_content.contains("test_p_serialize"), "missing serialize function name");
+    assert!(
+        fuzz_content.contains("test_p_parse"),
+        "missing parse function name"
+    );
+    assert!(
+        fuzz_content.contains("test_p_serialize"),
+        "missing serialize function name"
+    );
     assert!(fuzz_content.contains("test_p_t"), "missing type name");
 }
 
 #[test]
 fn codegen_no_fuzz_by_default() {
     let ast = wirespec_syntax::parse("packet P { x: u8 }").unwrap();
-    let sem =
-        wirespec_sema::analyze(&ast, wirespec_sema::ComplianceProfile::default(), &Default::default()).unwrap();
+    let sem = wirespec_sema::analyze(
+        &ast,
+        wirespec_sema::ComplianceProfile::default(),
+        &Default::default(),
+    )
+    .unwrap();
     let layout = wirespec_layout::lower(&sem).unwrap();
     let codec = wirespec_codec::lower(&layout).unwrap();
 
@@ -604,8 +639,16 @@ fn codegen_no_fuzz_by_default() {
 
     let mut sink = MemorySink::new();
     let output = backend.lower_and_emit(&codec, &ctx, &mut sink).unwrap();
-    assert_eq!(output.artifacts.len(), 2, "should emit only .h + .c (no fuzz)");
-    assert_eq!(sink.artifacts.len(), 2, "sink should have 2 artifacts (no fuzz)");
+    assert_eq!(
+        output.artifacts.len(),
+        2,
+        "should emit only .h + .c (no fuzz)"
+    );
+    assert_eq!(
+        sink.artifacts.len(),
+        2,
+        "sink should have 2 artifacts (no fuzz)"
+    );
 }
 
 #[test]
@@ -613,8 +656,12 @@ fn codegen_fuzz_targets_frame_first() {
     let src = r#"frame F = match tag: u8 { 0 => A {}, _ => B { data: bytes[remaining] } }
     packet P { x: u8 }"#;
     let ast = wirespec_syntax::parse(src).unwrap();
-    let sem =
-        wirespec_sema::analyze(&ast, wirespec_sema::ComplianceProfile::default(), &Default::default()).unwrap();
+    let sem = wirespec_sema::analyze(
+        &ast,
+        wirespec_sema::ComplianceProfile::default(),
+        &Default::default(),
+    )
+    .unwrap();
     let layout = wirespec_layout::lower(&sem).unwrap();
     let codec = wirespec_codec::lower(&layout).unwrap();
 
@@ -625,15 +672,26 @@ fn codegen_fuzz_targets_frame_first() {
         source_prefixes: Default::default(),
         compliance_profile: "phase2_extended_current".into(),
         common_options: CommonOptions::default(),
-        target_options: Box::new(CBackendOptions { emit_fuzz_harness: true }),
+        target_options: Box::new(CBackendOptions {
+            emit_fuzz_harness: true,
+        }),
         checksum_bindings: Arc::new(checksum_binding::CChecksumBindings),
         is_entry_module: true,
     };
 
     let lowered = Backend::lower(&backend, &codec, &ctx).unwrap();
-    let fuzz = lowered.fuzz_content.as_ref().expect("fuzz content should exist");
-    assert!(fuzz.contains("test_f_parse"), "should target frame F, not packet P");
-    assert!(fuzz.contains("test_f_serialize"), "should target frame F for serialize");
+    let fuzz = lowered
+        .fuzz_content
+        .as_ref()
+        .expect("fuzz content should exist");
+    assert!(
+        fuzz.contains("test_f_parse"),
+        "should target frame F, not packet P"
+    );
+    assert!(
+        fuzz.contains("test_f_serialize"),
+        "should target frame F for serialize"
+    );
     assert!(fuzz.contains("test_f_t"), "should use frame F type name");
 }
 
@@ -698,8 +756,10 @@ fn codegen_frame_varint_tag_parse() {
     let (_, source) = generate_c(src);
     // Should use VarInt parse, not read_u8
     assert!(source.contains("var_int_parse_cursor"));
-    assert!(!source.contains("wirespec_cursor_read_u8(cur, &_tag_val)")
-            || source.contains("var_int_parse_cursor"));
+    assert!(
+        !source.contains("wirespec_cursor_read_u8(cur, &_tag_val)")
+            || source.contains("var_int_parse_cursor")
+    );
 }
 
 #[test]

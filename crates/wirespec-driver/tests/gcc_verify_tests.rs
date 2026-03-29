@@ -12,7 +12,8 @@ use wirespec_syntax::parse;
 
 fn generate_c(src: &str, prefix: &str) -> (String, String) {
     let ast = parse(src).unwrap();
-    let sem = wirespec_sema::analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
+    let sem =
+        wirespec_sema::analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
     let layout = wirespec_layout::lower(&sem).unwrap();
     let codec = wirespec_codec::lower(&layout).unwrap();
 
@@ -28,15 +29,17 @@ fn generate_c(src: &str, prefix: &str) -> (String, String) {
         is_entry_module: true,
     };
     let lowered = Backend::lower(&backend, &codec, &ctx).unwrap();
-    (lowered.header_content.clone(), lowered.source_content.clone())
+    (
+        lowered.header_content.clone(),
+        lowered.source_content.clone(),
+    )
 }
 
 fn write_and_gcc(header: &str, source: &str, prefix: &str) -> (bool, String) {
     let dir = std::path::PathBuf::from("/tmp/wirespec-verify");
     std::fs::create_dir_all(&dir).unwrap();
 
-    let runtime_dir =
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../runtime");
+    let runtime_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../runtime");
 
     let h_path = dir.join(format!("{prefix}.h"));
     let c_path = dir.join(format!("{prefix}.c"));
@@ -234,7 +237,10 @@ fn gcc_verify_all() {
     let mut failures: Vec<(String, String)> = Vec::new();
 
     for tc in &cases {
-        eprintln!("=== Generating C for: {} (prefix={}) ===", tc.name, tc.prefix);
+        eprintln!(
+            "=== Generating C for: {} (prefix={}) ===",
+            tc.name, tc.prefix
+        );
         let (header, source) = generate_c(tc.source, tc.prefix);
 
         eprintln!("--- Header ({}.h) ---", tc.prefix);
@@ -254,7 +260,12 @@ fn gcc_verify_all() {
     }
 
     eprintln!("\n========================================");
-    eprintln!("SUMMARY: {} passed, {} failed out of {} total", pass_count, fail_count, cases.len());
+    eprintln!(
+        "SUMMARY: {} passed, {} failed out of {} total",
+        pass_count,
+        fail_count,
+        cases.len()
+    );
     eprintln!("========================================\n");
 
     if !failures.is_empty() {

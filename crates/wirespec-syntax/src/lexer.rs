@@ -74,12 +74,12 @@ pub enum TokenKind {
     Dot,
     DotDot,
     DotDotEq,
-    Arrow,       // ->
-    FatArrow,    // =>
-    Assign,      // =
-    PlusAssign,  // +=
-    At,          // @
-    LArrow,      // <-
+    Arrow,      // ->
+    FatArrow,   // =>
+    Assign,     // =
+    PlusAssign, // +=
+    At,         // @
+    LArrow,     // <-
 
     // Arithmetic
     Plus,
@@ -609,7 +609,10 @@ mod tests {
         let kinds = tok_kinds(r#""hello world""#);
         assert_eq!(
             kinds,
-            vec![TokenKind::StringLit("hello world".to_string()), TokenKind::Eof]
+            vec![
+                TokenKind::StringLit("hello world".to_string()),
+                TokenKind::Eof
+            ]
         );
     }
 
@@ -656,19 +659,13 @@ mod tests {
     #[test]
     fn binary_underscore() {
         let kinds = tok_kinds("0b1010_0101");
-        assert_eq!(
-            kinds,
-            vec![TokenKind::Integer(0b10100101), TokenKind::Eof]
-        );
+        assert_eq!(kinds, vec![TokenKind::Integer(0b10100101), TokenKind::Eof]);
     }
 
     #[test]
     fn decimal_underscore() {
         let kinds = tok_kinds("1_000_000");
-        assert_eq!(
-            kinds,
-            vec![TokenKind::Integer(1000000), TokenKind::Eof]
-        );
+        assert_eq!(kinds, vec![TokenKind::Integer(1000000), TokenKind::Eof]);
     }
 
     #[test]
@@ -685,10 +682,7 @@ mod tests {
         let kinds = tok_kinds(r#""\n\t\\\"" "#);
         assert_eq!(
             kinds,
-            vec![
-                TokenKind::StringLit("\n\t\\\"".to_string()),
-                TokenKind::Eof,
-            ]
+            vec![TokenKind::StringLit("\n\t\\\"".to_string()), TokenKind::Eof,]
         );
     }
 
@@ -696,9 +690,6 @@ mod tests {
     fn consecutive_operators() {
         let kinds = tok_kinds(">>>=");
         // >> > =
-        assert_eq!(
-            kinds,
-            vec![TokenKind::Shr, TokenKind::Ge, TokenKind::Eof]
-        );
+        assert_eq!(kinds, vec![TokenKind::Shr, TokenKind::Ge, TokenKind::Eof]);
     }
 }

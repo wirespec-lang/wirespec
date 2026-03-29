@@ -1,4 +1,4 @@
-use wirespec_sema::{analyze, ComplianceProfile};
+use wirespec_sema::{ComplianceProfile, analyze};
 use wirespec_syntax::parse;
 
 fn default_profile() -> ComplianceProfile {
@@ -67,10 +67,7 @@ fn endianness_explicit_override() {
     if let wirespec_sema::types::SemanticType::Primitive { endianness, .. } =
         &sem.packets[0].fields[0].ty
     {
-        assert_eq!(
-            *endianness,
-            Some(wirespec_sema::types::Endianness::Little)
-        );
+        assert_eq!(*endianness, Some(wirespec_sema::types::Endianness::Little));
     } else {
         panic!("expected Primitive type");
     }

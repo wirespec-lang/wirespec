@@ -31,7 +31,10 @@ fn resolve_enum_fields(fields: &[CodecField], enums: &[SemanticEnum]) -> Vec<Cod
                         f2.wire_type = underlying_wt;
                         f2.ref_type_name = None;
                         // Propagate endianness from the enum's underlying type
-                        if let wirespec_sema::types::SemanticType::Primitive { endianness, .. } = &e.underlying_type {
+                        if let wirespec_sema::types::SemanticType::Primitive {
+                            endianness, ..
+                        } = &e.underlying_type
+                        {
                             f2.endianness = *endianness;
                         }
                         return f2;
@@ -80,10 +83,9 @@ pub fn emit_source(module: &CodecModule, prefix: &str) -> String {
         let tname = c_type_name(prefix, &packet.name);
         let cursor_fn = c_func_name(prefix, &packet.name, "parse_cursor");
         let has_cksum = packet.checksum_plan.is_some()
-            && packet
-                .checksum_plan
-                .as_ref()
-                .map_or(false, |p| p.input_model == ChecksumInputModel::RecomputeWithSkippedField);
+            && packet.checksum_plan.as_ref().map_or(false, |p| {
+                p.input_model == ChecksumInputModel::RecomputeWithSkippedField
+            });
         if has_cksum {
             out.push_str(&format!(
                 "static wirespec_result_t {cursor_fn}(wirespec_cursor_t *cur, {tname} *out, size_t *_cksum_offset_out);\n"
@@ -156,10 +158,9 @@ fn emit_packet_parse(out: &mut String, packet: &CodecPacket, prefix: &str, enums
 
     let has_cksum = packet.checksum_plan.is_some();
     let needs_offset = has_cksum
-        && packet
-            .checksum_plan
-            .as_ref()
-            .map_or(false, |p| p.input_model == ChecksumInputModel::RecomputeWithSkippedField);
+        && packet.checksum_plan.as_ref().map_or(false, |p| {
+            p.input_model == ChecksumInputModel::RecomputeWithSkippedField
+        });
 
     // Static cursor-based parse
     if needs_offset {
@@ -234,7 +235,12 @@ fn emit_packet_parse(out: &mut String, packet: &CodecPacket, prefix: &str, enums
     out.push_str("}\n\n");
 }
 
-fn emit_packet_serialize(out: &mut String, packet: &CodecPacket, prefix: &str, enums: &[SemanticEnum]) {
+fn emit_packet_serialize(
+    out: &mut String,
+    packet: &CodecPacket,
+    prefix: &str,
+    enums: &[SemanticEnum],
+) {
     let tname = c_type_name(prefix, &packet.name);
     let fn_name = c_func_name(prefix, &packet.name, "serialize");
     let resolved_fields = resolve_enum_fields(&packet.fields, enums);
@@ -261,13 +267,7 @@ fn emit_packet_serialize(out: &mut String, packet: &CodecPacket, prefix: &str, e
             &cksum_plan.field_name,
         );
     } else {
-        serialize_emit::emit_serialize_items(
-            out,
-            &resolved_fields,
-            &packet.items,
-            prefix,
-            "    ",
-        );
+        serialize_emit::emit_serialize_items(out, &resolved_fields, &packet.items, prefix, "    ");
     }
 
     // Checksum compute after all fields written
@@ -281,14 +281,17 @@ fn emit_packet_serialize(out: &mut String, packet: &CodecPacket, prefix: &str, e
     out.push_str("}\n\n");
 }
 
-fn emit_packet_serialized_len(out: &mut String, packet: &CodecPacket, prefix: &str, enums: &[SemanticEnum]) {
+fn emit_packet_serialized_len(
+    out: &mut String,
+    packet: &CodecPacket,
+    prefix: &str,
+    enums: &[SemanticEnum],
+) {
     let tname = c_type_name(prefix, &packet.name);
     let fn_name = c_func_name(prefix, &packet.name, "serialized_len");
     let resolved_fields = resolve_enum_fields(&packet.fields, enums);
 
-    out.push_str(&format!(
-        "size_t {fn_name}(const {tname} *val) {{\n"
-    ));
+    out.push_str(&format!("size_t {fn_name}(const {tname} *val) {{\n"));
     out.push_str("    (void)val;\n");
     out.push_str("    size_t len = 0;\n");
 
@@ -357,7 +360,12 @@ fn emit_frame_parse(out: &mut String, frame: &CodecFrame, prefix: &str, _enums: 
     out.push_str("}\n\n");
 }
 
-fn emit_frame_serialize(out: &mut String, frame: &CodecFrame, prefix: &str, _enums: &[SemanticEnum]) {
+fn emit_frame_serialize(
+    out: &mut String,
+    frame: &CodecFrame,
+    prefix: &str,
+    _enums: &[SemanticEnum],
+) {
     let tname = c_type_name(prefix, &frame.name);
     let fn_name = c_func_name(prefix, &frame.name, "serialize");
 
@@ -375,14 +383,17 @@ fn emit_frame_serialize(out: &mut String, frame: &CodecFrame, prefix: &str, _enu
     out.push_str("}\n\n");
 }
 
-fn emit_frame_serialized_len(out: &mut String, frame: &CodecFrame, prefix: &str, _enums: &[SemanticEnum]) {
+fn emit_frame_serialized_len(
+    out: &mut String,
+    frame: &CodecFrame,
+    prefix: &str,
+    _enums: &[SemanticEnum],
+) {
     let tname = c_type_name(prefix, &frame.name);
     let fn_name = c_func_name(prefix, &frame.name, "serialized_len");
     let tag_type = c_frame_tag_type(prefix, &frame.name);
 
-    out.push_str(&format!(
-        "size_t {fn_name}(const {tname} *val) {{\n"
-    ));
+    out.push_str(&format!("size_t {fn_name}(const {tname} *val) {{\n"));
     out.push_str("    (void)val;\n");
     out.push_str("    size_t len = 0;\n");
 
@@ -429,7 +440,12 @@ fn emit_frame_serialized_len(out: &mut String, frame: &CodecFrame, prefix: &str,
 
 // ── Capsule ──
 
-fn emit_capsule_parse(out: &mut String, capsule: &CodecCapsule, prefix: &str, _enums: &[SemanticEnum]) {
+fn emit_capsule_parse(
+    out: &mut String,
+    capsule: &CodecCapsule,
+    prefix: &str,
+    _enums: &[SemanticEnum],
+) {
     let tname = c_type_name(prefix, &capsule.name);
     let cursor_fn = c_func_name(prefix, &capsule.name, "parse_cursor");
     let public_fn = c_func_name(prefix, &capsule.name, "parse");
@@ -462,7 +478,12 @@ fn emit_capsule_parse(out: &mut String, capsule: &CodecCapsule, prefix: &str, _e
     out.push_str("}\n\n");
 }
 
-fn emit_capsule_serialize(out: &mut String, capsule: &CodecCapsule, prefix: &str, _enums: &[SemanticEnum]) {
+fn emit_capsule_serialize(
+    out: &mut String,
+    capsule: &CodecCapsule,
+    prefix: &str,
+    _enums: &[SemanticEnum],
+) {
     let tname = c_type_name(prefix, &capsule.name);
     let fn_name = c_func_name(prefix, &capsule.name, "serialize");
 
@@ -510,13 +531,16 @@ fn emit_capsule_serialize(out: &mut String, capsule: &CodecCapsule, prefix: &str
     out.push_str("}\n\n");
 }
 
-fn emit_capsule_serialized_len(out: &mut String, capsule: &CodecCapsule, prefix: &str, _enums: &[SemanticEnum]) {
+fn emit_capsule_serialized_len(
+    out: &mut String,
+    capsule: &CodecCapsule,
+    prefix: &str,
+    _enums: &[SemanticEnum],
+) {
     let tname = c_type_name(prefix, &capsule.name);
     let fn_name = c_func_name(prefix, &capsule.name, "serialized_len");
 
-    out.push_str(&format!(
-        "size_t {fn_name}(const {tname} *val) {{\n"
-    ));
+    out.push_str(&format!("size_t {fn_name}(const {tname} *val) {{\n"));
     out.push_str("    (void)val;\n");
     out.push_str("    size_t len = 0;\n");
 
@@ -641,7 +665,15 @@ fn emit_sm_dispatch(out: &mut String, sm: &SemanticStateMachine, prefix: &str) {
 
             // Delegate: child SM dispatch
             if let Some(ref delegate) = t.delegate {
-                emit_delegate(out, delegate, sm, &expr_ctx, prefix, &src_snake, "            ");
+                emit_delegate(
+                    out,
+                    delegate,
+                    sm,
+                    &expr_ctx,
+                    prefix,
+                    &src_snake,
+                    "            ",
+                );
             }
 
             out.push_str("            *sm = dst;\n");
@@ -766,12 +798,7 @@ fn emit_guard(out: &mut String, guard: &SemanticExpr, ctx: &SmExprContext, inden
 
 /// Emit an action assignment. If the value is a `Fill` expression, emit a
 /// for-loop instead of a simple assignment.
-fn emit_action(
-    out: &mut String,
-    action: &SemanticAction,
-    ctx: &SmExprContext,
-    indent: &str,
-) {
+fn emit_action(out: &mut String, action: &SemanticAction, ctx: &SmExprContext, indent: &str) {
     match &action.value {
         SemanticExpr::Fill { value, count } => {
             let target_c = crate::expr::sema_expr_to_c(&action.target, ctx);
@@ -789,25 +816,26 @@ fn emit_action(
             let op = &action.op;
             // Check if the target is an array field — C can't assign arrays
             // directly, so use memcpy instead.
-            let is_array_field = if let SemanticExpr::TransitionPeerRef { reference } = &action.target {
-                if let Some(field_name) = reference.path.first() {
-                    ctx.sm.map_or(false, |sm| {
-                        sm.states.iter().any(|s| {
-                            s.fields.iter().any(|f| {
-                                &f.name == field_name
-                                    && matches!(
-                                        &f.ty,
-                                        wirespec_sema::types::SemanticType::Array { .. }
-                                    )
+            let is_array_field =
+                if let SemanticExpr::TransitionPeerRef { reference } = &action.target {
+                    if let Some(field_name) = reference.path.first() {
+                        ctx.sm.map_or(false, |sm| {
+                            sm.states.iter().any(|s| {
+                                s.fields.iter().any(|f| {
+                                    &f.name == field_name
+                                        && matches!(
+                                            &f.ty,
+                                            wirespec_sema::types::SemanticType::Array { .. }
+                                        )
+                                })
                             })
                         })
-                    })
+                    } else {
+                        false
+                    }
                 } else {
                     false
-                }
-            } else {
-                false
-            };
+                };
             if is_array_field {
                 out.push_str(&format!(
                     "{indent}memcpy({target_c}, {value_c}, sizeof({target_c}));\n"
@@ -836,7 +864,9 @@ fn emit_delegate(
     // The delegate target is a TransitionPeerRef pointing to the child SM field.
     // E.g., TransitionPeerRef { peer: Src, path: ["field_name"] }
     let (field_name, child_sm_name) = match &delegate.target {
-        SemanticExpr::TransitionPeerRef { reference } if reference.peer == TransitionPeerKind::Src => {
+        SemanticExpr::TransitionPeerRef { reference }
+            if reference.peer == TransitionPeerKind::Src =>
+        {
             if let Some(fname) = reference.path.first() {
                 // Look up the field in the source state to find the child SM type
                 let child_name = sm
@@ -866,7 +896,9 @@ fn emit_delegate(
         let sm_snake = to_snake_case(&sm.name);
         let sm_upper = sm_snake.to_uppercase();
 
-        out.push_str(&format!("{indent}/* delegate: child dispatch to {child_sm} */\n"));
+        out.push_str(&format!(
+            "{indent}/* delegate: child dispatch to {child_sm} */\n"
+        ));
         out.push_str(&format!(
             "{indent}{child_tag_type} _old_tag = dst.{src_state_snake}.{field_snake}.tag;\n"
         ));
@@ -897,27 +929,19 @@ fn emit_delegate(
                 "{indent}if (dst.{src_state_snake}.{field_snake}.tag != _old_tag) {{\n"
             ));
             let event_type = format!("{prefix}_{sm_snake}_event_t");
-            out.push_str(&format!(
-                "{indent}    {event_type} _csc_ev;\n"
-            ));
+            out.push_str(&format!("{indent}    {event_type} _csc_ev;\n"));
             out.push_str(&format!(
                 "{indent}    _csc_ev.tag = {prefix_upper}_{sm_upper}_EVENT_CHILD_STATE_CHANGED;\n"
             ));
-            out.push_str(&format!(
-                "{indent}    *sm = dst;\n"
-            ));
+            out.push_str(&format!("{indent}    *sm = dst;\n"));
             out.push_str(&format!(
                 "{indent}    wirespec_result_t _csc_rc = {prefix}_{sm_snake}_dispatch(sm, &_csc_ev);\n"
             ));
             out.push_str(&format!(
                 "{indent}    if (_csc_rc != WIRESPEC_OK && _csc_rc != WIRESPEC_ERR_INVALID_STATE)\n"
             ));
-            out.push_str(&format!(
-                "{indent}        return _csc_rc;\n"
-            ));
-            out.push_str(&format!(
-                "{indent}    return WIRESPEC_OK;\n"
-            ));
+            out.push_str(&format!("{indent}        return _csc_rc;\n"));
+            out.push_str(&format!("{indent}    return WIRESPEC_OK;\n"));
             out.push_str(&format!("{indent}}}\n"));
         }
     } else {
@@ -971,9 +995,7 @@ fn emit_varint_prefix_match(out: &mut String, vi: &SemanticVarInt, prefix: &str)
         // First byte: mask off prefix bits to get value bits
         let first_mask = (1u64 << (8 - prefix_bits)) - 1;
         if total == 1 {
-            out.push_str(&format!(
-                "        *out = buf[0] & 0x{first_mask:X};\n"
-            ));
+            out.push_str(&format!("        *out = buf[0] & 0x{first_mask:X};\n"));
         } else {
             // Multi-byte: assemble value from all bytes
             out.push_str(&format!(
@@ -1023,9 +1045,15 @@ fn emit_varint_prefix_match(out: &mut String, vi: &SemanticVarInt, prefix: &str)
         if i == 0 {
             out.push_str(&format!("    if (val <= {}ULL) {{\n", branch.max_value));
         } else if !is_last {
-            out.push_str(&format!("    }} else if (val <= {}ULL) {{\n", branch.max_value));
+            out.push_str(&format!(
+                "    }} else if (val <= {}ULL) {{\n",
+                branch.max_value
+            ));
         } else {
-            out.push_str(&format!("    }} else if (val <= {}ULL) {{\n", branch.max_value));
+            out.push_str(&format!(
+                "    }} else if (val <= {}ULL) {{\n",
+                branch.max_value
+            ));
         }
 
         out.push_str(&format!(
@@ -1071,9 +1099,7 @@ fn emit_varint_prefix_match(out: &mut String, vi: &SemanticVarInt, prefix: &str)
     out.push_str("}\n\n");
 
     // ── Wire size ──
-    out.push_str(&format!(
-        "size_t\n{wire_size_fn}({tname} val)\n{{\n"
-    ));
+    out.push_str(&format!("size_t\n{wire_size_fn}({tname} val)\n{{\n"));
 
     for (i, branch) in vi.branches.iter().enumerate() {
         let total = branch.total_bytes;
@@ -1169,18 +1195,14 @@ fn emit_varint_continuation_bit(out: &mut String, vi: &SemanticVarInt, prefix: &
             ));
             out.push_str(&format!("        val >>= {value_bits};\n"));
             out.push_str("        if (val > 0) {\n");
-            out.push_str(&format!(
-                "            buf[i] |= 0x{cont_mask:02X};\n"
-            ));
+            out.push_str(&format!("            buf[i] |= 0x{cont_mask:02X};\n"));
             out.push_str("        }\n");
             out.push_str("        i++;\n");
             out.push_str("    } while (val > 0);\n");
             out.push_str("    *written = i;\n");
         }
         wirespec_sema::types::Endianness::Big => {
-            out.push_str(&format!(
-                "    uint8_t tmp[{max_bytes}];\n"
-            ));
+            out.push_str(&format!("    uint8_t tmp[{max_bytes}];\n"));
             out.push_str("    size_t n = 0;\n");
             out.push_str("    do {\n");
             out.push_str(&format!(
@@ -1195,9 +1217,7 @@ fn emit_varint_continuation_bit(out: &mut String, vi: &SemanticVarInt, prefix: &
             out.push_str("    for (size_t i = 0; i < n; i++) {\n");
             out.push_str("        buf[i] = tmp[n - 1 - i];\n");
             out.push_str("        if (i < n - 1) {\n");
-            out.push_str(&format!(
-                "            buf[i] |= 0x{cont_mask:02X};\n"
-            ));
+            out.push_str(&format!("            buf[i] |= 0x{cont_mask:02X};\n"));
             out.push_str("        }\n");
             out.push_str("    }\n");
             out.push_str("    *written = n;\n");
@@ -1208,11 +1228,11 @@ fn emit_varint_continuation_bit(out: &mut String, vi: &SemanticVarInt, prefix: &
     out.push_str("}\n\n");
 
     // ── Wire size ──
-    out.push_str(&format!(
-        "size_t\n{wire_size_fn}({tname} val)\n{{\n"
-    ));
+    out.push_str(&format!("size_t\n{wire_size_fn}({tname} val)\n{{\n"));
     out.push_str("    size_t n = 1;\n");
-    out.push_str(&format!("    while (val >> {value_bits}) {{ n++; val >>= {value_bits}; }}\n"));
+    out.push_str(&format!(
+        "    while (val >> {value_bits}) {{ n++; val >>= {value_bits}; }}\n"
+    ));
     out.push_str(&format!("    if (n > {max_bytes}) n = {max_bytes};\n"));
     out.push_str("    return n;\n");
     out.push_str("}\n\n");
@@ -1313,9 +1333,7 @@ fn emit_checksum_verify(out: &mut String, plan: &ChecksumPlan, indent: &str) {
                 "{indent}    if (out->{} != _computed)\n",
                 plan.field_name
             ));
-            out.push_str(&format!(
-                "{indent}        return WIRESPEC_ERR_CHECKSUM;\n"
-            ));
+            out.push_str(&format!("{indent}        return WIRESPEC_ERR_CHECKSUM;\n"));
             out.push_str(&format!("{indent}}}\n"));
         }
         None => {
@@ -1389,7 +1407,7 @@ pub fn emit_fuzz_source(module: &CodecModule, prefix: &str) -> Option<String> {
     let serialize_fn = format!("{prefix}_{type_snake}_serialize");
 
     Some(format!(
-r#"/* Auto-generated fuzz harness -- DO NOT EDIT */
+        r#"/* Auto-generated fuzz harness -- DO NOT EDIT */
 #include "{prefix}.h"
 #include <stdint.h>
 #include <stddef.h>
@@ -1424,5 +1442,6 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {{
 
     return 0;
 }}
-"#))
+"#
+    ))
 }

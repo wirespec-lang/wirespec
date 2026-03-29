@@ -32,8 +32,8 @@ fn generate_c_rust(wspec_path: &str) -> Option<(String, String)> {
     let source = fs::read_to_string(&full_path).ok()?;
 
     let ast = wirespec_syntax::parse(&source).ok()?;
-    let sem = wirespec_sema::analyze(&ast, ComplianceProfile::default(), &Default::default())
-        .ok()?;
+    let sem =
+        wirespec_sema::analyze(&ast, ComplianceProfile::default(), &Default::default()).ok()?;
     let layout = wirespec_layout::lower(&sem).ok()?;
     let codec = wirespec_codec::lower(&layout).ok()?;
 
@@ -52,7 +52,10 @@ fn generate_c_rust(wspec_path: &str) -> Option<(String, String)> {
         is_entry_module: true,
     };
     let lowered = Backend::lower(&backend, &codec, &ctx).ok()?;
-    Some((lowered.header_content.clone(), lowered.source_content.clone()))
+    Some((
+        lowered.header_content.clone(),
+        lowered.source_content.clone(),
+    ))
 }
 
 /// Generate C code using the Python compiler via subprocess.
@@ -165,7 +168,10 @@ fn extract_type_names(header: &str) -> BTreeSet<String> {
         }
         // Also look for "struct foo_bar {" pattern
         if trimmed.starts_with("struct ") && trimmed.ends_with('{') {
-            if let Some(name) = trimmed.strip_prefix("struct ").and_then(|s| s.strip_suffix(" {")) {
+            if let Some(name) = trimmed
+                .strip_prefix("struct ")
+                .and_then(|s| s.strip_suffix(" {"))
+            {
                 types.insert(name.to_string());
             }
         }
@@ -201,7 +207,11 @@ fn compare_outputs(name: &str, wspec_path: &str) {
             if !python_only_types.is_empty() {
                 eprintln!("  Types only in Python: {:?}", python_only_types);
             }
-            eprintln!("  Common types: {} of {}", common_types.len(), rust_types.len().max(python_types.len()));
+            eprintln!(
+                "  Common types: {} of {}",
+                common_types.len(),
+                rust_types.len().max(python_types.len())
+            );
 
             // -- Function declarations --
             let rust_funcs = extract_func_decls(&rust_h);
@@ -260,11 +270,19 @@ fn compare_outputs(name: &str, wspec_path: &str) {
             // Assertions: both should produce non-empty output
             assert!(!rust_h.is_empty(), "Rust header is empty for {wspec_path}");
             assert!(!rust_c.is_empty(), "Rust source is empty for {wspec_path}");
-            assert!(!python_h.is_empty(), "Python header is empty for {wspec_path}");
-            assert!(!python_c.is_empty(), "Python source is empty for {wspec_path}");
+            assert!(
+                !python_h.is_empty(),
+                "Python header is empty for {wspec_path}"
+            );
+            assert!(
+                !python_c.is_empty(),
+                "Python source is empty for {wspec_path}"
+            );
         }
         (Some(_), None) => {
-            eprintln!("  SKIP: Python compiler failed (may not be installed or file not supported)");
+            eprintln!(
+                "  SKIP: Python compiler failed (may not be installed or file not supported)"
+            );
         }
         (None, Some(_)) => {
             eprintln!("  FAIL: Rust compiler failed but Python succeeded");

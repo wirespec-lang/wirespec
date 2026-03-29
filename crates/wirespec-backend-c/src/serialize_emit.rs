@@ -10,7 +10,10 @@ use crate::type_map::*;
 /// Returns true if the wire type is a signed integer that needs a cast
 /// when passed to the unsigned write functions.
 fn needs_signed_cast(wt: &WireType) -> bool {
-    matches!(wt, WireType::I8 | WireType::I16 | WireType::I32 | WireType::I64)
+    matches!(
+        wt,
+        WireType::I8 | WireType::I16 | WireType::I32 | WireType::I64
+    )
 }
 
 /// Returns the unsigned C type corresponding to a signed wire type.
@@ -81,7 +84,10 @@ fn emit_field_serialize(
                 }
             }
         }
-        FieldStrategy::BytesFixed | FieldStrategy::BytesLength | FieldStrategy::BytesRemaining | FieldStrategy::BytesLor => {
+        FieldStrategy::BytesFixed
+        | FieldStrategy::BytesLength
+        | FieldStrategy::BytesRemaining
+        | FieldStrategy::BytesLor => {
             out.push_str(&format!(
                 "{indent}r = wirespec_write_bytes(buf, cap, &pos, val->{0}.ptr, val->{0}.len);\n",
                 f.name
@@ -107,7 +113,9 @@ fn emit_field_serialize(
                 ));
                 out.push_str(&format!("{indent}        pos += _written;\n"));
                 out.push_str(&format!("{indent}    }}\n"));
-            } else if f.ref_type_name.is_some() && matches!(inner_wt, WireType::VarInt | WireType::ContVarInt) {
+            } else if f.ref_type_name.is_some()
+                && matches!(inner_wt, WireType::VarInt | WireType::ContVarInt)
+            {
                 let ref_name = f.ref_type_name.as_ref().unwrap();
                 let serialize_fn = c_func_name(prefix, ref_name, "serialize");
                 out.push_str(&format!(
@@ -140,9 +148,7 @@ fn emit_field_serialize(
         FieldStrategy::Struct => {
             if let Some(ref ref_name) = f.ref_type_name {
                 let serialize_fn = c_func_name(prefix, ref_name, "serialize");
-                out.push_str(&format!(
-                    "{indent}{{\n{indent}    size_t _written = 0;\n"
-                ));
+                out.push_str(&format!("{indent}{{\n{indent}    size_t _written = 0;\n"));
                 out.push_str(&format!(
                     "{indent}    r = {serialize_fn}(&val->{}, buf + pos, cap - pos, &_written);\n",
                     f.name
@@ -155,9 +161,7 @@ fn emit_field_serialize(
         FieldStrategy::VarInt | FieldStrategy::ContVarInt => {
             if let Some(ref ref_name) = f.ref_type_name {
                 let serialize_fn = c_func_name(prefix, ref_name, "serialize");
-                out.push_str(&format!(
-                    "{indent}{{\n{indent}    size_t _written = 0;\n"
-                ));
+                out.push_str(&format!("{indent}{{\n{indent}    size_t _written = 0;\n"));
                 out.push_str(&format!(
                     "{indent}    r = {serialize_fn}(val->{}, buf + pos, cap - pos, &_written);\n",
                     f.name
@@ -257,17 +261,16 @@ fn emit_array_serialize(
 }
 
 /// Emit serialize body for frame variants.
-pub fn emit_frame_serialize_body(
-    out: &mut String,
-    frame: &CodecFrame,
-    prefix: &str,
-    indent: &str,
-) {
+pub fn emit_frame_serialize_body(out: &mut String, frame: &CodecFrame, prefix: &str, indent: &str) {
     // Write the raw tag value once before the switch
     match &frame.tag.wire_type {
         WireType::VarInt | WireType::ContVarInt => {
             // VarInt tags use the VarInt serialize function
-            let ref_name = frame.tag.ref_type_name.as_deref().unwrap_or(&frame.tag.field_name);
+            let ref_name = frame
+                .tag
+                .ref_type_name
+                .as_deref()
+                .unwrap_or(&frame.tag.field_name);
             let varint_fn = crate::names::c_func_name(prefix, ref_name, "serialize");
             out.push_str(&format!(
                 "{indent}{{\n{indent}    size_t _written;\n{indent}    r = {varint_fn}(val->frame_type, buf + pos, cap - pos, &_written);\n{indent}    if (r != WIRESPEC_OK) return r;\n{indent}    pos += _written;\n{indent}}}\n"
@@ -402,9 +405,7 @@ fn emit_variant_field_serialize(
                     out.push_str(&format!(
                         "{indent}    r = {write_fn_name}(buf, cap, &pos, {var_name});\n"
                     ));
-                    out.push_str(&format!(
-                        "{indent}    if (r != WIRESPEC_OK) return r;\n"
-                    ));
+                    out.push_str(&format!("{indent}    if (r != WIRESPEC_OK) return r;\n"));
                     out.push_str(&format!("{indent}}}\n"));
                 }
             }
@@ -438,7 +439,9 @@ fn emit_variant_field_serialize(
                 ));
                 out.push_str(&format!("{indent}        pos += _written;\n"));
                 out.push_str(&format!("{indent}    }}\n"));
-            } else if f.ref_type_name.is_some() && matches!(inner_wt, WireType::VarInt | WireType::ContVarInt) {
+            } else if f.ref_type_name.is_some()
+                && matches!(inner_wt, WireType::VarInt | WireType::ContVarInt)
+            {
                 let ref_name = f.ref_type_name.as_ref().unwrap();
                 let serialize_fn = c_func_name(prefix, ref_name, "serialize");
                 out.push_str(&format!(
@@ -476,9 +479,7 @@ fn emit_variant_field_serialize(
                             "{indent}    r = {write_fn_name}(buf, cap, &pos, {val_prefix}{}[_i]);\n",
                             f.name
                         ));
-                        out.push_str(&format!(
-                            "{indent}    if (r != WIRESPEC_OK) return r;\n"
-                        ));
+                        out.push_str(&format!("{indent}    if (r != WIRESPEC_OK) return r;\n"));
                     }
                     FieldStrategy::Struct => {
                         if let Some(ref ref_name) = arr.element_ref_type_name {
@@ -509,16 +510,12 @@ fn emit_variant_field_serialize(
         FieldStrategy::Struct => {
             if let Some(ref ref_name) = f.ref_type_name {
                 let serialize_fn = c_func_name(prefix, ref_name, "serialize");
-                out.push_str(&format!(
-                    "{indent}{{\n{indent}    size_t _written = 0;\n"
-                ));
+                out.push_str(&format!("{indent}{{\n{indent}    size_t _written = 0;\n"));
                 out.push_str(&format!(
                     "{indent}    r = {serialize_fn}(&{val_prefix}{}, buf + pos, cap - pos, &_written);\n",
                     f.name
                 ));
-                out.push_str(&format!(
-                    "{indent}    if (r != WIRESPEC_OK) return r;\n"
-                ));
+                out.push_str(&format!("{indent}    if (r != WIRESPEC_OK) return r;\n"));
                 out.push_str(&format!("{indent}    pos += _written;\n"));
                 out.push_str(&format!("{indent}}}\n"));
             }
@@ -526,16 +523,12 @@ fn emit_variant_field_serialize(
         FieldStrategy::VarInt | FieldStrategy::ContVarInt => {
             if let Some(ref ref_name) = f.ref_type_name {
                 let serialize_fn = c_func_name(prefix, ref_name, "serialize");
-                out.push_str(&format!(
-                    "{indent}{{\n{indent}    size_t _written = 0;\n"
-                ));
+                out.push_str(&format!("{indent}{{\n{indent}    size_t _written = 0;\n"));
                 out.push_str(&format!(
                     "{indent}    r = {serialize_fn}({val_prefix}{}, buf + pos, cap - pos, &_written);\n",
                     f.name
                 ));
-                out.push_str(&format!(
-                    "{indent}    if (r != WIRESPEC_OK) return r;\n"
-                ));
+                out.push_str(&format!("{indent}    if (r != WIRESPEC_OK) return r;\n"));
                 out.push_str(&format!("{indent}    pos += _written;\n"));
                 out.push_str(&format!("{indent}}}\n"));
             }
@@ -603,13 +596,8 @@ fn emit_field_serialized_len(
                 out.push_str(&format!("{indent}len += {size};\n"));
             }
         }
-        FieldStrategy::BytesLength
-        | FieldStrategy::BytesRemaining
-        | FieldStrategy::BytesLor => {
-            out.push_str(&format!(
-                "{indent}len += {val_prefix}{}.len;\n",
-                f.name
-            ));
+        FieldStrategy::BytesLength | FieldStrategy::BytesRemaining | FieldStrategy::BytesLor => {
+            out.push_str(&format!("{indent}len += {val_prefix}{}.len;\n", f.name));
         }
         FieldStrategy::Conditional => {
             let inner_wt = f.inner_wire_type.as_ref().unwrap_or(&f.wire_type);
@@ -625,7 +613,9 @@ fn emit_field_serialized_len(
                     "{indent}if ({val_prefix}has_{}) len += {len_fn}(&{val_prefix}{});\n",
                     f.name, f.name
                 ));
-            } else if f.ref_type_name.is_some() && matches!(inner_wt, WireType::VarInt | WireType::ContVarInt) {
+            } else if f.ref_type_name.is_some()
+                && matches!(inner_wt, WireType::VarInt | WireType::ContVarInt)
+            {
                 let ref_name = f.ref_type_name.as_ref().unwrap();
                 let len_fn = c_func_name(prefix, ref_name, "wire_size");
                 out.push_str(&format!(

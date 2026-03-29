@@ -410,9 +410,7 @@ impl Parser {
                 if !annotations.is_empty() {
                     return Err(self.error("annotations are not allowed on static_assert".into()));
                 }
-                Ok(Some(AstTopItem::StaticAssert(
-                    self.parse_static_assert()?,
-                )))
+                Ok(Some(AstTopItem::StaticAssert(self.parse_static_assert()?)))
             }
             TokenKind::Type => {
                 let item = self.parse_type_def(annotations, exported)?;
@@ -444,7 +442,11 @@ impl Parser {
 
     // ── Const ──
 
-    fn parse_const(&mut self, annotations: Vec<AstAnnotation>, exported: bool) -> Result<AstConstDecl> {
+    fn parse_const(
+        &mut self,
+        annotations: Vec<AstAnnotation>,
+        exported: bool,
+    ) -> Result<AstConstDecl> {
         let start = self.span();
         self.expect(&TokenKind::Const)?;
         let (name, _) = self.expect_name()?;
@@ -464,7 +466,11 @@ impl Parser {
 
     // ── Enum / Flags ──
 
-    fn parse_enum(&mut self, annotations: Vec<AstAnnotation>, exported: bool) -> Result<AstEnumDecl> {
+    fn parse_enum(
+        &mut self,
+        annotations: Vec<AstAnnotation>,
+        exported: bool,
+    ) -> Result<AstEnumDecl> {
         let start = self.span();
         self.expect(&TokenKind::Enum)?;
         let (name, _) = self.expect_name()?;
@@ -495,7 +501,11 @@ impl Parser {
         })
     }
 
-    fn parse_flags(&mut self, annotations: Vec<AstAnnotation>, exported: bool) -> Result<AstFlagsDecl> {
+    fn parse_flags(
+        &mut self,
+        annotations: Vec<AstAnnotation>,
+        exported: bool,
+    ) -> Result<AstFlagsDecl> {
         let start = self.span();
         self.expect(&TokenKind::Flags)?;
         let (name, _) = self.expect_name()?;
@@ -619,18 +629,16 @@ impl Parser {
         }
         self.expect(&TokenKind::RBrace)?;
 
-        Ok(AstTopItem::ContinuationVarInt(
-            AstContinuationVarIntDecl {
-                name,
-                annotations,
-                continuation_bit,
-                value_bits,
-                max_bytes,
-                byte_order,
-                exported,
-                span: Some(start),
-            },
-        ))
+        Ok(AstTopItem::ContinuationVarInt(AstContinuationVarIntDecl {
+            name,
+            annotations,
+            continuation_bit,
+            value_bits,
+            max_bytes,
+            byte_order,
+            exported,
+            span: Some(start),
+        }))
     }
 
     // ── Packet ──
@@ -946,9 +954,7 @@ impl Parser {
                     delegate = Some(self.parse_delegate_clause()?);
                 }
                 _ => {
-                    return Err(
-                        self.error(format!("unexpected in transition: {:?}", self.peek()))
-                    );
+                    return Err(self.error(format!("unexpected in transition: {:?}", self.peek())));
                 }
             }
         }
@@ -1051,9 +1057,7 @@ impl Parser {
             match self.peek() {
                 TokenKind::Eof => break,
                 TokenKind::RBrace if depth == 0 => break,
-                TokenKind::State | TokenKind::Initial | TokenKind::Transition
-                    if depth == 0 =>
-                {
+                TokenKind::State | TokenKind::Initial | TokenKind::Transition if depth == 0 => {
                     break;
                 }
                 TokenKind::Name(n) if n == "verify" && depth == 0 => break,
@@ -1330,9 +1334,7 @@ impl Parser {
             if let TokenKind::Name(ref n) = self.peek().clone() {
                 if n == "_" {
                     self.advance();
-                    return Ok(AstPattern::Wildcard {
-                        span: Some(start),
-                    });
+                    return Ok(AstPattern::Wildcard { span: Some(start) });
                 }
             }
         }
@@ -1679,9 +1681,7 @@ impl Parser {
             }
             TokenKind::Null => {
                 self.advance();
-                Ok(AstExpr::Null {
-                    span: Some(start),
-                })
+                Ok(AstExpr::Null { span: Some(start) })
             }
             TokenKind::LParen => {
                 self.advance();

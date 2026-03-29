@@ -1,7 +1,7 @@
 // crates/wirespec-layout/tests/lower_tests.rs
 use wirespec_layout::lower::lower;
-use wirespec_sema::analyze;
 use wirespec_sema::ComplianceProfile;
+use wirespec_sema::analyze;
 use wirespec_sema::types::Endianness;
 
 fn analyze_and_lower(src: &str) -> wirespec_layout::ir::LayoutModule {
@@ -27,21 +27,33 @@ fn lower_simple_packet() {
     assert!(layout.packets[0].fields[0].endianness.is_none());
     // u16 gets module default endianness (big)
     assert_eq!(layout.packets[0].fields[1].wire_width_bits, Some(16));
-    assert_eq!(layout.packets[0].fields[1].endianness, Some(Endianness::Big));
+    assert_eq!(
+        layout.packets[0].fields[1].endianness,
+        Some(Endianness::Big)
+    );
 }
 
 #[test]
 fn lower_explicit_endian() {
     let layout = analyze_and_lower("packet P { x: u16le, y: u32be }");
-    assert_eq!(layout.packets[0].fields[0].endianness, Some(Endianness::Little));
-    assert_eq!(layout.packets[0].fields[1].endianness, Some(Endianness::Big));
+    assert_eq!(
+        layout.packets[0].fields[0].endianness,
+        Some(Endianness::Little)
+    );
+    assert_eq!(
+        layout.packets[0].fields[1].endianness,
+        Some(Endianness::Big)
+    );
 }
 
 #[test]
 fn lower_module_endian_little() {
     let layout = analyze_and_lower("@endian little\nmodule test\npacket P { x: u16 }");
     assert_eq!(layout.module_endianness, Endianness::Little);
-    assert_eq!(layout.packets[0].fields[0].endianness, Some(Endianness::Little));
+    assert_eq!(
+        layout.packets[0].fields[0].endianness,
+        Some(Endianness::Little)
+    );
 }
 
 #[test]
@@ -58,9 +70,8 @@ fn lower_bitgroup_packet() {
 
 #[test]
 fn lower_bit_single() {
-    let layout = analyze_and_lower(
-        "packet P { a: bits[4], b: bits[4], c: bit, d: bit, e: bits[6] }"
-    );
+    let layout =
+        analyze_and_lower("packet P { a: bits[4], b: bits[4], c: bit, d: bit, e: bits[6] }");
     // All fields are bit-type: bits[4]+bits[4]+bit+bit+bits[6] = 16 bits -> 1 group
     // (bit parses as Bits { width_bits: 1 }, so no non-bit field breaks the run)
     assert_eq!(layout.packets[0].bitgroups.len(), 1);

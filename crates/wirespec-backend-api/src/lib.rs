@@ -207,14 +207,35 @@ impl std::fmt::Display for BackendError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::UnsupportedTarget(t) => write!(f, "unsupported target: {t}"),
-            Self::UnsupportedProfile { target, profile, reason } => {
-                write!(f, "target {target} does not support profile {profile}: {reason}")
+            Self::UnsupportedProfile {
+                target,
+                profile,
+                reason,
+            } => {
+                write!(
+                    f,
+                    "target {target} does not support profile {profile}: {reason}"
+                )
             }
-            Self::UnsupportedOption { target, option, reason } => {
-                write!(f, "target {target}: unsupported option '{option}': {reason}")
+            Self::UnsupportedOption {
+                target,
+                option,
+                reason,
+            } => {
+                write!(
+                    f,
+                    "target {target}: unsupported option '{option}': {reason}"
+                )
             }
-            Self::UnsupportedFeature { target, feature, reason } => {
-                write!(f, "target {target}: unsupported feature '{feature}': {reason}")
+            Self::UnsupportedFeature {
+                target,
+                feature,
+                reason,
+            } => {
+                write!(
+                    f,
+                    "target {target}: unsupported feature '{feature}': {reason}"
+                )
             }
             Self::MissingChecksumBinding { target, algorithm } => {
                 write!(f, "target {target}: no checksum binding for '{algorithm}'")
@@ -225,8 +246,16 @@ impl std::fmt::Display for BackendError {
             Self::EmitFailure { target, reason } => {
                 write!(f, "target {target}: emit failure: {reason}")
             }
-            Self::Io { target, path, reason } => {
-                write!(f, "target {target}: I/O error at {}: {reason}", path.display())
+            Self::Io {
+                target,
+                path,
+                reason,
+            } => {
+                write!(
+                    f,
+                    "target {target}: I/O error at {}: {reason}",
+                    path.display()
+                )
             }
         }
     }

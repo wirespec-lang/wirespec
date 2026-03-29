@@ -69,6 +69,10 @@ pub fn rust_const_name(prefix: &str, name: &str) -> String {
     if prefix.is_empty() {
         snake.to_uppercase()
     } else {
-        format!("{}_{}", to_snake_case(prefix).to_uppercase(), snake.to_uppercase())
+        format!(
+            "{}_{}",
+            to_snake_case(prefix).to_uppercase(),
+            snake.to_uppercase()
+        )
     }
 }

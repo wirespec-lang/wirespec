@@ -7,10 +7,10 @@
 //!
 //! No existing tests or source files are modified.
 
+use wirespec_sema::ComplianceProfile;
 use wirespec_sema::analyze;
 use wirespec_sema::error::ErrorKind;
 use wirespec_sema::types::{Endianness, FieldPresence, SemanticType};
-use wirespec_sema::ComplianceProfile;
 use wirespec_syntax::parse;
 
 fn check(src: &str) -> Result<wirespec_sema::SemanticModule, wirespec_sema::error::SemaError> {
@@ -79,10 +79,8 @@ fn error_indirect_cycle_three_aliases() {
 
 #[test]
 fn packet_all_bytes_kinds() {
-    let sem = check(
-        "packet P { a: bytes[16], b: u16, c: bytes[length: b], d: bytes[remaining] }",
-    )
-    .unwrap();
+    let sem = check("packet P { a: bytes[16], b: u16, c: bytes[length: b], d: bytes[remaining] }")
+        .unwrap();
     assert_eq!(sem.packets[0].fields.len(), 4);
 }
 
@@ -100,7 +98,9 @@ fn ok_remaining_last_field() {
 
 #[test]
 fn ok_bytes_length_with_subtraction() {
-    let sem = check("packet P { length: u16, require length >= 4, data: bytes[length: length - 4] }").unwrap();
+    let sem =
+        check("packet P { length: u16, require length >= 4, data: bytes[length: length - 4] }")
+            .unwrap();
     assert_eq!(sem.packets[0].fields.len(), 2);
     assert_eq!(sem.packets[0].requires.len(), 1);
 }
@@ -128,10 +128,9 @@ fn packet_derived_with_complex_expr() {
 
 #[test]
 fn packet_nested_optional_with_derived() {
-    let sem = check(
-        "packet P { flags: u8, extra: if flags & 1 { u16 }, let has: bool = extra != null }",
-    )
-    .unwrap();
+    let sem =
+        check("packet P { flags: u8, extra: if flags & 1 { u16 }, let has: bool = extra != null }")
+            .unwrap();
     assert_eq!(sem.packets[0].fields.len(), 2);
     assert_eq!(sem.packets[0].derived.len(), 1);
     assert!(matches!(
@@ -146,10 +145,7 @@ fn packet_nested_optional_with_derived() {
 
 #[test]
 fn frame_single_wildcard_only() {
-    let sem = check(
-        "frame F = match t: u8 { _ => Unknown { data: bytes[remaining] } }",
-    )
-    .unwrap();
+    let sem = check("frame F = match t: u8 { _ => Unknown { data: bytes[remaining] } }").unwrap();
     assert_eq!(sem.frames[0].variants.len(), 1);
 }
 
@@ -166,9 +162,7 @@ fn frame_many_branches() {
 
 #[test]
 fn error_frame_missing_wildcard_branch() {
-    let result = check(
-        "frame F = match t: u8 { 0 => A {}, 1 => B { x: u8 } }",
-    );
+    let result = check("frame F = match t: u8 { 0 => A {}, 1 => B { x: u8 } }");
     assert!(result.is_err(), "frame without wildcard should be rejected");
     let err = result.unwrap_err();
     assert_eq!(err.kind, ErrorKind::TypeMismatch);
@@ -239,7 +233,10 @@ fn error_capsule_missing_wildcard() {
             },
         }"#,
     );
-    assert!(result.is_err(), "capsule without wildcard should be rejected");
+    assert!(
+        result.is_err(),
+        "capsule without wildcard should be rejected"
+    );
     assert_eq!(result.unwrap_err().kind, ErrorKind::TypeMismatch);
 }
 
@@ -316,7 +313,10 @@ fn sm_wildcard_expands_to_non_terminal_only() {
     );
     // Verify C is not a source
     for t in &abort_transitions {
-        assert_ne!(t.src_state_name, "C", "terminal state C should not get wildcard expansion");
+        assert_ne!(
+            t.src_state_name, "C",
+            "terminal state C should not get wildcard expansion"
+        );
     }
 }
 
@@ -399,7 +399,10 @@ fn error_sm_delegate_on_non_self_transition() {
     }"#;
     let result = check(src);
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().kind, ErrorKind::SmDelegateNotSelfTransition);
+    assert_eq!(
+        result.unwrap_err().kind,
+        ErrorKind::SmDelegateNotSelfTransition
+    );
 }
 
 #[test]
@@ -483,7 +486,11 @@ fn error_sm_partial_assignment_missing_field() {
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert_eq!(err.kind, ErrorKind::SmMissingAssignment);
-    assert!(err.msg.contains("y"), "error should mention unassigned field 'y': {}", err.msg);
+    assert!(
+        err.msg.contains("y"),
+        "error should mention unassigned field 'y': {}",
+        err.msg
+    );
 }
 
 #[test]
@@ -540,7 +547,10 @@ fn ok_sm_field_references_child_sm() {
     let parent = &sem.state_machines[1];
     assert_eq!(parent.states[0].fields[0].name, "child");
     assert!(parent.states[0].fields[0].child_sm_id.is_some());
-    assert_eq!(parent.states[0].fields[0].child_sm_name.as_deref(), Some("Child"));
+    assert_eq!(
+        parent.states[0].fields[0].child_sm_name.as_deref(),
+        Some("Child")
+    );
 }
 
 #[test]
@@ -581,8 +591,8 @@ fn enum_many_members() {
 
 #[test]
 fn flags_bitmask_values() {
-    let sem = check("flags F: u8 { A = 0x01, B = 0x02, C = 0x04, D = 0x08 }\npacket P { x: F }")
-        .unwrap();
+    let sem =
+        check("flags F: u8 { A = 0x01, B = 0x02, C = 0x04, D = 0x08 }\npacket P { x: F }").unwrap();
     assert_eq!(sem.enums[0].members.len(), 4);
     assert!(sem.enums[0].is_flags);
 }
@@ -756,27 +766,39 @@ fn error_duplicate_checksums() {
 fn error_checksum_unknown_algorithm() {
     let result = check("packet P { @checksum(sha256) c: u32 }");
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().kind, ErrorKind::ChecksumProfileViolation);
+    assert_eq!(
+        result.unwrap_err().kind,
+        ErrorKind::ChecksumProfileViolation
+    );
 }
 
 #[test]
 fn error_checksum_unknown_algorithm_strict_profile() {
     let result = check_strict("packet P { @checksum(md5) c: u32 }");
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().kind, ErrorKind::ChecksumProfileViolation);
+    assert_eq!(
+        result.unwrap_err().kind,
+        ErrorKind::ChecksumProfileViolation
+    );
 }
 
 #[test]
 fn error_fletcher16_rejected_under_strict() {
     let result = check_strict("packet P { data: u32, @checksum(fletcher16) c: u16 }");
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().kind, ErrorKind::ChecksumProfileViolation);
+    assert_eq!(
+        result.unwrap_err().kind,
+        ErrorKind::ChecksumProfileViolation
+    );
 }
 
 #[test]
 fn ok_fletcher16_under_extended() {
     let result = check("packet P { data: u32, @checksum(fletcher16) c: u16 }");
-    assert!(result.is_ok(), "fletcher16 should be allowed under extended profile");
+    assert!(
+        result.is_ok(),
+        "fletcher16 should be allowed under extended profile"
+    );
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -880,7 +902,11 @@ fn ok_bool_in_frame_derived_field() {
             _ => B { data: bytes[remaining] },
         }"#,
     );
-    assert!(result.is_ok(), "bool in derived field should be valid: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "bool in derived field should be valid: {:?}",
+        result.err()
+    );
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -956,7 +982,10 @@ fn ok_backward_ref_optional() {
 fn error_lor_references_non_optional_field() {
     let result = check("packet P { len: u16, data: bytes[length_or_remaining: len] }");
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().kind, ErrorKind::InvalidLengthOrRemaining);
+    assert_eq!(
+        result.unwrap_err().kind,
+        ErrorKind::InvalidLengthOrRemaining
+    );
 }
 
 #[test]
@@ -964,7 +993,11 @@ fn ok_lor_references_optional_field() {
     let result = check(
         "packet P { flags: u8, len: if flags & 1 { u16 }, data: bytes[length_or_remaining: len] }",
     );
-    assert!(result.is_ok(), "LOR with optional field should pass: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "LOR with optional field should pass: {:?}",
+        result.err()
+    );
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -1029,7 +1062,11 @@ fn derive_traits_on_packet() {
 #[test]
 fn derive_debug_only() {
     let sem = check("@derive(debug)\npacket P { x: u8 }").unwrap();
-    assert!(sem.packets[0].derive_traits.contains(&wirespec_sema::types::DeriveTrait::Debug));
+    assert!(
+        sem.packets[0]
+            .derive_traits
+            .contains(&wirespec_sema::types::DeriveTrait::Debug)
+    );
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -1144,7 +1181,10 @@ fn strict_profile_rejects_fletcher16() {
         &Default::default(),
     );
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().kind, ErrorKind::ChecksumProfileViolation);
+    assert_eq!(
+        result.unwrap_err().kind,
+        ErrorKind::ChecksumProfileViolation
+    );
 }
 
 #[test]
@@ -1197,10 +1237,7 @@ fn item_order_reflects_declaration_order() {
     "#;
     let sem = check(src).unwrap();
     // item_order should contain IDs in declaration order
-    assert!(
-        !sem.item_order.is_empty(),
-        "item_order should not be empty"
-    );
+    assert!(!sem.item_order.is_empty(), "item_order should not be empty");
     assert_eq!(sem.item_order.len(), 4);
 }
 

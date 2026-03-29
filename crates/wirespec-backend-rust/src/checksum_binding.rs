@@ -2,8 +2,8 @@
 //
 // Rust checksum runtime bindings using wirespec_rt.
 
-use wirespec_backend_api::*;
 use crate::TARGET_RUST;
+use wirespec_backend_api::*;
 
 pub struct RustChecksumBindings;
 

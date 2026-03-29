@@ -49,7 +49,10 @@ pub enum AstAnnotationArg {
     Int(i64),
     Bool(bool),
     String(String),
-    NamedValue { name: String, value: AstLiteralValue },
+    NamedValue {
+        name: String,
+        value: AstLiteralValue,
+    },
 }
 
 // ── Expressions ──

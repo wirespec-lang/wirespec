@@ -6,7 +6,8 @@ use wirespec_syntax::parse;
 
 fn full_pipeline(src: &str) -> CodecModule {
     let ast = parse(src).unwrap();
-    let sem = wirespec_sema::analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
+    let sem =
+        wirespec_sema::analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
     let layout = wirespec_layout::lower(&sem).unwrap();
     lower(&layout).unwrap()
 }
@@ -42,7 +43,10 @@ fn codec_bytes_strategies() {
     let c = full_pipeline("packet P { a: bytes[6], b: bytes[remaining] }");
     assert_eq!(c.packets[0].fields[0].strategy, FieldStrategy::BytesFixed);
     assert_eq!(c.packets[0].fields[0].memory_tier, Some(MemoryTier::A));
-    assert_eq!(c.packets[0].fields[1].strategy, FieldStrategy::BytesRemaining);
+    assert_eq!(
+        c.packets[0].fields[1].strategy,
+        FieldStrategy::BytesRemaining
+    );
 }
 
 #[test]
@@ -181,7 +185,11 @@ fn codec_bytes_lor_strategy() {
     "#;
     let c = full_pipeline(src);
     // bytes[length_or_remaining:] -> BytesLor strategy
-    let data_field = c.packets[0].fields.iter().find(|f| f.name == "data").unwrap();
+    let data_field = c.packets[0]
+        .fields
+        .iter()
+        .find(|f| f.name == "data")
+        .unwrap();
     assert_eq!(data_field.strategy, FieldStrategy::BytesLor);
     assert_eq!(data_field.memory_tier, Some(MemoryTier::A));
 }
@@ -190,7 +198,11 @@ fn codec_bytes_lor_strategy() {
 fn codec_bytes_length_strategy() {
     let src = "packet P { len: u16, data: bytes[length: len] }";
     let c = full_pipeline(src);
-    let data_field = c.packets[0].fields.iter().find(|f| f.name == "data").unwrap();
+    let data_field = c.packets[0]
+        .fields
+        .iter()
+        .find(|f| f.name == "data")
+        .unwrap();
     assert_eq!(data_field.strategy, FieldStrategy::BytesLength);
     assert_eq!(data_field.memory_tier, Some(MemoryTier::A));
     assert!(data_field.bytes_spec.is_some());
@@ -213,7 +225,11 @@ fn codec_array_with_composite_element_tier_c() {
         packet P { count: u8, items: [Item; count] }
     "#;
     let c = full_pipeline(src);
-    let items_field = c.packets[1].fields.iter().find(|f| f.name == "items").unwrap();
+    let items_field = c.packets[1]
+        .fields
+        .iter()
+        .find(|f| f.name == "items")
+        .unwrap();
     assert_eq!(items_field.strategy, FieldStrategy::Array);
     assert_eq!(items_field.memory_tier, Some(MemoryTier::C));
 }
@@ -222,7 +238,11 @@ fn codec_array_with_composite_element_tier_c() {
 fn codec_array_with_scalar_element_tier_b() {
     let src = "packet P { count: u8, items: [u8; count] }";
     let c = full_pipeline(src);
-    let items_field = c.packets[0].fields.iter().find(|f| f.name == "items").unwrap();
+    let items_field = c.packets[0]
+        .fields
+        .iter()
+        .find(|f| f.name == "items")
+        .unwrap();
     assert_eq!(items_field.strategy, FieldStrategy::Array);
     assert_eq!(items_field.memory_tier, Some(MemoryTier::B));
 }
@@ -254,14 +274,24 @@ fn codec_no_checksum_plan_without_annotation() {
 fn codec_derived_in_items() {
     let src = "packet P { x: u8, let y: bool = x != 0 }";
     let c = full_pipeline(src);
-    assert!(c.packets[0].items.iter().any(|i| matches!(i, CodecItem::Derived(_))));
+    assert!(
+        c.packets[0]
+            .items
+            .iter()
+            .any(|i| matches!(i, CodecItem::Derived(_)))
+    );
 }
 
 #[test]
 fn codec_require_in_items() {
     let src = "packet P { x: u8, require x > 0 }";
     let c = full_pipeline(src);
-    assert!(c.packets[0].items.iter().any(|i| matches!(i, CodecItem::Require(_))));
+    assert!(
+        c.packets[0]
+            .items
+            .iter()
+            .any(|i| matches!(i, CodecItem::Require(_)))
+    );
 }
 
 #[test]
@@ -274,9 +304,18 @@ fn codec_frame_variant_patterns() {
         }
     "#;
     let c = full_pipeline(src);
-    assert!(matches!(c.frames[0].variants[0].pattern, VariantPattern::Exact { value: 0 }));
-    assert!(matches!(c.frames[0].variants[1].pattern, VariantPattern::RangeInclusive { start: 1, end: 3 }));
-    assert!(matches!(c.frames[0].variants[2].pattern, VariantPattern::Wildcard));
+    assert!(matches!(
+        c.frames[0].variants[0].pattern,
+        VariantPattern::Exact { value: 0 }
+    ));
+    assert!(matches!(
+        c.frames[0].variants[1].pattern,
+        VariantPattern::RangeInclusive { start: 1, end: 3 }
+    ));
+    assert!(matches!(
+        c.frames[0].variants[2].pattern,
+        VariantPattern::Wildcard
+    ));
 }
 
 #[test]
@@ -319,6 +358,10 @@ fn codec_max_elements_on_array() {
         }
     "#;
     let c = full_pipeline(src);
-    let items = c.packets[0].fields.iter().find(|f| f.name == "items").unwrap();
+    let items = c.packets[0]
+        .fields
+        .iter()
+        .find(|f| f.name == "items")
+        .unwrap();
     assert_eq!(items.max_elements, Some(256));
 }

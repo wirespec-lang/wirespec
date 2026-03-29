@@ -157,10 +157,8 @@ fn lower_capsule(ctx: &LowerCtx, c: &LayoutCapsule) -> Result<CodecCapsule, Code
     };
 
     let header_scope_id = format!("{}#header", c.capsule_id);
-    let header_fields =
-        lower_fields(ctx, &c.header_fields, &header_scope_id, &c.header_bitgroups)?;
-    let header_items =
-        lower_items(&c.header_items, &c.header_derived, &c.header_requires, ctx)?;
+    let header_fields = lower_fields(ctx, &c.header_fields, &header_scope_id, &c.header_bitgroups)?;
+    let header_items = lower_items(&c.header_items, &c.header_derived, &c.header_requires, ctx)?;
     let header_checksum_plan =
         synthesize_checksum_plan(&header_fields, ScopeKind::CapsuleHeader, &c.name);
 
@@ -440,12 +438,8 @@ fn extract_array_spec(ctx: &LowerCtx, ty: &SemanticType) -> Option<ArraySpec> {
             let element_wire_type = semantic_type_to_wire_type(ctx, element_type);
             let element_strategy = assign_element_strategy(element_type);
             let element_ref_type_name = extract_ref_type_name(element_type);
-            let count = count_expr
-                .as_ref()
-                .map(|e| convert_semantic_expr(e));
-            let within = within_expr
-                .as_ref()
-                .map(|e| convert_semantic_expr(e));
+            let count = count_expr.as_ref().map(|e| convert_semantic_expr(e));
+            let within = within_expr.as_ref().map(|e| convert_semantic_expr(e));
 
             Some(ArraySpec {
                 element_wire_type,

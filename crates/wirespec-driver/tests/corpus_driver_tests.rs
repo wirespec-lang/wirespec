@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use wirespec_driver::{compile, CompileRequest};
+use wirespec_driver::{CompileRequest, compile};
 use wirespec_sema::ComplianceProfile;
 
 fn examples_dir() -> PathBuf {

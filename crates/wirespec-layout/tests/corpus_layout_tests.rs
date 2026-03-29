@@ -4,18 +4,20 @@
 // (parse -> sema -> layout).
 
 use wirespec_layout::lower;
-use wirespec_sema::{analyze, ComplianceProfile};
+use wirespec_sema::{ComplianceProfile, analyze};
 use wirespec_syntax::parse;
 
 fn layout_file(path: &str) -> wirespec_layout::ir::LayoutModule {
-    let source = std::fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("Failed to read {path}: {e}"));
-    let ast = parse(&source)
-        .unwrap_or_else(|e| panic!("Failed to parse {path}: {e}"));
-    let sem = analyze(&ast, ComplianceProfile::Phase2ExtendedCurrent, &Default::default())
-        .unwrap_or_else(|e| panic!("Failed to analyze {path}: {e}"));
-    lower(&sem)
-        .unwrap_or_else(|e| panic!("Failed to lower {path}: {e}"))
+    let source =
+        std::fs::read_to_string(path).unwrap_or_else(|e| panic!("Failed to read {path}: {e}"));
+    let ast = parse(&source).unwrap_or_else(|e| panic!("Failed to parse {path}: {e}"));
+    let sem = analyze(
+        &ast,
+        ComplianceProfile::Phase2ExtendedCurrent,
+        &Default::default(),
+    )
+    .unwrap_or_else(|e| panic!("Failed to analyze {path}: {e}"));
+    lower(&sem).unwrap_or_else(|e| panic!("Failed to lower {path}: {e}"))
 }
 
 #[test]

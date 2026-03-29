@@ -30,7 +30,9 @@ impl Backend for CBackend {
         module: &CodecModule,
         ctx: &BackendContext,
     ) -> Result<Self::LoweredModule, BackendError> {
-        let opts = ctx.target_options.downcast_ref::<CBackendOptions>()
+        let opts = ctx
+            .target_options
+            .downcast_ref::<CBackendOptions>()
             .ok_or_else(|| BackendError::UnsupportedOption {
                 target: TARGET_C,
                 option: "target_options".into(),

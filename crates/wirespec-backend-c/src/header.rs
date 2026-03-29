@@ -293,7 +293,10 @@ fn semantic_type_to_c_imp(
             if prefix.is_empty() {
                 "uint64_t".into()
             } else {
-                let effective_prefix = import_prefixes.get(name).map(|s| s.as_str()).unwrap_or(prefix);
+                let effective_prefix = import_prefixes
+                    .get(name)
+                    .map(|s| s.as_str())
+                    .unwrap_or(prefix);
                 c_type_name(effective_prefix, name)
             }
         }
@@ -304,7 +307,10 @@ fn semantic_type_to_c_imp(
             if prefix.is_empty() {
                 "uint32_t".into()
             } else {
-                let effective_prefix = import_prefixes.get(name).map(|s| s.as_str()).unwrap_or(prefix);
+                let effective_prefix = import_prefixes
+                    .get(name)
+                    .map(|s| s.as_str())
+                    .unwrap_or(prefix);
                 c_type_name(effective_prefix, name)
             }
         }
@@ -317,7 +323,10 @@ fn semantic_type_to_c_imp(
 }
 
 /// Convenience wrapper: no import prefixes.
-fn semantic_type_to_c<'a>(ty: &wirespec_sema::types::SemanticType, _prefix: impl Into<Option<&'a str>>) -> String {
+fn semantic_type_to_c<'a>(
+    ty: &wirespec_sema::types::SemanticType,
+    _prefix: impl Into<Option<&'a str>>,
+) -> String {
     let prefix = _prefix.into().unwrap_or("");
     semantic_type_to_c_imp(ty, prefix, &std::collections::HashMap::new())
 }
@@ -327,7 +336,13 @@ fn semantic_literal_to_c(lit: &wirespec_sema::expr::SemanticLiteral) -> String {
     use wirespec_sema::expr::SemanticLiteral;
     match lit {
         SemanticLiteral::Int(v) => format!("{v}"),
-        SemanticLiteral::Bool(b) => if *b { "1".into() } else { "0".into() },
+        SemanticLiteral::Bool(b) => {
+            if *b {
+                "1".into()
+            } else {
+                "0".into()
+            }
+        }
         SemanticLiteral::String(s) => format!("\"{s}\""),
         SemanticLiteral::Null => "0".into(),
     }
@@ -358,11 +373,7 @@ fn emit_varint_header(out: &mut String, module: &CodecModule, prefix: &str) {
 }
 
 /// Emit VarInt function declarations.
-fn emit_varint_func_decls(
-    out: &mut String,
-    vi: &wirespec_sema::ir::SemanticVarInt,
-    prefix: &str,
-) {
+fn emit_varint_func_decls(out: &mut String, vi: &wirespec_sema::ir::SemanticVarInt, prefix: &str) {
     let snake = to_snake_case(&vi.name);
     let tname = format!("{prefix}_{snake}_t");
     let parse_fn = format!("{prefix}_{snake}_parse");
@@ -375,9 +386,7 @@ fn emit_varint_func_decls(
     out.push_str(&format!(
         "wirespec_result_t {serialize_fn}(\n    {tname} val,\n    uint8_t *buf, size_t cap, size_t *written);\n"
     ));
-    out.push_str(&format!(
-        "size_t {wire_size_fn}({tname} val);\n"
-    ));
+    out.push_str(&format!("size_t {wire_size_fn}({tname} val);\n"));
     out.push('\n');
 }
 
@@ -389,12 +398,7 @@ fn emit_packet_struct(out: &mut String, packet: &CodecPacket, prefix: &str) {
     out.push_str("};\n\n");
 }
 
-fn emit_struct_fields(
-    out: &mut String,
-    fields: &[CodecField],
-    items: &[CodecItem],
-    prefix: &str,
-) {
+fn emit_struct_fields(out: &mut String, fields: &[CodecField], items: &[CodecItem], prefix: &str) {
     // Emit fields in item order so derived fields appear where declared
     for item in items {
         match item {
@@ -622,9 +626,7 @@ fn emit_func_decls(out: &mut String, name: &str, prefix: &str) {
     out.push_str(&format!(
         "wirespec_result_t {serialize_fn}(const {tname} *val, uint8_t *buf, size_t cap, size_t *written);\n"
     ));
-    out.push_str(&format!(
-        "size_t {len_fn}(const {tname} *val);\n"
-    ));
+    out.push_str(&format!("size_t {len_fn}(const {tname} *val);\n"));
     out.push('\n');
 }
 
@@ -653,13 +655,29 @@ fn emit_state_machine_header_imp(
     emit_sm_state_tag_enum(out, sm, prefix, &sm_snake, &sm_upper, &prefix_upper);
 
     // 2. State data struct (tagged union)
-    emit_sm_state_struct_imp(out, sm, prefix, &sm_snake, &sm_upper, &prefix_upper, import_prefixes);
+    emit_sm_state_struct_imp(
+        out,
+        sm,
+        prefix,
+        &sm_snake,
+        &sm_upper,
+        &prefix_upper,
+        import_prefixes,
+    );
 
     // 3. Event tag enum
     emit_sm_event_tag_enum(out, sm, prefix, &sm_snake, &sm_upper, &prefix_upper);
 
     // 4. Event data struct (tagged union)
-    emit_sm_event_struct_imp(out, sm, prefix, &sm_snake, &sm_upper, &prefix_upper, import_prefixes);
+    emit_sm_event_struct_imp(
+        out,
+        sm,
+        prefix,
+        &sm_snake,
+        &sm_upper,
+        &prefix_upper,
+        import_prefixes,
+    );
 
     // 5. Dispatch function declaration
     let sm_type = format!("{prefix}_{sm_snake}_t");
@@ -702,7 +720,15 @@ fn emit_sm_state_struct(
     sm_upper: &str,
     prefix_upper: &str,
 ) {
-    emit_sm_state_struct_imp(out, sm, prefix, sm_snake, sm_upper, prefix_upper, &std::collections::HashMap::new());
+    emit_sm_state_struct_imp(
+        out,
+        sm,
+        prefix,
+        sm_snake,
+        sm_upper,
+        prefix_upper,
+        &std::collections::HashMap::new(),
+    );
 }
 
 fn emit_sm_state_struct_imp(
@@ -745,7 +771,13 @@ fn emit_sm_state_struct_imp(
 }
 
 fn emit_sm_state_field(out: &mut String, field: &SemanticStateField, prefix: &str, indent: &str) {
-    emit_sm_state_field_imp(out, field, prefix, indent, &std::collections::HashMap::new())
+    emit_sm_state_field_imp(
+        out,
+        field,
+        prefix,
+        indent,
+        &std::collections::HashMap::new(),
+    )
 }
 
 fn emit_sm_state_field_imp(
@@ -757,11 +789,7 @@ fn emit_sm_state_field_imp(
 ) {
     let ctype = semantic_type_to_c_imp(&field.ty, prefix, import_prefixes);
     // Handle array types specially
-    if let wirespec_sema::types::SemanticType::Array {
-        count_expr,
-        ..
-    } = &field.ty
-    {
+    if let wirespec_sema::types::SemanticType::Array { count_expr, .. } = &field.ty {
         // For fixed-size arrays in state fields
         if let Some(count) = count_expr {
             if let wirespec_sema::expr::SemanticExpr::Literal {
@@ -809,7 +837,15 @@ fn emit_sm_event_struct(
     sm_upper: &str,
     prefix_upper: &str,
 ) {
-    emit_sm_event_struct_imp(out, sm, prefix, sm_snake, sm_upper, prefix_upper, &std::collections::HashMap::new());
+    emit_sm_event_struct_imp(
+        out,
+        sm,
+        prefix,
+        sm_snake,
+        sm_upper,
+        prefix_upper,
+        &std::collections::HashMap::new(),
+    );
 }
 
 fn emit_sm_event_struct_imp(
@@ -857,10 +893,7 @@ fn emit_sm_init_helper(
     prefix_upper: &str,
 ) {
     // Find the initial state
-    let initial_state = sm
-        .states
-        .iter()
-        .find(|s| s.state_id == sm.initial_state_id);
+    let initial_state = sm.states.iter().find(|s| s.state_id == sm.initial_state_id);
 
     let initial_state = match initial_state {
         Some(s) => s,
@@ -873,9 +906,7 @@ fn emit_sm_init_helper(
 
     let init_fn = format!("{prefix}_{sm_snake}_init");
 
-    out.push_str(&format!(
-        "static inline void {init_fn}({sm_type} *sm) {{\n"
-    ));
+    out.push_str(&format!("static inline void {init_fn}({sm_type} *sm) {{\n"));
     out.push_str(&format!(
         "    sm->tag = {prefix_upper}_{sm_upper}_{initial_upper};\n"
     ));
@@ -893,4 +924,3 @@ fn emit_sm_init_helper(
 
     out.push_str("}\n\n");
 }
-

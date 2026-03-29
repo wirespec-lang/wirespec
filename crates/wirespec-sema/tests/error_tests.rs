@@ -5,9 +5,9 @@
 //! state machine errors, checksum errors, annotation handling, and
 //! complex valid regression cases.
 
+use wirespec_sema::ComplianceProfile;
 use wirespec_sema::analyze;
 use wirespec_sema::error::ErrorKind;
-use wirespec_sema::ComplianceProfile;
 use wirespec_syntax::parse;
 
 fn default_profile() -> ComplianceProfile {
@@ -172,7 +172,10 @@ fn error_forward_ref_in_bytes_length() {
     // bytes[length: len] references 'len' which is declared after
     let ast = parse("packet P { data: bytes[length: len], len: u16 }").unwrap();
     let result = analyze(&ast, default_profile(), &Default::default());
-    assert!(result.is_err(), "forward reference in bytes length should fail");
+    assert!(
+        result.is_err(),
+        "forward reference in bytes length should fail"
+    );
     assert_eq!(result.unwrap_err().kind, ErrorKind::ForwardReference);
 }
 
@@ -181,7 +184,10 @@ fn error_forward_ref_in_optional_condition() {
     // Optional condition references 'flags' declared after the field
     let ast = parse("packet P { extra: if flags & 1 { u16 }, flags: u8 }").unwrap();
     let result = analyze(&ast, default_profile(), &Default::default());
-    assert!(result.is_err(), "forward reference in optional condition should fail");
+    assert!(
+        result.is_err(),
+        "forward reference in optional condition should fail"
+    );
     assert_eq!(result.unwrap_err().kind, ErrorKind::ForwardReference);
 }
 
@@ -190,7 +196,10 @@ fn error_forward_ref_in_array_count() {
     // Array count references 'count' declared after
     let ast = parse("packet P { items: [u8; count], count: u16 }").unwrap();
     let result = analyze(&ast, default_profile(), &Default::default());
-    assert!(result.is_err(), "forward reference in array count should fail");
+    assert!(
+        result.is_err(),
+        "forward reference in array count should fail"
+    );
     assert_eq!(result.unwrap_err().kind, ErrorKind::ForwardReference);
 }
 
@@ -199,7 +208,10 @@ fn ok_no_forward_ref_bytes_length() {
     // len is declared before data -- should succeed
     let ast = parse("packet P { len: u16, data: bytes[length: len] }").unwrap();
     let result = analyze(&ast, default_profile(), &Default::default());
-    assert!(result.is_ok(), "back reference in bytes length should succeed");
+    assert!(
+        result.is_ok(),
+        "back reference in bytes length should succeed"
+    );
 }
 
 #[test]
@@ -207,7 +219,10 @@ fn ok_no_forward_ref_array_count() {
     // count is declared before items -- should succeed
     let ast = parse("packet P { count: u16, items: [u8; count] }").unwrap();
     let result = analyze(&ast, default_profile(), &Default::default());
-    assert!(result.is_ok(), "back reference in array count should succeed");
+    assert!(
+        result.is_ok(),
+        "back reference in array count should succeed"
+    );
 }
 
 #[test]
@@ -215,7 +230,10 @@ fn ok_no_forward_ref_optional_condition() {
     // flags is declared before extra -- should succeed
     let ast = parse("packet P { flags: u8, extra: if flags & 0x01 { u16 } }").unwrap();
     let result = analyze(&ast, default_profile(), &Default::default());
-    assert!(result.is_ok(), "back reference in optional condition should succeed");
+    assert!(
+        result.is_ok(),
+        "back reference in optional condition should succeed"
+    );
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -234,7 +252,10 @@ fn error_unknown_checksum_algorithm() {
     let ast = parse(src).unwrap();
     let result = analyze(&ast, default_profile(), &Default::default());
     assert!(result.is_err(), "unknown checksum algorithm should fail");
-    assert_eq!(result.unwrap_err().kind, ErrorKind::ChecksumProfileViolation);
+    assert_eq!(
+        result.unwrap_err().kind,
+        ErrorKind::ChecksumProfileViolation
+    );
 }
 
 #[test]
@@ -248,12 +269,19 @@ fn error_checksum_profile_strict_fletcher16() {
         }
     "#;
     let ast = parse(src).unwrap();
-    let result = analyze(&ast, ComplianceProfile::Phase2StrictV1_0, &Default::default());
+    let result = analyze(
+        &ast,
+        ComplianceProfile::Phase2StrictV1_0,
+        &Default::default(),
+    );
     assert!(
         result.is_err(),
         "fletcher16 should be rejected under strict profile"
     );
-    assert_eq!(result.unwrap_err().kind, ErrorKind::ChecksumProfileViolation);
+    assert_eq!(
+        result.unwrap_err().kind,
+        ErrorKind::ChecksumProfileViolation
+    );
 }
 
 #[test]
@@ -267,8 +295,15 @@ fn ok_checksum_extended_fletcher16() {
         }
     "#;
     let ast = parse(src).unwrap();
-    let result = analyze(&ast, ComplianceProfile::Phase2ExtendedCurrent, &Default::default());
-    assert!(result.is_ok(), "fletcher16 should be accepted under extended profile");
+    let result = analyze(
+        &ast,
+        ComplianceProfile::Phase2ExtendedCurrent,
+        &Default::default(),
+    );
+    assert!(
+        result.is_ok(),
+        "fletcher16 should be accepted under extended profile"
+    );
 }
 
 #[test]
@@ -282,8 +317,15 @@ fn ok_checksum_internet_strict() {
         }
     "#;
     let ast = parse(src).unwrap();
-    let result = analyze(&ast, ComplianceProfile::Phase2StrictV1_0, &Default::default());
-    assert!(result.is_ok(), "internet checksum should be accepted under strict profile");
+    let result = analyze(
+        &ast,
+        ComplianceProfile::Phase2StrictV1_0,
+        &Default::default(),
+    );
+    assert!(
+        result.is_ok(),
+        "internet checksum should be accepted under strict profile"
+    );
 }
 
 #[test]
@@ -297,8 +339,15 @@ fn ok_checksum_crc32_strict() {
         }
     "#;
     let ast = parse(src).unwrap();
-    let result = analyze(&ast, ComplianceProfile::Phase2StrictV1_0, &Default::default());
-    assert!(result.is_ok(), "crc32 should be accepted under strict profile");
+    let result = analyze(
+        &ast,
+        ComplianceProfile::Phase2StrictV1_0,
+        &Default::default(),
+    );
+    assert!(
+        result.is_ok(),
+        "crc32 should be accepted under strict profile"
+    );
 }
 
 #[test]
@@ -312,8 +361,15 @@ fn ok_checksum_crc32c_strict() {
         }
     "#;
     let ast = parse(src).unwrap();
-    let result = analyze(&ast, ComplianceProfile::Phase2StrictV1_0, &Default::default());
-    assert!(result.is_ok(), "crc32c should be accepted under strict profile");
+    let result = analyze(
+        &ast,
+        ComplianceProfile::Phase2StrictV1_0,
+        &Default::default(),
+    );
+    assert!(
+        result.is_ok(),
+        "crc32c should be accepted under strict profile"
+    );
 }
 
 #[test]
@@ -327,9 +383,19 @@ fn error_checksum_unknown_algo_strict() {
         }
     "#;
     let ast = parse(src).unwrap();
-    let result = analyze(&ast, ComplianceProfile::Phase2StrictV1_0, &Default::default());
-    assert!(result.is_err(), "md5 should be rejected under strict profile");
-    assert_eq!(result.unwrap_err().kind, ErrorKind::ChecksumProfileViolation);
+    let result = analyze(
+        &ast,
+        ComplianceProfile::Phase2StrictV1_0,
+        &Default::default(),
+    );
+    assert!(
+        result.is_err(),
+        "md5 should be rejected under strict profile"
+    );
+    assert_eq!(
+        result.unwrap_err().kind,
+        ErrorKind::ChecksumProfileViolation
+    );
 }
 
 #[test]
@@ -343,9 +409,19 @@ fn error_checksum_unknown_algo_extended() {
         }
     "#;
     let ast = parse(src).unwrap();
-    let result = analyze(&ast, ComplianceProfile::Phase2ExtendedCurrent, &Default::default());
-    assert!(result.is_err(), "md5 should be rejected even under extended profile");
-    assert_eq!(result.unwrap_err().kind, ErrorKind::ChecksumProfileViolation);
+    let result = analyze(
+        &ast,
+        ComplianceProfile::Phase2ExtendedCurrent,
+        &Default::default(),
+    );
+    assert!(
+        result.is_err(),
+        "md5 should be rejected even under extended profile"
+    );
+    assert_eq!(
+        result.unwrap_err().kind,
+        ErrorKind::ChecksumProfileViolation
+    );
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -465,7 +541,10 @@ fn ok_sm_self_transition_with_guard_and_action() {
     "#;
     let ast = parse(src).unwrap();
     let result = analyze(&ast, default_profile(), &Default::default());
-    assert!(result.is_ok(), "self-transition with guard and action should succeed");
+    assert!(
+        result.is_ok(),
+        "self-transition with guard and action should succeed"
+    );
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -554,7 +633,10 @@ fn ok_packet_all_primitive_types() {
     "#;
     let ast = parse(src).unwrap();
     let result = analyze(&ast, default_profile(), &Default::default());
-    assert!(result.is_ok(), "packet with all primitive types should succeed");
+    assert!(
+        result.is_ok(),
+        "packet with all primitive types should succeed"
+    );
     let sem = result.unwrap();
     assert_eq!(sem.packets[0].fields.len(), 13);
 }
@@ -600,7 +682,10 @@ fn ok_complex_frame_with_all_features() {
     "#;
     let ast = parse(src).unwrap();
     let result = analyze(&ast, default_profile(), &Default::default());
-    assert!(result.is_ok(), "complex frame with all features should succeed");
+    assert!(
+        result.is_ok(),
+        "complex frame with all features should succeed"
+    );
     let sem = result.unwrap();
     assert_eq!(sem.frames[0].variants.len(), 5);
 }
@@ -787,7 +872,10 @@ fn ok_packet_with_require_and_derived() {
     "#;
     let ast = parse(src).unwrap();
     let result = analyze(&ast, default_profile(), &Default::default());
-    assert!(result.is_ok(), "packet with require and derived should succeed");
+    assert!(
+        result.is_ok(),
+        "packet with require and derived should succeed"
+    );
     let sem = result.unwrap();
     assert_eq!(sem.packets[0].requires.len(), 1);
     assert_eq!(sem.packets[0].derived.len(), 1);
@@ -798,7 +886,10 @@ fn ok_bytes_remaining_as_last() {
     // bytes[remaining] as last field should succeed
     let ast = parse("packet P { x: u8, data: bytes[remaining] }").unwrap();
     let result = analyze(&ast, default_profile(), &Default::default());
-    assert!(result.is_ok(), "bytes[remaining] as last field should succeed");
+    assert!(
+        result.is_ok(),
+        "bytes[remaining] as last field should succeed"
+    );
 }
 
 #[test]
@@ -828,10 +919,7 @@ fn ok_explicit_little_endian_module() {
 fn ok_default_big_endian_module() {
     let ast = parse("packet P { x: u16 }").unwrap();
     let sem = analyze(&ast, default_profile(), &Default::default()).unwrap();
-    assert_eq!(
-        sem.module_endianness,
-        wirespec_sema::types::Endianness::Big
-    );
+    assert_eq!(sem.module_endianness, wirespec_sema::types::Endianness::Big);
 }
 
 #[test]
@@ -840,10 +928,7 @@ fn ok_explicit_endian_type_override() {
     let ast = parse("packet P { x: u16le }").unwrap();
     let sem = analyze(&ast, default_profile(), &Default::default()).unwrap();
     // Module is big-endian, but the field type is explicitly little
-    assert_eq!(
-        sem.module_endianness,
-        wirespec_sema::types::Endianness::Big
-    );
+    assert_eq!(sem.module_endianness, wirespec_sema::types::Endianness::Big);
     assert_eq!(sem.packets[0].fields.len(), 1);
 }
 
@@ -936,7 +1021,10 @@ fn ok_sm_single_terminal_state() {
     "#;
     let ast = parse(src).unwrap();
     let result = analyze(&ast, default_profile(), &Default::default());
-    assert!(result.is_ok(), "SM with single terminal state should succeed");
+    assert!(
+        result.is_ok(),
+        "SM with single terminal state should succeed"
+    );
 }
 
 #[test]
@@ -951,7 +1039,10 @@ fn ok_sm_state_with_multiple_fields() {
     "#;
     let ast = parse(src).unwrap();
     let result = analyze(&ast, default_profile(), &Default::default());
-    assert!(result.is_ok(), "SM state with multiple fields should succeed");
+    assert!(
+        result.is_ok(),
+        "SM state with multiple fields should succeed"
+    );
     let sem = result.unwrap();
     assert_eq!(sem.state_machines[0].states[0].fields.len(), 2);
 }
@@ -1109,14 +1200,24 @@ fn ir_schema_version() {
 #[test]
 fn ir_compliance_profile_strict() {
     let ast = parse("packet P { x: u8 }").unwrap();
-    let sem = analyze(&ast, ComplianceProfile::Phase2StrictV1_0, &Default::default()).unwrap();
+    let sem = analyze(
+        &ast,
+        ComplianceProfile::Phase2StrictV1_0,
+        &Default::default(),
+    )
+    .unwrap();
     assert_eq!(sem.compliance_profile, "phase2_strict_v1_0");
 }
 
 #[test]
 fn ir_compliance_profile_extended() {
     let ast = parse("packet P { x: u8 }").unwrap();
-    let sem = analyze(&ast, ComplianceProfile::Phase2ExtendedCurrent, &Default::default()).unwrap();
+    let sem = analyze(
+        &ast,
+        ComplianceProfile::Phase2ExtendedCurrent,
+        &Default::default(),
+    )
+    .unwrap();
     assert_eq!(sem.compliance_profile, "phase2_extended_current");
 }
 
@@ -1129,14 +1230,20 @@ fn ok_self_reference_in_require() {
     // A require can reference a field declared just before it
     let ast = parse("packet P { x: u8, require x > 0 }").unwrap();
     let result = analyze(&ast, default_profile(), &Default::default());
-    assert!(result.is_ok(), "require referencing preceding field should succeed");
+    assert!(
+        result.is_ok(),
+        "require referencing preceding field should succeed"
+    );
 }
 
 #[test]
 fn ok_derived_references_preceding_field() {
     let ast = parse("packet P { x: u8, let doubled: u8 = x + x }").unwrap();
     let result = analyze(&ast, default_profile(), &Default::default());
-    assert!(result.is_ok(), "derived referencing preceding field should succeed");
+    assert!(
+        result.is_ok(),
+        "derived referencing preceding field should succeed"
+    );
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -1218,7 +1325,11 @@ fn ok_sm_events_are_unique() {
     let sem = analyze(&ast, default_profile(), &Default::default()).unwrap();
     let sm = &sem.state_machines[0];
     // "step" event is used in two transitions but should appear only once in events
-    assert_eq!(sm.events.len(), 1, "duplicate event names should be deduplicated");
+    assert_eq!(
+        sm.events.len(),
+        1,
+        "duplicate event names should be deduplicated"
+    );
     assert_eq!(sm.events[0].name, "step");
 }
 
@@ -1267,7 +1378,10 @@ fn error_array_count_non_integer() {
     let src = "packet Inner { x: u8 } packet P { data: bytes[4], items: [Inner; data] }";
     let ast = parse(src).unwrap();
     let result = analyze(&ast, default_profile(), &Default::default());
-    assert!(result.is_err(), "array count with non-integer ref should fail");
+    assert!(
+        result.is_err(),
+        "array count with non-integer ref should fail"
+    );
     assert_eq!(result.unwrap_err().kind, ErrorKind::InvalidArrayCount);
 }
 
@@ -1276,5 +1390,8 @@ fn ok_array_count_integer() {
     let src = "packet Inner { x: u8 } packet P { count: u8, items: [Inner; count] }";
     let ast = parse(src).unwrap();
     let result = analyze(&ast, default_profile(), &Default::default());
-    assert!(result.is_ok(), "array count with integer ref should succeed");
+    assert!(
+        result.is_ok(),
+        "array count with integer ref should succeed"
+    );
 }

@@ -28,10 +28,7 @@ pub fn validate_remaining_is_last(fields: &[FieldDescriptor]) -> SemaResult<()> 
 }
 
 /// Spec §3.11: at most one @checksum per scope.
-pub fn validate_single_checksum(
-    checksum_fields: &[&str],
-    scope_desc: &str,
-) -> SemaResult<()> {
+pub fn validate_single_checksum(checksum_fields: &[&str], scope_desc: &str) -> SemaResult<()> {
     if checksum_fields.len() > 1 {
         return Err(SemaError::new(
             ErrorKind::DuplicateChecksum,
@@ -53,14 +50,12 @@ pub fn validate_no_forward_refs(
 ) -> SemaResult<()> {
     for name in referenced {
         if !declared.contains(name) {
-            return Err(
-                SemaError::new(
-                    ErrorKind::ForwardReference,
-                    format!("field '{field_name}' references undeclared '{name}'"),
-                )
-                .with_span(span)
-                .with_hint(format!("'{name}' must be declared before '{field_name}'")),
-            );
+            return Err(SemaError::new(
+                ErrorKind::ForwardReference,
+                format!("field '{field_name}' references undeclared '{name}'"),
+            )
+            .with_span(span)
+            .with_hint(format!("'{name}' must be declared before '{field_name}'")));
         }
     }
     Ok(())
@@ -91,10 +86,7 @@ pub fn validate_checksum_profile(
     algorithm: &str,
     profile: crate::profile::ComplianceProfile,
 ) -> SemaResult<()> {
-    if !profile
-        .allowed_checksum_algorithms()
-        .contains(&algorithm)
-    {
+    if !profile.allowed_checksum_algorithms().contains(&algorithm) {
         return Err(SemaError::new(
             ErrorKind::ChecksumProfileViolation,
             format!(

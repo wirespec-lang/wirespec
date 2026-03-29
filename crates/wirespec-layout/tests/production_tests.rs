@@ -1,6 +1,6 @@
 use wirespec_layout::lower::lower;
-use wirespec_sema::{analyze, ComplianceProfile};
 use wirespec_sema::types::Endianness;
+use wirespec_sema::{ComplianceProfile, analyze};
 
 fn layout(src: &str) -> wirespec_layout::ir::LayoutModule {
     let ast = wirespec_syntax::parse(src).unwrap();
@@ -237,16 +237,19 @@ fn bitgroup_fields_have_member_ref() {
 
 #[test]
 fn bitgroup_in_frame_variant() {
-    let l = layout(r#"frame F = match t: u8 {
+    let l = layout(
+        r#"frame F = match t: u8 {
         0 => A { x: bits[4], y: bits[4], z: u16 },
         _ => B { data: bytes[remaining] },
-    }"#);
+    }"#,
+    );
     assert_eq!(l.frames[0].variants[0].bitgroups.len(), 1);
 }
 
 #[test]
 fn bitgroup_in_capsule_header() {
-    let l = layout(r#"capsule C {
+    let l = layout(
+        r#"capsule C {
         flags: bits[4],
         type_field: bits[4],
         length: u16,
@@ -254,7 +257,8 @@ fn bitgroup_in_capsule_header() {
             0 => D { data: bytes[remaining] },
             _ => U { data: bytes[remaining] },
         },
-    }"#);
+    }"#,
+    );
     assert!(!l.capsules[0].header_bitgroups.is_empty());
     assert_eq!(l.capsules[0].header_bitgroups[0].total_bits, 8);
 }
@@ -273,40 +277,48 @@ fn bitgroup_unaligned_error() {
 
 #[test]
 fn frame_tag_u8_no_endianness() {
-    let l = layout(r#"frame F = match t: u8 {
+    let l = layout(
+        r#"frame F = match t: u8 {
         0 => A {},
         _ => B { data: bytes[remaining] },
-    }"#);
+    }"#,
+    );
     assert!(l.frames[0].tag_endianness.is_none());
 }
 
 #[test]
 fn frame_tag_u16_has_endianness() {
-    let l = layout(r#"frame F = match t: u16 {
+    let l = layout(
+        r#"frame F = match t: u16 {
         0 => A {},
         _ => B { data: bytes[remaining] },
-    }"#);
+    }"#,
+    );
     assert!(l.frames[0].tag_endianness.is_some());
 }
 
 #[test]
 fn frame_variant_count() {
-    let l = layout(r#"frame F = match t: u8 {
+    let l = layout(
+        r#"frame F = match t: u8 {
         0 => A {},
         1 => B { x: u8 },
         2 => C { y: u16 },
         _ => D { data: bytes[remaining] },
-    }"#);
+    }"#,
+    );
     assert_eq!(l.frames[0].variants.len(), 4);
 }
 
 #[test]
 fn frame_variant_fields_correct() {
-    let l = layout(r#"frame F = match t: u8 {
+    let l = layout(
+        r#"frame F = match t: u8 {
         0 => A {},
         1 => B { x: u8, y: u16 },
         _ => C { data: bytes[remaining] },
-    }"#);
+    }"#,
+    );
     assert_eq!(l.frames[0].variants[0].fields.len(), 0);
     assert_eq!(l.frames[0].variants[1].fields.len(), 2);
     assert_eq!(l.frames[0].variants[2].fields.len(), 1);
@@ -316,13 +328,15 @@ fn frame_variant_fields_correct() {
 
 #[test]
 fn capsule_header_and_variant_fields() {
-    let l = layout(r#"capsule C {
+    let l = layout(
+        r#"capsule C {
         type_field: u8, length: u16,
         payload: match type_field within length {
             0 => D { x: u8, y: u16 },
             _ => U { data: bytes[remaining] },
         },
-    }"#);
+    }"#,
+    );
     assert_eq!(l.capsules[0].header_fields.len(), 2);
     assert_eq!(l.capsules[0].variants[0].fields.len(), 2);
     assert_eq!(l.capsules[0].variants[1].fields.len(), 1);
@@ -330,7 +344,8 @@ fn capsule_header_and_variant_fields() {
 
 #[test]
 fn capsule_variant_count() {
-    let l = layout(r#"capsule C {
+    let l = layout(
+        r#"capsule C {
         type_field: u8, length: u16,
         payload: match type_field within length {
             0 => A { data: bytes[remaining] },
@@ -338,7 +353,8 @@ fn capsule_variant_count() {
             2 => C { data: bytes[remaining] },
             _ => D { data: bytes[remaining] },
         },
-    }"#);
+    }"#,
+    );
     assert_eq!(l.capsules[0].variants.len(), 4);
 }
 
@@ -438,9 +454,11 @@ fn mixed_field_types() {
 
 #[test]
 fn empty_frame_variant() {
-    let l = layout(r#"frame F = match t: u8 {
+    let l = layout(
+        r#"frame F = match t: u8 {
         0 => Empty {},
         _ => Other { data: bytes[remaining] },
-    }"#);
+    }"#,
+    );
     assert_eq!(l.frames[0].variants[0].fields.len(), 0);
 }
