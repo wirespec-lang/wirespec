@@ -47,7 +47,7 @@ QUIC, TLS 1.3, MQTT, BLE, IPv4, TCP, Ethernet — all defined and tested in `exa
 
 ## Documentation
 
-Full language guide, reference, and cookbook: [wirespec.dev](https://docs.wirespec.org)
+Full language guide, reference, and cookbook: [docs.wirespec.org](https://docs.wirespec.org)
 
 ## Roadmap
 
