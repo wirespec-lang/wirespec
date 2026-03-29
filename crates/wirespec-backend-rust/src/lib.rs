@@ -29,7 +29,8 @@ impl Backend for RustBackend {
         module: &CodecModule,
         ctx: &BackendContext,
     ) -> Result<Self::LoweredModule, BackendError> {
-        ctx.target_options.downcast_ref::<RustBackendOptions>()
+        ctx.target_options
+            .downcast_ref::<RustBackendOptions>()
             .ok_or_else(|| BackendError::UnsupportedOption {
                 target: TARGET_RUST,
                 option: "target_options".into(),

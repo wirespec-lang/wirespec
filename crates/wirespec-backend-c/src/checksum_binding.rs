@@ -2,8 +2,8 @@
 //
 // C checksum runtime bindings.
 
-use wirespec_backend_api::*;
 use crate::TARGET_C;
+use wirespec_backend_api::*;
 
 pub struct CChecksumBindings;
 

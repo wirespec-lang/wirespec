@@ -43,9 +43,7 @@ pub fn wire_type_to_c(wt: &WireType, prefix: &str) -> String {
 /// C cursor-read function for a primitive/endian combo.
 pub fn cursor_read_fn(wt: &WireType, endianness: Option<Endianness>) -> &'static str {
     match (wt, endianness) {
-        (WireType::U8, _) | (WireType::Bool, _) | (WireType::Bit, _) => {
-            "wirespec_cursor_read_u8"
-        }
+        (WireType::U8, _) | (WireType::Bool, _) | (WireType::Bit, _) => "wirespec_cursor_read_u8",
         (WireType::U16, Some(Endianness::Little)) => "wirespec_cursor_read_u16le",
         (WireType::U16, _) => "wirespec_cursor_read_u16be",
         (WireType::U24, Some(Endianness::Little)) => "wirespec_cursor_read_u24le",

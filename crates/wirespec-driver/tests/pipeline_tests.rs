@@ -106,11 +106,7 @@ fn pipeline_with_external_types() {
         },
     );
     // VarInt is registered as an external type, so sema should resolve it.
-    let codec = compile_module(
-        "packet P { x: VarInt }",
-        ComplianceProfile::default(),
-        &ext,
-    )
-    .unwrap();
+    let codec =
+        compile_module("packet P { x: VarInt }", ComplianceProfile::default(), &ext).unwrap();
     assert_eq!(codec.packets.len(), 1);
 }

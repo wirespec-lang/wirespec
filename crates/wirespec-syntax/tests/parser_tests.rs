@@ -255,7 +255,10 @@ fn parse_computed_type() {
                 AstTypeDeclBody::Fields { fields } => {
                     assert_eq!(fields.len(), 2);
                     assert_eq!(fields[0].name, "prefix");
-                    assert!(matches!(&fields[0].type_expr, AstTypeExpr::Bits { width: 2, .. }));
+                    assert!(matches!(
+                        &fields[0].type_expr,
+                        AstTypeExpr::Bits { width: 2, .. }
+                    ));
                     assert!(matches!(&fields[1].type_expr, AstTypeExpr::Match { .. }));
                 }
                 _ => panic!("expected fields"),
@@ -335,7 +338,10 @@ fn parse_packet_with_require() {
                 assert_eq!(f.name, "data");
                 assert!(matches!(
                     &f.type_expr,
-                    AstTypeExpr::Bytes { kind: AstBytesKind::Length, .. }
+                    AstTypeExpr::Bytes {
+                        kind: AstBytesKind::Length,
+                        ..
+                    }
                 ));
             }
         }
@@ -424,7 +430,9 @@ fn parse_packet_with_array() {
         AstTopItem::Packet(p) => {
             if let AstFieldItem::Field(f) = &p.fields[1] {
                 if let AstTypeExpr::Array { count, .. } = &f.type_expr {
-                    assert!(matches!(count, AstArrayCount::Expr(AstExpr::NameRef { name, .. }) if name == "count"));
+                    assert!(
+                        matches!(count, AstArrayCount::Expr(AstExpr::NameRef { name, .. }) if name == "count")
+                    );
                 } else {
                     panic!("expected array type");
                 }
@@ -467,7 +475,10 @@ fn parse_packet_bytes_remaining() {
             if let AstFieldItem::Field(f) = &p.fields[0] {
                 assert!(matches!(
                     &f.type_expr,
-                    AstTypeExpr::Bytes { kind: AstBytesKind::Remaining, .. }
+                    AstTypeExpr::Bytes {
+                        kind: AstBytesKind::Remaining,
+                        ..
+                    }
                 ));
             }
         }
@@ -488,7 +499,11 @@ fn parse_packet_bytes_fixed() {
             if let AstFieldItem::Field(f) = &p.fields[0] {
                 assert!(matches!(
                     &f.type_expr,
-                    AstTypeExpr::Bytes { kind: AstBytesKind::Fixed, fixed_size: Some(6), .. }
+                    AstTypeExpr::Bytes {
+                        kind: AstBytesKind::Fixed,
+                        fixed_size: Some(6),
+                        ..
+                    }
                 ));
             }
         }
@@ -510,7 +525,10 @@ fn parse_packet_bytes_length_or_remaining() {
             if let AstFieldItem::Field(f) = &p.fields[1] {
                 assert!(matches!(
                     &f.type_expr,
-                    AstTypeExpr::Bytes { kind: AstBytesKind::LengthOrRemaining, .. }
+                    AstTypeExpr::Bytes {
+                        kind: AstBytesKind::LengthOrRemaining,
+                        ..
+                    }
                 ));
             }
         }
@@ -566,11 +584,19 @@ fn parse_frame_with_range_pattern() {
         AstTopItem::Frame(f) => {
             assert!(matches!(
                 &f.branches[0].pattern,
-                AstPattern::RangeInclusive { start: 2, end: 3, .. }
+                AstPattern::RangeInclusive {
+                    start: 2,
+                    end: 3,
+                    ..
+                }
             ));
             assert!(matches!(
                 &f.branches[1].pattern,
-                AstPattern::RangeInclusive { start: 8, end: 15, .. }
+                AstPattern::RangeInclusive {
+                    start: 8,
+                    end: 15,
+                    ..
+                }
             ));
         }
         _ => panic!("expected frame"),
@@ -642,10 +668,7 @@ fn parse_capsule_expr_tag() {
     .unwrap();
     match &m.items[0] {
         AstTopItem::Capsule(c) => {
-            assert!(matches!(
-                &c.payload_tag,
-                AstPayloadTagSelector::Expr { .. }
-            ));
+            assert!(matches!(&c.payload_tag, AstPayloadTagSelector::Expr { .. }));
         }
         _ => panic!("expected capsule"),
     }
@@ -661,7 +684,13 @@ fn parse_expr_arithmetic() {
     match &m.items[0] {
         AstTopItem::StaticAssert(sa) => {
             // Should be 1 + (2 * 3), i.e. Add(1, Mul(2, 3))
-            if let AstExpr::Binary { op: BinOp::Add, left, right, .. } = &sa.expr {
+            if let AstExpr::Binary {
+                op: BinOp::Add,
+                left,
+                right,
+                ..
+            } = &sa.expr
+            {
                 assert!(matches!(**left, AstExpr::Int { value: 1, .. }));
                 assert!(matches!(**right, AstExpr::Binary { op: BinOp::Mul, .. }));
             } else {
@@ -678,8 +707,20 @@ fn parse_expr_bitwise_binds_tighter_than_comparison() {
     let m = parse("static_assert a & mask == 0").unwrap();
     match &m.items[0] {
         AstTopItem::StaticAssert(sa) => {
-            if let AstExpr::Binary { op: BinOp::Eq, left, right, .. } = &sa.expr {
-                assert!(matches!(**left, AstExpr::Binary { op: BinOp::BitAnd, .. }));
+            if let AstExpr::Binary {
+                op: BinOp::Eq,
+                left,
+                right,
+                ..
+            } = &sa.expr
+            {
+                assert!(matches!(
+                    **left,
+                    AstExpr::Binary {
+                        op: BinOp::BitAnd,
+                        ..
+                    }
+                ));
                 assert!(matches!(**right, AstExpr::Int { value: 0, .. }));
             } else {
                 panic!("expected eq with bitand lhs: {:?}", sa.expr);
@@ -740,7 +781,13 @@ fn parse_expr_state_constructor() {
     match &m.items[0] {
         AstTopItem::StaticAssert(sa) => {
             if let AstExpr::Binary { left, .. } = &sa.expr {
-                if let AstExpr::StateConstructor { sm_name, state_name, args, .. } = &**left {
+                if let AstExpr::StateConstructor {
+                    sm_name,
+                    state_name,
+                    args,
+                    ..
+                } = &**left
+                {
                     assert_eq!(sm_name, "PathState");
                     assert_eq!(state_name, "Active");
                     assert_eq!(args.len(), 3);
@@ -771,7 +818,13 @@ fn parse_expr_unary_not() {
     let m = parse("static_assert !(x == 0)").unwrap();
     match &m.items[0] {
         AstTopItem::StaticAssert(sa) => {
-            assert!(matches!(&sa.expr, AstExpr::Unary { op: UnaryOp::Not, .. }));
+            assert!(matches!(
+                &sa.expr,
+                AstExpr::Unary {
+                    op: UnaryOp::Not,
+                    ..
+                }
+            ));
         }
         _ => panic!("expected static_assert"),
     }
@@ -783,7 +836,13 @@ fn parse_expr_unary_neg() {
     match &m.items[0] {
         AstTopItem::StaticAssert(sa) => {
             if let AstExpr::Binary { left, .. } = &sa.expr {
-                assert!(matches!(**left, AstExpr::Unary { op: UnaryOp::Neg, .. }));
+                assert!(matches!(
+                    **left,
+                    AstExpr::Unary {
+                        op: UnaryOp::Neg,
+                        ..
+                    }
+                ));
             }
         }
         _ => panic!("expected static_assert"),
@@ -796,7 +855,12 @@ fn parse_expr_shift() {
     match &m.items[0] {
         AstTopItem::StaticAssert(sa) => {
             // Should be (x >> 4) == 1 because shift binds tighter than comparison
-            if let AstExpr::Binary { op: BinOp::Eq, left, .. } = &sa.expr {
+            if let AstExpr::Binary {
+                op: BinOp::Eq,
+                left,
+                ..
+            } = &sa.expr
+            {
                 assert!(matches!(**left, AstExpr::Binary { op: BinOp::Shr, .. }));
             }
         }
@@ -853,7 +917,10 @@ fn parse_state_machine_basic() {
 
             assert_eq!(sm.states[1].name, "Active");
             assert_eq!(sm.states[1].fields.len(), 2);
-            assert_eq!(sm.states[1].fields[1].default_value, Some(AstLiteralValue::Int(0)));
+            assert_eq!(
+                sm.states[1].fields[1].default_value,
+                Some(AstLiteralValue::Int(0))
+            );
 
             assert_eq!(sm.states[2].name, "Closed");
             assert!(sm.states[2].is_terminal);
@@ -1214,7 +1281,12 @@ fn error_frame_missing_match() {
 #[test]
 fn error_capsule_missing_within() {
     // Capsule payload match must have "within" keyword
-    assert!(parse("capsule C { t: u8, l: u16, payload: match t { 0 => D { data: bytes[remaining] } } }").is_err());
+    assert!(
+        parse(
+            "capsule C { t: u8, l: u16, payload: match t { 0 => D { data: bytes[remaining] } } }"
+        )
+        .is_err()
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

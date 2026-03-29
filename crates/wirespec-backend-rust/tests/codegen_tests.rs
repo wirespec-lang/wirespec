@@ -3,12 +3,17 @@
 // Integration tests for the Rust backend.
 
 use wirespec_backend_api::*;
-use wirespec_backend_rust::checksum_binding::RustChecksumBindings;
 use wirespec_backend_rust::RustBackend;
+use wirespec_backend_rust::checksum_binding::RustChecksumBindings;
 
 fn generate_rust(src: &str) -> String {
     let ast = wirespec_syntax::parse(src).unwrap();
-    let sem = wirespec_sema::analyze(&ast, wirespec_sema::ComplianceProfile::default(), &Default::default()).unwrap();
+    let sem = wirespec_sema::analyze(
+        &ast,
+        wirespec_sema::ComplianceProfile::default(),
+        &Default::default(),
+    )
+    .unwrap();
     let layout = wirespec_layout::lower(&sem).unwrap();
     let codec = wirespec_codec::lower(&layout).unwrap();
     let backend = RustBackend;
@@ -34,7 +39,10 @@ fn codegen_simple_packet() {
     assert!(rs.contains("pub y: u16"), "should contain y: u16");
     assert!(rs.contains("fn parse"), "should contain fn parse");
     assert!(rs.contains("fn serialize"), "should contain fn serialize");
-    assert!(rs.contains("fn serialized_len"), "should contain fn serialized_len");
+    assert!(
+        rs.contains("fn serialized_len"),
+        "should contain fn serialized_len"
+    );
 }
 
 #[test]
@@ -61,7 +69,10 @@ fn codegen_frame() {
 #[test]
 fn codegen_bitgroup() {
     let rs = generate_rust("packet P { a: bits[4], b: bits[4], c: u16 }");
-    assert!(rs.contains(">>"), "should contain shift right for extraction");
+    assert!(
+        rs.contains(">>"),
+        "should contain shift right for extraction"
+    );
     assert!(rs.contains("& 0xf"), "should contain mask for 4-bit field");
 }
 
@@ -74,7 +85,10 @@ fn codegen_array() {
 #[test]
 fn codegen_enum_def() {
     let rs = generate_rust("enum E: u8 { A = 0, B = 1 }");
-    assert!(rs.contains("pub const"), "should contain pub const for enum values");
+    assert!(
+        rs.contains("pub const"),
+        "should contain pub const for enum values"
+    );
 }
 
 #[test]
@@ -86,13 +100,21 @@ fn codegen_derived_field() {
 #[test]
 fn codegen_require() {
     let rs = generate_rust("packet P { length: u16, require length >= 8 }");
-    assert!(rs.contains("Error::Constraint"), "should contain constraint check");
+    assert!(
+        rs.contains("Error::Constraint"),
+        "should contain constraint check"
+    );
 }
 
 #[test]
 fn codegen_artifact_emission() {
     let ast = wirespec_syntax::parse("packet P { x: u8 }").unwrap();
-    let sem = wirespec_sema::analyze(&ast, wirespec_sema::ComplianceProfile::default(), &Default::default()).unwrap();
+    let sem = wirespec_sema::analyze(
+        &ast,
+        wirespec_sema::ComplianceProfile::default(),
+        &Default::default(),
+    )
+    .unwrap();
     let layout = wirespec_layout::lower(&sem).unwrap();
     let codec = wirespec_codec::lower(&layout).unwrap();
     let backend = RustBackend;
@@ -110,9 +132,18 @@ fn codegen_artifact_emission() {
 
     let mut sink = MemorySink::new();
     Backend::emit(&backend, &lowered, &mut sink).unwrap();
-    assert_eq!(sink.artifacts.len(), 1, "should produce a single .rs artifact");
+    assert_eq!(
+        sink.artifacts.len(),
+        1,
+        "should produce a single .rs artifact"
+    );
     assert!(
-        sink.artifacts[0].0.relative_path.to_str().unwrap().ends_with(".rs"),
+        sink.artifacts[0]
+            .0
+            .relative_path
+            .to_str()
+            .unwrap()
+            .ends_with(".rs"),
         "artifact should be a .rs file"
     );
 }
@@ -133,9 +164,18 @@ fn codegen_rust_varint_prefix_match() {
         },
     }"#;
     let rs = generate_rust(src);
-    assert!(rs.contains("fn var_int_parse"), "should contain parse function");
-    assert!(rs.contains("fn var_int_serialize"), "should contain serialize function");
-    assert!(rs.contains("fn var_int_wire_size"), "should contain wire_size function");
+    assert!(
+        rs.contains("fn var_int_parse"),
+        "should contain parse function"
+    );
+    assert!(
+        rs.contains("fn var_int_serialize"),
+        "should contain serialize function"
+    );
+    assert!(
+        rs.contains("fn var_int_wire_size"),
+        "should contain wire_size function"
+    );
     assert!(rs.contains("match prefix"), "should contain prefix match");
 }
 
@@ -148,9 +188,18 @@ fn codegen_rust_varint_continuation_bit() {
         byte_order: little,
     }"#;
     let rs = generate_rust(src);
-    assert!(rs.contains("fn mqtt_len_parse"), "should contain parse function");
-    assert!(rs.contains("fn mqtt_len_serialize"), "should contain serialize function");
-    assert!(rs.contains("fn mqtt_len_wire_size"), "should contain wire_size function");
+    assert!(
+        rs.contains("fn mqtt_len_parse"),
+        "should contain parse function"
+    );
+    assert!(
+        rs.contains("fn mqtt_len_serialize"),
+        "should contain serialize function"
+    );
+    assert!(
+        rs.contains("fn mqtt_len_wire_size"),
+        "should contain wire_size function"
+    );
     assert!(rs.contains("0x7f"), "should contain value mask");
     assert!(rs.contains("0x80"), "should contain continuation mask");
 }
@@ -214,7 +263,10 @@ fn codegen_rust_state_machine_with_guard_and_action() {
     "#;
     let rs = generate_rust(src);
     assert!(rs.contains("pub enum Counter"), "should contain state enum");
-    assert!(rs.contains("pub enum CounterEvent"), "should contain event enum");
+    assert!(
+        rs.contains("pub enum CounterEvent"),
+        "should contain event enum"
+    );
     assert!(rs.contains("dispatch"), "should contain dispatch method");
     assert!(rs.contains("InvalidState"), "should contain guard error");
 }
@@ -247,28 +299,55 @@ fn codegen_rust_state_machine_event_params() {
 fn codegen_rust_checksum_internet() {
     let src = "packet P { data: u32, @checksum(internet) checksum: u16 }";
     let rs = generate_rust(src);
-    assert!(rs.contains("internet_checksum"), "should contain internet_checksum call for verify");
-    assert!(rs.contains("internet_checksum_compute"), "should contain internet_checksum_compute call for serialize");
-    assert!(rs.contains("Error::Checksum"), "should contain Checksum error");
+    assert!(
+        rs.contains("internet_checksum"),
+        "should contain internet_checksum call for verify"
+    );
+    assert!(
+        rs.contains("internet_checksum_compute"),
+        "should contain internet_checksum_compute call for serialize"
+    );
+    assert!(
+        rs.contains("Error::Checksum"),
+        "should contain Checksum error"
+    );
     assert!(rs.contains("_start"), "should track start position");
-    assert!(rs.contains("_cksum_offset"), "should track checksum field offset for serialize");
+    assert!(
+        rs.contains("_cksum_offset"),
+        "should track checksum field offset for serialize"
+    );
 }
 
 #[test]
 fn codegen_rust_checksum_crc32() {
     let src = "packet P { data: u32, @checksum(crc32) checksum: u32 }";
     let rs = generate_rust(src);
-    assert!(rs.contains("crc32_verify"), "should contain crc32_verify call");
-    assert!(rs.contains("crc32_compute"), "should contain crc32_compute call");
-    assert!(rs.contains("Error::Checksum"), "should contain Checksum error");
+    assert!(
+        rs.contains("crc32_verify"),
+        "should contain crc32_verify call"
+    );
+    assert!(
+        rs.contains("crc32_compute"),
+        "should contain crc32_compute call"
+    );
+    assert!(
+        rs.contains("Error::Checksum"),
+        "should contain Checksum error"
+    );
 }
 
 #[test]
 fn codegen_rust_checksum_fletcher16() {
     let src = "packet P { data: u32, @checksum(fletcher16) checksum: u16 }";
     let rs = generate_rust(src);
-    assert!(rs.contains("fletcher16_verify"), "should contain fletcher16_verify call");
-    assert!(rs.contains("fletcher16_compute"), "should contain fletcher16_compute call");
+    assert!(
+        rs.contains("fletcher16_verify"),
+        "should contain fletcher16_verify call"
+    );
+    assert!(
+        rs.contains("fletcher16_compute"),
+        "should contain fletcher16_compute call"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -317,7 +396,10 @@ fn codegen_rust_delegate_transition() {
     let rs = generate_rust(src);
     // Delegate transition should auto-copy and reference child SM
     assert!(rs.contains("clone") || rs.contains("delegate"));
-    assert!(rs.contains("child"), "should reference child field in delegate");
+    assert!(
+        rs.contains("child"),
+        "should reference child field in delegate"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -362,7 +444,10 @@ fn codegen_rust_sm_action_field_copy() {
     assert!(rs.contains("count"), "should contain count field in action");
     assert!(rs.contains("data"), "should contain data field in action");
     // Should contain guard check
-    assert!(rs.contains("< 10") || rs.contains("<10"), "should contain guard comparison");
+    assert!(
+        rs.contains("< 10") || rs.contains("<10"),
+        "should contain guard comparison"
+    );
 }
 
 #[test]

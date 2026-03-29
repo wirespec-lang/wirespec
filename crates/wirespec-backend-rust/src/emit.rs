@@ -3,13 +3,13 @@
 // Full .rs file emission: structs, enums, impl blocks, frames, capsules,
 // varints, state machines.
 
-use wirespec_codec::ir::*;
-use wirespec_sema::ir::*;
-use wirespec_sema::expr::{SemanticExpr, SemanticLiteral, TransitionPeerKind};
 use crate::names::*;
 use crate::parse_emit;
 use crate::serialize_emit;
 use crate::type_map::*;
+use wirespec_codec::ir::*;
+use wirespec_sema::expr::{SemanticExpr, SemanticLiteral, TransitionPeerKind};
+use wirespec_sema::ir::*;
 
 const MAX_ARRAY_ELEMENTS: u32 = 256;
 
@@ -203,10 +203,9 @@ fn emit_packet(out: &mut String, packet: &CodecPacket) {
     let has_cksum = packet.checksum_plan.is_some();
     // Parse needs offset tracking for recompute-compare algorithms (CRC, fletcher)
     let parse_needs_offset = has_cksum
-        && packet
-            .checksum_plan
-            .as_ref()
-            .map_or(false, |p| p.input_model == ChecksumInputModel::RecomputeWithSkippedField);
+        && packet.checksum_plan.as_ref().map_or(false, |p| {
+            p.input_model == ChecksumInputModel::RecomputeWithSkippedField
+        });
     // Serialize always needs offset tracking when checksum is present (all algorithms need it)
 
     // Struct definition
@@ -342,9 +341,7 @@ fn emit_serialize_items_with_cksum_tracking(
         if let CodecItem::Field { field_id } = item {
             if let Some(f) = fields.iter().find(|f| &f.field_id == field_id) {
                 if f.name == cksum_field_name {
-                    out.push_str(&format!(
-                        "{indent}_cksum_offset = w.written() - _start;\n"
-                    ));
+                    out.push_str(&format!("{indent}_cksum_offset = w.written() - _start;\n"));
                 }
             }
         }
@@ -354,11 +351,7 @@ fn emit_serialize_items_with_cksum_tracking(
 }
 
 /// Emit checksum verification code after parse.
-fn emit_checksum_verify_rust(
-    out: &mut String,
-    plan: &ChecksumPlan,
-    indent: &str,
-) {
+fn emit_checksum_verify_rust(out: &mut String, plan: &ChecksumPlan, indent: &str) {
     use wirespec_sema::checksum_catalog;
 
     let algo = &plan.algorithm_id;
@@ -367,25 +360,19 @@ fn emit_checksum_verify_rust(
     match spec.map(|s| s.verify_mode) {
         Some(checksum_catalog::ChecksumVerifyMode::ZeroSum) => {
             // Zero-sum verify: sum of entire scope including checksum field == 0
-            out.push_str(&format!(
-                "{indent}{{\n"
-            ));
+            out.push_str(&format!("{indent}{{\n"));
             out.push_str(&format!(
                 "{indent}    let _cksum = {algo}_checksum(&cur.bytes()[_start..cur.consumed()]);\n"
             ));
             out.push_str(&format!(
                 "{indent}    if _cksum != 0 {{ return Err(Error::Checksum); }}\n"
             ));
-            out.push_str(&format!(
-                "{indent}}}\n"
-            ));
+            out.push_str(&format!("{indent}}}\n"));
         }
         Some(checksum_catalog::ChecksumVerifyMode::RecomputeCompare) => {
             // Recompute skipping the checksum field, compare
             let width = plan.field_width_bytes;
-            out.push_str(&format!(
-                "{indent}{{\n"
-            ));
+            out.push_str(&format!("{indent}{{\n"));
             out.push_str(&format!(
                 "{indent}    let _scope = &cur.bytes()[_start..cur.consumed()];\n"
             ));
@@ -396,9 +383,7 @@ fn emit_checksum_verify_rust(
                 "{indent}    if {field} != _computed {{ return Err(Error::Checksum); }}\n",
                 field = plan.field_name,
             ));
-            out.push_str(&format!(
-                "{indent}}}\n"
-            ));
+            out.push_str(&format!("{indent}}}\n"));
         }
         None => {
             out.push_str(&format!(
@@ -409,48 +394,30 @@ fn emit_checksum_verify_rust(
 }
 
 /// Emit checksum compute code after serialize.
-fn emit_checksum_compute_rust(
-    out: &mut String,
-    plan: &ChecksumPlan,
-    indent: &str,
-) {
+fn emit_checksum_compute_rust(out: &mut String, plan: &ChecksumPlan, indent: &str) {
     use wirespec_sema::checksum_catalog;
 
     let algo = &plan.algorithm_id;
     let spec = checksum_catalog::lookup(algo);
 
-    out.push_str(&format!(
-        "{indent}// Checksum compute ({algo})\n"
-    ));
+    out.push_str(&format!("{indent}// Checksum compute ({algo})\n"));
 
     match spec.map(|s| s.verify_mode) {
         Some(checksum_catalog::ChecksumVerifyMode::ZeroSum) => {
             // Zero-sum compute: patch-in-place
-            out.push_str(&format!(
-                "{indent}{{\n"
-            ));
-            out.push_str(&format!(
-                "{indent}    let _written = w.as_written_mut();\n"
-            ));
+            out.push_str(&format!("{indent}{{\n"));
+            out.push_str(&format!("{indent}    let _written = w.as_written_mut();\n"));
             out.push_str(&format!(
                 "{indent}    {algo}_checksum_compute(&mut _written[_start..], _cksum_offset);\n"
             ));
-            out.push_str(&format!(
-                "{indent}}}\n"
-            ));
+            out.push_str(&format!("{indent}}}\n"));
         }
         Some(checksum_catalog::ChecksumVerifyMode::RecomputeCompare) => {
             // Recompute: compute value, write bytes big-endian
             let width = plan.field_width_bytes;
-            out.push_str(&format!(
-                "{indent}{{\n"
-            ));
-            out.push_str(&format!(
-                "{indent}    let _end = w.written();\n"
-            ));
-            out.push_str(&format!(
-                "{indent}    let _written = w.as_written_mut();\n"
-            ));
+            out.push_str(&format!("{indent}{{\n"));
+            out.push_str(&format!("{indent}    let _end = w.written();\n"));
+            out.push_str(&format!("{indent}    let _written = w.as_written_mut();\n"));
             out.push_str(&format!(
                 "{indent}    let _val = {algo}_compute(&mut _written[_start.._end], _cksum_offset);\n"
             ));
@@ -460,9 +427,7 @@ fn emit_checksum_compute_rust(
                     "{indent}    _written[_start + _cksum_offset + {i}] = ((_val >> {shift}) & 0xFF) as u8;\n"
                 ));
             }
-            out.push_str(&format!(
-                "{indent}}}\n"
-            ));
+            out.push_str(&format!("{indent}}}\n"));
         }
         None => {
             out.push_str(&format!(
@@ -485,7 +450,12 @@ fn emit_frame(out: &mut String, frame: &CodecFrame) {
     out.push_str(&format!("pub enum {type_name}{lt} {{\n"));
     for variant in &frame.variants {
         let variant_name = to_pascal_case(&variant.name);
-        if variant.fields.is_empty() && !variant.items.iter().any(|i| matches!(i, CodecItem::Derived(_))) {
+        if variant.fields.is_empty()
+            && !variant
+                .items
+                .iter()
+                .any(|i| matches!(i, CodecItem::Derived(_)))
+        {
             out.push_str(&format!("    {variant_name},\n"));
         } else {
             out.push_str(&format!("    {variant_name} {{\n"));
@@ -597,11 +567,7 @@ fn emit_capsule(out: &mut String, capsule: &CodecCapsule) {
 // ── Shared helpers ──
 
 /// Emit struct fields for packets and capsule headers.
-fn emit_struct_fields(
-    out: &mut String,
-    fields: &[CodecField],
-    items: &[CodecItem],
-) {
+fn emit_struct_fields(out: &mut String, fields: &[CodecField], items: &[CodecItem]) {
     for item in items {
         match item {
             CodecItem::Field { field_id } => {
@@ -633,10 +599,7 @@ fn emit_single_struct_field(out: &mut String, f: &CodecField) {
             if let Some(ref arr) = f.array_spec {
                 let elem_ty = rust_field_type(&arr.element_wire_type);
                 let max_elems = f.max_elements.unwrap_or(MAX_ARRAY_ELEMENTS);
-                out.push_str(&format!(
-                    "    pub {}: [{elem_ty}; {max_elems}],\n",
-                    f.name
-                ));
+                out.push_str(&format!("    pub {}: [{elem_ty}; {max_elems}],\n", f.name));
                 out.push_str(&format!("    pub {}_count: usize,\n", f.name));
             }
         }
@@ -737,10 +700,7 @@ fn emit_variant_single_field(out: &mut String, f: &CodecField) {
             if let Some(ref arr) = f.array_spec {
                 let elem_ty = rust_field_type(&arr.element_wire_type);
                 let max_elems = f.max_elements.unwrap_or(MAX_ARRAY_ELEMENTS);
-                out.push_str(&format!(
-                    "        {}: [{elem_ty}; {max_elems}],\n",
-                    f.name
-                ));
+                out.push_str(&format!("        {}: [{elem_ty}; {max_elems}],\n", f.name));
                 out.push_str(&format!("        {}_count: usize,\n", f.name));
             }
         }
@@ -788,10 +748,7 @@ fn emit_varint_prefix_match(out: &mut String, vi: &SemanticVarInt, snake: &str) 
         "pub fn {snake}_parse(cur: &mut Cursor<'_>) -> Result<u64> {{\n"
     ));
     out.push_str("    let first = cur.read_u8()?;\n");
-    out.push_str(&format!(
-        "    let prefix = first >> {};\n",
-        8 - prefix_bits
-    ));
+    out.push_str(&format!("    let prefix = first >> {};\n", 8 - prefix_bits));
     if vi.strict && vi.branches.len() > 1 {
         // @strict: capture val from match so we can validate after
         out.push_str("    let val = match prefix {\n");
@@ -885,9 +842,7 @@ fn emit_varint_prefix_match(out: &mut String, vi: &SemanticVarInt, snake: &str) 
                 if shift == 0 {
                     out.push_str("        w.write_u8(val as u8)?;\n");
                 } else {
-                    out.push_str(&format!(
-                        "        w.write_u8((val >> {shift}) as u8)?;\n"
-                    ));
+                    out.push_str(&format!("        w.write_u8((val >> {shift}) as u8)?;\n"));
                 }
             }
         }
@@ -903,18 +858,14 @@ fn emit_varint_prefix_match(out: &mut String, vi: &SemanticVarInt, snake: &str) 
     out.push_str("}\n\n");
 
     // ── wire_size ──
-    out.push_str(&format!(
-        "pub fn {snake}_wire_size(val: u64) -> usize {{\n"
-    ));
+    out.push_str(&format!("pub fn {snake}_wire_size(val: u64) -> usize {{\n"));
 
     for (i, branch) in vi.branches.iter().enumerate() {
         let max_val = branch.max_value;
         let total_bytes = branch.total_bytes;
 
         if i == 0 {
-            out.push_str(&format!(
-                "    if val <= {max_val} {{ {total_bytes} }}\n"
-            ));
+            out.push_str(&format!("    if val <= {max_val} {{ {total_bytes} }}\n"));
         } else {
             out.push_str(&format!(
                 "    else if val <= {max_val} {{ {total_bytes} }}\n"
@@ -922,10 +873,7 @@ fn emit_varint_prefix_match(out: &mut String, vi: &SemanticVarInt, snake: &str) 
         }
     }
 
-    out.push_str(&format!(
-        "    else {{ {} }}\n",
-        vi.max_bytes
-    ));
+    out.push_str(&format!("    else {{ {} }}\n", vi.max_bytes));
     out.push_str("}\n\n");
 }
 
@@ -941,9 +889,7 @@ fn emit_varint_continuation_bit(out: &mut String, vi: &SemanticVarInt, snake: &s
     ));
     out.push_str("    let mut value: u64 = 0;\n");
     out.push_str("    let mut shift: u32 = 0;\n");
-    out.push_str(&format!(
-        "    for _ in 0..{max_bytes} {{\n"
-    ));
+    out.push_str(&format!("    for _ in 0..{max_bytes} {{\n"));
     out.push_str("        let byte = cur.read_u8()?;\n");
     out.push_str(&format!(
         "        let chunk = (byte & 0x{value_mask:02x}) as u64;\n"
@@ -961,15 +907,11 @@ fn emit_varint_continuation_bit(out: &mut String, vi: &SemanticVarInt, snake: &s
     out.push_str(&format!(
         "pub fn {snake}_serialize(mut val: u64, w: &mut Writer<'_>) -> Result<()> {{\n"
     ));
-    out.push_str(&format!(
-        "    for _ in 0..{max_bytes} {{\n"
-    ));
+    out.push_str(&format!("    for _ in 0..{max_bytes} {{\n"));
     out.push_str(&format!(
         "        let mut byte = (val & 0x{value_mask:02x}) as u8;\n"
     ));
-    out.push_str(&format!(
-        "        val >>= {value_bits};\n"
-    ));
+    out.push_str(&format!("        val >>= {value_bits};\n"));
     out.push_str(&format!(
         "        if val != 0 {{ byte |= 0x{cont_mask:02x}; }}\n"
     ));
@@ -980,17 +922,13 @@ fn emit_varint_continuation_bit(out: &mut String, vi: &SemanticVarInt, snake: &s
     out.push_str("}\n\n");
 
     // ── wire_size ──
-    out.push_str(&format!(
-        "pub fn {snake}_wire_size(val: u64) -> usize {{\n"
-    ));
+    out.push_str(&format!("pub fn {snake}_wire_size(val: u64) -> usize {{\n"));
     out.push_str("    let mut v = val;\n");
     out.push_str("    let mut n = 1usize;\n");
     out.push_str(&format!(
         "    while v >= (1u64 << {value_bits}) && n < {max_bytes} {{\n"
     ));
-    out.push_str(&format!(
-        "        v >>= {value_bits};\n"
-    ));
+    out.push_str(&format!("        v >>= {value_bits};\n"));
     out.push_str("        n += 1;\n");
     out.push_str("    }\n");
     out.push_str("    n\n");
@@ -1089,9 +1027,8 @@ fn emit_state_machine(out: &mut String, sm: &SemanticStateMachine) {
                 if src.fields.is_empty() {
                     format!("Self::{src_state_name}")
                 } else {
-                    let field_bindings: Vec<String> = src.fields.iter()
-                        .map(|f| f.name.clone())
-                        .collect();
+                    let field_bindings: Vec<String> =
+                        src.fields.iter().map(|f| f.name.clone()).collect();
                     format!("Self::{src_state_name} {{ {} }}", field_bindings.join(", "))
                 }
             } else {
@@ -1103,10 +1040,12 @@ fn emit_state_machine(out: &mut String, sm: &SemanticStateMachine) {
                 if ev.params.is_empty() {
                     format!("{sm_name}Event::{event_name}")
                 } else {
-                    let param_bindings: Vec<String> = ev.params.iter()
-                        .map(|p| p.name.clone())
-                        .collect();
-                    format!("{sm_name}Event::{event_name} {{ {} }}", param_bindings.join(", "))
+                    let param_bindings: Vec<String> =
+                        ev.params.iter().map(|p| p.name.clone()).collect();
+                    format!(
+                        "{sm_name}Event::{event_name} {{ {} }}",
+                        param_bindings.join(", ")
+                    )
                 }
             } else {
                 format!("{sm_name}Event::{event_name}")
@@ -1130,7 +1069,8 @@ fn emit_state_machine(out: &mut String, sm: &SemanticStateMachine) {
                 let child_field = extract_delegate_child_field(&delegate.target);
                 let child_sm_name = child_field.as_ref().and_then(|fname| {
                     src_state.and_then(|s| {
-                        s.fields.iter()
+                        s.fields
+                            .iter()
                             .find(|f| f.name == *fname)
                             .and_then(|f| f.child_sm_name.clone())
                     })
@@ -1193,7 +1133,8 @@ fn emit_state_machine(out: &mut String, sm: &SemanticStateMachine) {
 
                         // For each destination field, check if there's an action that assigns it
                         for dst_field in &dst.fields {
-                            let assigned_value = find_action_for_field(&trans.actions, &dst_field.name, &sm.states);
+                            let assigned_value =
+                                find_action_for_field(&trans.actions, &dst_field.name, &sm.states);
                             if let Some(expr_str) = assigned_value {
                                 out.push_str(&format!(
                                     "                    {}: {expr_str},\n",
@@ -1282,9 +1223,7 @@ fn sm_expr_to_rust_ctx(expr: &SemanticExpr, sm_states: &[SemanticState]) -> Stri
                 }
             }
         }
-        SemanticExpr::ValueRef { reference } => {
-            reference.value_id.clone()
-        }
+        SemanticExpr::ValueRef { reference } => reference.value_id.clone(),
         SemanticExpr::Binary { op, left, right } => {
             let l = sm_expr_to_rust_ctx(left, sm_states);
             let r = sm_expr_to_rust_ctx(right, sm_states);
@@ -1310,12 +1249,19 @@ fn sm_expr_to_rust_ctx(expr: &SemanticExpr, sm_states: &[SemanticState]) -> Stri
             // Rust doesn't have ??, use unwrap_or pattern
             format!("{e}.unwrap_or({d})")
         }
-        SemanticExpr::InState { expr, state_id, sm_name, state_name, .. } => {
+        SemanticExpr::InState {
+            expr,
+            state_id,
+            sm_name,
+            state_name,
+            ..
+        } => {
             let expr_rs = sm_expr_to_rust_ctx(expr, sm_states);
             let sm_pascal = to_pascal_case(sm_name);
             let state_pascal = to_pascal_case(state_name);
             // Look up whether this state has fields to emit correct match pattern
-            let has_fields = sm_states.iter()
+            let has_fields = sm_states
+                .iter()
                 .find(|s| s.state_id == *state_id)
                 .map(|s| !s.fields.is_empty())
                 .unwrap_or(true); // default to true (use { .. }) if state not found
@@ -1325,31 +1271,43 @@ fn sm_expr_to_rust_ctx(expr: &SemanticExpr, sm_states: &[SemanticState]) -> Stri
                 format!("matches!({expr_rs}, {sm_pascal}::{state_pascal})")
             }
         }
-        SemanticExpr::StateConstructor { sm_name, state_id, state_name, args, .. } => {
+        SemanticExpr::StateConstructor {
+            sm_name,
+            state_id,
+            state_name,
+            args,
+            ..
+        } => {
             let sm_pascal = to_pascal_case(sm_name);
             let state_pascal = to_pascal_case(state_name);
             if args.is_empty() {
                 format!("{sm_pascal}::{state_pascal}")
             } else {
                 // Try to look up field names from state definitions
-                let field_names: Option<Vec<String>> = sm_states.iter()
+                let field_names: Option<Vec<String>> = sm_states
+                    .iter()
                     .find(|s| s.state_id == *state_id)
                     .map(|s| s.fields.iter().map(|f| f.name.clone()).collect());
 
-                let arg_strs: Vec<String> = args.iter()
+                let arg_strs: Vec<String> = args
+                    .iter()
                     .map(|a| sm_expr_to_rust_ctx(a, sm_states))
                     .collect();
 
                 if let Some(names) = field_names {
                     // Pair field names with arg values
-                    let fields: Vec<String> = names.iter()
+                    let fields: Vec<String> = names
+                        .iter()
                         .zip(arg_strs.iter())
                         .map(|(name, val)| format!("{name}: {val}"))
                         .collect();
                     format!("{sm_pascal}::{state_pascal} {{ {} }}", fields.join(", "))
                 } else {
                     // Fallback: emit positional args as comment
-                    format!("{sm_pascal}::{state_pascal} {{ /* args: {} */ }}", arg_strs.join(", "))
+                    format!(
+                        "{sm_pascal}::{state_pascal} {{ /* args: {} */ }}",
+                        arg_strs.join(", ")
+                    )
                 }
             }
         }
@@ -1366,11 +1324,18 @@ fn sm_expr_to_rust_ctx(expr: &SemanticExpr, sm_states: &[SemanticState]) -> Stri
             let e = sm_expr_to_rust_ctx(end, sm_states);
             format!("{b}[{s}..{e}]")
         }
-        SemanticExpr::All { collection, state_id, sm_name, state_name, .. } => {
+        SemanticExpr::All {
+            collection,
+            state_id,
+            sm_name,
+            state_name,
+            ..
+        } => {
             let sm_pascal = to_pascal_case(sm_name);
             let state_pascal = to_pascal_case(state_name);
             // Check whether the target state has fields for correct match pattern
-            let has_fields = sm_states.iter()
+            let has_fields = sm_states
+                .iter()
                 .find(|s| s.state_id == *state_id)
                 .map(|s| !s.fields.is_empty())
                 .unwrap_or(true);
@@ -1437,9 +1402,7 @@ fn extract_delegate_child_field(target: &SemanticExpr) -> Option<String> {
                 None
             }
         }
-        SemanticExpr::Subscript { base, .. } => {
-            extract_delegate_child_field(base)
-        }
+        SemanticExpr::Subscript { base, .. } => extract_delegate_child_field(base),
         _ => None,
     }
 }

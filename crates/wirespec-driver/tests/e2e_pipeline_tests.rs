@@ -10,7 +10,8 @@ use wirespec_syntax::parse;
 
 fn pipeline_to_c(src: &str) -> (String, String) {
     let ast = parse(src).unwrap();
-    let sem = wirespec_sema::analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
+    let sem =
+        wirespec_sema::analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
     let layout = wirespec_layout::lower(&sem).unwrap();
     let codec = wirespec_codec::lower(&layout).unwrap();
 
@@ -26,12 +27,16 @@ fn pipeline_to_c(src: &str) -> (String, String) {
         is_entry_module: true,
     };
     let lowered = Backend::lower(&backend, &codec, &ctx).unwrap();
-    (lowered.header_content.clone(), lowered.source_content.clone())
+    (
+        lowered.header_content.clone(),
+        lowered.source_content.clone(),
+    )
 }
 
 fn pipeline_to_rust(src: &str) -> String {
     let ast = parse(src).unwrap();
-    let sem = wirespec_sema::analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
+    let sem =
+        wirespec_sema::analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
     let layout = wirespec_layout::lower(&sem).unwrap();
     let codec = wirespec_codec::lower(&layout).unwrap();
 
@@ -193,7 +198,8 @@ fn e2e_state_machine_preserved() {
     "#;
     // SM should at least not crash the pipeline
     let ast = parse(src).unwrap();
-    let sem = wirespec_sema::analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
+    let sem =
+        wirespec_sema::analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
     assert_eq!(sem.state_machines.len(), 1);
     let layout = wirespec_layout::lower(&sem).unwrap();
     let codec = wirespec_codec::lower(&layout).unwrap();
@@ -203,7 +209,8 @@ fn e2e_state_machine_preserved() {
 #[test]
 fn e2e_artifact_c_produces_two_files() {
     let ast = parse("packet P { x: u8 }").unwrap();
-    let sem = wirespec_sema::analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
+    let sem =
+        wirespec_sema::analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
     let layout = wirespec_layout::lower(&sem).unwrap();
     let codec = wirespec_codec::lower(&layout).unwrap();
 
@@ -221,20 +228,25 @@ fn e2e_artifact_c_produces_two_files() {
     let mut sink = MemorySink::new();
     let output = backend.lower_and_emit(&codec, &ctx, &mut sink).unwrap();
     assert_eq!(output.artifacts.len(), 2);
-    assert!(output.artifacts[0]
-        .relative_path
-        .to_string_lossy()
-        .ends_with(".h"));
-    assert!(output.artifacts[1]
-        .relative_path
-        .to_string_lossy()
-        .ends_with(".c"));
+    assert!(
+        output.artifacts[0]
+            .relative_path
+            .to_string_lossy()
+            .ends_with(".h")
+    );
+    assert!(
+        output.artifacts[1]
+            .relative_path
+            .to_string_lossy()
+            .ends_with(".c")
+    );
 }
 
 #[test]
 fn e2e_artifact_rust_produces_one_file() {
     let ast = parse("packet P { x: u8 }").unwrap();
-    let sem = wirespec_sema::analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
+    let sem =
+        wirespec_sema::analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
     let layout = wirespec_layout::lower(&sem).unwrap();
     let codec = wirespec_codec::lower(&layout).unwrap();
 
@@ -252,8 +264,10 @@ fn e2e_artifact_rust_produces_one_file() {
     let mut sink = MemorySink::new();
     let output = backend.lower_and_emit(&codec, &ctx, &mut sink).unwrap();
     assert_eq!(output.artifacts.len(), 1);
-    assert!(output.artifacts[0]
-        .relative_path
-        .to_string_lossy()
-        .ends_with(".rs"));
+    assert!(
+        output.artifacts[0]
+            .relative_path
+            .to_string_lossy()
+            .ends_with(".rs")
+    );
 }

@@ -1,6 +1,6 @@
 // crates/wirespec-sema/src/resolve.rs
-use std::collections::HashMap;
 use crate::types::*;
+use std::collections::HashMap;
 
 /// What kind of declaration a name refers to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,9 +119,9 @@ impl TypeRegistry {
         names.extend(self.aliases.keys().cloned());
         // Add primitive names
         for prim in &[
-            "u8", "u16", "u32", "u64", "i8", "i16", "i32", "i64", "u16be", "u16le", "u24",
-            "u24be", "u24le", "u32be", "u32le", "u64be", "u64le", "i16be", "i16le", "i32be",
-            "i32le", "i64be", "i64le", "bool", "bit",
+            "u8", "u16", "u32", "u64", "i8", "i16", "i32", "i64", "u16be", "u16le", "u24", "u24be",
+            "u24le", "u32be", "u32le", "u64be", "u64le", "i16be", "i16le", "i32be", "i32le",
+            "i64be", "i64le", "bool", "bit",
         ] {
             names.push(prim.to_string());
         }

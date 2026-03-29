@@ -73,11 +73,7 @@ pub fn compile(request: &CompileRequest) -> Result<CompileResult, DriverError> {
     let mut compiled = Vec::new();
 
     for module in &resolved {
-        let codec = pipeline::compile_module(
-            &module.source,
-            request.profile,
-            &external_types,
-        )?;
+        let codec = pipeline::compile_module(&module.source, request.profile, &external_types)?;
 
         // Register exported types for downstream modules
         pipeline::collect_external_types(

@@ -22,14 +22,20 @@ fn integer_like_checks() {
 fn registry_resolves_primitives() {
     let reg = TypeRegistry::new(Endianness::Big);
     let resolved = reg.resolve_type_name("u16").unwrap();
-    assert_eq!(resolved, ResolvedType::Primitive(PrimitiveWireType::U16, Some(Endianness::Big)));
+    assert_eq!(
+        resolved,
+        ResolvedType::Primitive(PrimitiveWireType::U16, Some(Endianness::Big))
+    );
 }
 
 #[test]
 fn registry_resolves_explicit_endian() {
     let reg = TypeRegistry::new(Endianness::Big);
     let resolved = reg.resolve_type_name("u16le").unwrap();
-    assert_eq!(resolved, ResolvedType::Primitive(PrimitiveWireType::U16, Some(Endianness::Little)));
+    assert_eq!(
+        resolved,
+        ResolvedType::Primitive(PrimitiveWireType::U16, Some(Endianness::Little))
+    );
 }
 
 #[test]
@@ -37,7 +43,10 @@ fn registry_user_type() {
     let mut reg = TypeRegistry::new(Endianness::Big);
     reg.register("VarInt", DeclKind::VarInt).unwrap();
     let resolved = reg.resolve_type_name("VarInt").unwrap();
-    assert_eq!(resolved, ResolvedType::UserDefined("VarInt".into(), DeclKind::VarInt));
+    assert_eq!(
+        resolved,
+        ResolvedType::UserDefined("VarInt".into(), DeclKind::VarInt)
+    );
 }
 
 #[test]
@@ -51,5 +60,8 @@ fn registry_alias_resolution() {
     let mut reg = TypeRegistry::new(Endianness::Little);
     reg.register_alias("AttHandle", "u16le");
     let resolved = reg.resolve_type_name("AttHandle").unwrap();
-    assert_eq!(resolved, ResolvedType::Primitive(PrimitiveWireType::U16, Some(Endianness::Little)));
+    assert_eq!(
+        resolved,
+        ResolvedType::Primitive(PrimitiveWireType::U16, Some(Endianness::Little))
+    );
 }

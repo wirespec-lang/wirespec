@@ -2,9 +2,9 @@
 //!
 //! Each test exercises a specific validation rule added to the analyzer.
 
+use wirespec_sema::ComplianceProfile;
 use wirespec_sema::analyze;
 use wirespec_sema::error::ErrorKind;
-use wirespec_sema::ComplianceProfile;
 use wirespec_syntax::parse;
 
 fn default_profile() -> ComplianceProfile {
@@ -55,7 +55,10 @@ fn ok_sm_same_event_different_src() {
         transition A -> B { on go }
         transition B -> C { on go }
     }"#;
-    assert!(check(src).is_ok(), "same event from different states should be allowed");
+    assert!(
+        check(src).is_ok(),
+        "same event from different states should be allowed"
+    );
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -71,8 +74,14 @@ fn error_sm_delegate_not_self() {
         transition A -> B { on ev(id: u8, e: u8) delegate src.c <- e }
     }"#;
     let result = check(src);
-    assert!(result.is_err(), "delegate on non-self-transition should fail");
-    assert_eq!(result.unwrap_err().kind, ErrorKind::SmDelegateNotSelfTransition);
+    assert!(
+        result.is_err(),
+        "delegate on non-self-transition should fail"
+    );
+    assert_eq!(
+        result.unwrap_err().kind,
+        ErrorKind::SmDelegateNotSelfTransition
+    );
 }
 
 #[test]
@@ -84,7 +93,10 @@ fn ok_sm_delegate_self() {
         transition A -> A { on ev(id: u8, e: u8) delegate src.c <- e }
         transition A -> B { on done }
     }"#;
-    assert!(check(src).is_ok(), "delegate on self-transition should be allowed");
+    assert!(
+        check(src).is_ok(),
+        "delegate on self-transition should be allowed"
+    );
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -105,7 +117,10 @@ fn error_sm_delegate_with_action() {
         transition A -> B { on done }
     }"#;
     let result = check(src);
-    assert!(result.is_err(), "delegate + action should be mutually exclusive");
+    assert!(
+        result.is_err(),
+        "delegate + action should be mutually exclusive"
+    );
     assert_eq!(result.unwrap_err().kind, ErrorKind::SmDelegateWithAction);
 }
 
@@ -122,7 +137,10 @@ fn error_sm_invalid_initial() {
         transition A -> B { on go }
     }"#;
     let result = check(src);
-    assert!(result.is_err(), "initial state that doesn't exist should fail");
+    assert!(
+        result.is_err(),
+        "initial state that doesn't exist should fail"
+    );
     assert_eq!(result.unwrap_err().kind, ErrorKind::SmInvalidInitial);
 }
 
@@ -134,7 +152,10 @@ fn error_sm_missing_initial() {
         transition A -> B { on go }
     }"#;
     let result = check(src);
-    assert!(result.is_err(), "missing initial state declaration should fail");
+    assert!(
+        result.is_err(),
+        "missing initial state declaration should fail"
+    );
     assert_eq!(result.unwrap_err().kind, ErrorKind::SmInvalidInitial);
 }
 
@@ -164,15 +185,26 @@ fn error_direct_cyclic_alias() {
 fn error_lor_non_optional() {
     let src = "packet P { len: u16, data: bytes[length_or_remaining: len] }";
     let result = check(src);
-    assert!(result.is_err(), "LOR referencing non-optional field should fail");
-    assert_eq!(result.unwrap_err().kind, ErrorKind::InvalidLengthOrRemaining);
+    assert!(
+        result.is_err(),
+        "LOR referencing non-optional field should fail"
+    );
+    assert_eq!(
+        result.unwrap_err().kind,
+        ErrorKind::InvalidLengthOrRemaining
+    );
 }
 
 #[test]
 fn ok_lor_optional() {
-    let src = "packet P { flags: u8, len: if flags & 1 { u16 }, data: bytes[length_or_remaining: len] }";
+    let src =
+        "packet P { flags: u8, len: if flags & 1 { u16 }, data: bytes[length_or_remaining: len] }";
     let result = check(src);
-    assert!(result.is_ok(), "LOR referencing optional field should pass: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "LOR referencing optional field should pass: {:?}",
+        result.err()
+    );
 }
 
 // ══════════════════════════════════════════════════════════════════════

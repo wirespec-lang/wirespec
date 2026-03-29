@@ -63,32 +63,29 @@ impl ExprContext {
             }
         }
     }
-
 }
 
 /// Convert a CodecExpr to a C expression string.
 pub fn expr_to_c(expr: &CodecExpr, ctx: &ExprContext) -> String {
     match expr {
-        CodecExpr::ValueRef { reference } => {
-            match reference.kind {
-                ValueRefKind::Field | ValueRefKind::Derived => {
-                    let name = extract_field_name(&reference.value_id);
-                    let prefix = ctx.resolve_prefix(name);
-                    format!("{prefix}{name}")
-                }
-                ValueRefKind::Const => {
-                    let name_upper = crate::names::to_snake_case(&reference.value_id).to_uppercase();
-                    CONST_PREFIX.with(|p| {
-                        let prefix = p.borrow();
-                        if prefix.is_empty() {
-                            name_upper.clone()
-                        } else {
-                            format!("{}_{}", prefix.to_uppercase(), name_upper)
-                        }
-                    })
-                }
+        CodecExpr::ValueRef { reference } => match reference.kind {
+            ValueRefKind::Field | ValueRefKind::Derived => {
+                let name = extract_field_name(&reference.value_id);
+                let prefix = ctx.resolve_prefix(name);
+                format!("{prefix}{name}")
             }
-        }
+            ValueRefKind::Const => {
+                let name_upper = crate::names::to_snake_case(&reference.value_id).to_uppercase();
+                CONST_PREFIX.with(|p| {
+                    let prefix = p.borrow();
+                    if prefix.is_empty() {
+                        name_upper.clone()
+                    } else {
+                        format!("{}_{}", prefix.to_uppercase(), name_upper)
+                    }
+                })
+            }
+        },
         CodecExpr::Literal { value } => match value {
             LiteralValue::Int(n) => {
                 if *n < 0 {
@@ -101,9 +98,7 @@ pub fn expr_to_c(expr: &CodecExpr, ctx: &ExprContext) -> String {
                     format!("{n}")
                 }
             }
-            LiteralValue::Bool(b) => {
-                if *b { "true" } else { "false" }.into()
-            }
+            LiteralValue::Bool(b) => if *b { "true" } else { "false" }.into(),
             LiteralValue::String(s) => format!("\"{s}\""),
             LiteralValue::Null => "0".into(),
         },
@@ -121,7 +116,10 @@ pub fn expr_to_c(expr: &CodecExpr, ctx: &ExprContext) -> String {
             let o = expr_to_c(operand, ctx);
             format!("({op}{o})")
         }
-        CodecExpr::Coalesce { expr: e, default: d } => {
+        CodecExpr::Coalesce {
+            expr: e,
+            default: d,
+        } => {
             let e_str = expr_to_c(e, ctx);
             let d_str = expr_to_c(d, ctx);
             // For optional field coalesce: has_X ? X : default
@@ -244,9 +242,7 @@ pub fn sema_expr_to_c(expr: &SemanticExpr, ctx: &SmExprContext) -> String {
         SemanticExpr::ValueRef { reference } => {
             // In SM context, value refs to consts use uppercase
             match reference.kind {
-                wirespec_sema::expr::ValueRefKind::Const => {
-                    reference.value_id.to_uppercase()
-                }
+                wirespec_sema::expr::ValueRefKind::Const => reference.value_id.to_uppercase(),
                 _ => {
                     let name = extract_field_name(&reference.value_id);
                     format!("sm->{}.{name}", ctx.src_state_snake)
@@ -265,9 +261,7 @@ pub fn sema_expr_to_c(expr: &SemanticExpr, ctx: &SmExprContext) -> String {
                     format!("{n}")
                 }
             }
-            SemanticLiteral::Bool(b) => {
-                if *b { "true" } else { "false" }.into()
-            }
+            SemanticLiteral::Bool(b) => if *b { "true" } else { "false" }.into(),
             SemanticLiteral::String(s) => format!("\"{s}\""),
             SemanticLiteral::Null => "0".into(),
         },
@@ -358,9 +352,7 @@ pub fn sema_expr_to_c(expr: &SemanticExpr, ctx: &SmExprContext) -> String {
                     .collect();
 
                 let inits = arg_strs.join(", ");
-                format!(
-                    "(({sm_type}){{ .tag = {tag}, .{state_snake} = {{ {inits} }} }})"
-                )
+                format!("(({sm_type}){{ .tag = {tag}, .{state_snake} = {{ {inits} }} }})")
             }
         }
         SemanticExpr::Fill { .. } => {
@@ -406,13 +398,14 @@ pub fn sema_expr_to_c(expr: &SemanticExpr, ctx: &SmExprContext) -> String {
                 }
                 _ => {
                     let coll_c = sema_expr_to_c(collection, ctx);
-                    format!(
-                        "({{ bool _all_ok = true; /* all check on {coll_c} */ _all_ok; }})"
-                    )
+                    format!("({{ bool _all_ok = true; /* all check on {coll_c} */ _all_ok; }})")
                 }
             }
         }
-        SemanticExpr::Coalesce { expr: e, default: d } => {
+        SemanticExpr::Coalesce {
+            expr: e,
+            default: d,
+        } => {
             let e_str = sema_expr_to_c(e, ctx);
             let d_str = sema_expr_to_c(d, ctx);
             format!("({e_str} ? {e_str} : {d_str})")

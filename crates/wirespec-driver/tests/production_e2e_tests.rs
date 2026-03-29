@@ -1,8 +1,8 @@
-use wirespec_syntax::parse;
-use wirespec_sema::{analyze, ComplianceProfile};
-use wirespec_backend_api::*;
-use std::sync::Arc;
 use std::process::Command;
+use std::sync::Arc;
+use wirespec_backend_api::*;
+use wirespec_sema::{ComplianceProfile, analyze};
+use wirespec_syntax::parse;
 
 fn full_pipeline_c(src: &str, prefix: &str) -> (String, String) {
     let ast = parse(src).unwrap();
@@ -21,7 +21,10 @@ fn full_pipeline_c(src: &str, prefix: &str) -> (String, String) {
         is_entry_module: true,
     };
     let lowered = Backend::lower(&backend, &codec, &ctx).unwrap();
-    (lowered.header_content.clone(), lowered.source_content.clone())
+    (
+        lowered.header_content.clone(),
+        lowered.source_content.clone(),
+    )
 }
 
 fn generate_and_gcc(src: &str, prefix: &str) {
@@ -29,17 +32,22 @@ fn generate_and_gcc(src: &str, prefix: &str) {
     let dir = std::path::PathBuf::from("/tmp/wirespec-prod-tests");
     std::fs::create_dir_all(&dir).unwrap();
 
-    let runtime = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../runtime");
+    let runtime = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../runtime");
 
     std::fs::write(dir.join(format!("{prefix}.h")), &header).unwrap();
     std::fs::write(dir.join(format!("{prefix}.c")), &source).unwrap();
 
     let output = match Command::new("gcc")
         .args([
-            "-Wall", "-Wextra", "-Werror", "-std=c11", "-fsyntax-only",
-            "-I", &dir.to_string_lossy(),
-            "-I", &runtime.to_string_lossy(),
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-std=c11",
+            "-fsyntax-only",
+            "-I",
+            &dir.to_string_lossy(),
+            "-I",
+            &runtime.to_string_lossy(),
         ])
         .arg(dir.join(format!("{prefix}.c")))
         .output()
@@ -374,7 +382,10 @@ fn e2e_pipeline_checksum_crc32() {
     let codec = wirespec_codec::lower(&layout).unwrap();
     let plan = codec.packets[0].checksum_plan.as_ref().unwrap();
     assert_eq!(plan.algorithm_id, "crc32");
-    assert_eq!(plan.verify_mode, wirespec_codec::ir::ChecksumVerifyMode::RecomputeCompare);
+    assert_eq!(
+        plan.verify_mode,
+        wirespec_codec::ir::ChecksumVerifyMode::RecomputeCompare
+    );
 }
 
 #[test]

@@ -53,12 +53,8 @@ fn lower_packet(
     module_endianness: Endianness,
 ) -> Result<LayoutPacket, LayoutError> {
     let fields = lower_fields(&p.fields, module_endianness);
-    let (bitgroups, fields) = bitgroup::detect_bitgroups(
-        &fields,
-        &p.packet_id,
-        module_endianness,
-    )
-    .map_err(|e| LayoutError { msg: e.msg })?;
+    let (bitgroups, fields) = bitgroup::detect_bitgroups(&fields, &p.packet_id, module_endianness)
+        .map_err(|e| LayoutError { msg: e.msg })?;
 
     Ok(LayoutPacket {
         packet_id: p.packet_id.clone(),
@@ -101,12 +97,9 @@ fn lower_capsule(
 ) -> Result<LayoutCapsule, LayoutError> {
     let header_fields = lower_fields(&c.header_fields, module_endianness);
     let header_scope_id = format!("{}#header", c.capsule_id);
-    let (header_bitgroups, header_fields) = bitgroup::detect_bitgroups(
-        &header_fields,
-        &header_scope_id,
-        module_endianness,
-    )
-    .map_err(|e| LayoutError { msg: e.msg })?;
+    let (header_bitgroups, header_fields) =
+        bitgroup::detect_bitgroups(&header_fields, &header_scope_id, module_endianness)
+            .map_err(|e| LayoutError { msg: e.msg })?;
 
     let mut variants = Vec::new();
     for v in &c.variants {
@@ -136,12 +129,8 @@ fn lower_variant_scope(
     module_endianness: Endianness,
 ) -> Result<LayoutVariantScope, LayoutError> {
     let fields = lower_fields(&v.fields, module_endianness);
-    let (bitgroups, fields) = bitgroup::detect_bitgroups(
-        &fields,
-        &v.scope_id,
-        module_endianness,
-    )
-    .map_err(|e| LayoutError { msg: e.msg })?;
+    let (bitgroups, fields) = bitgroup::detect_bitgroups(&fields, &v.scope_id, module_endianness)
+        .map_err(|e| LayoutError { msg: e.msg })?;
 
     Ok(LayoutVariantScope {
         scope_id: v.scope_id.clone(),
@@ -158,10 +147,7 @@ fn lower_variant_scope(
     })
 }
 
-fn lower_fields(
-    sem_fields: &[SemanticField],
-    module_endianness: Endianness,
-) -> Vec<LayoutField> {
+fn lower_fields(sem_fields: &[SemanticField], module_endianness: Endianness) -> Vec<LayoutField> {
     sem_fields
         .iter()
         .map(|f| lower_field(f, module_endianness))
@@ -221,13 +207,16 @@ fn resolve_field_endianness(
 }
 
 /// Resolve endianness for a type.
-fn resolve_type_endianness(
-    ty: &SemanticType,
-    module_endianness: Endianness,
-) -> Option<Endianness> {
+fn resolve_type_endianness(ty: &SemanticType, module_endianness: Endianness) -> Option<Endianness> {
     match ty {
-        SemanticType::Primitive { endianness: Some(e), .. } => Some(*e),
-        SemanticType::Primitive { endianness: None, wire } => {
+        SemanticType::Primitive {
+            endianness: Some(e),
+            ..
+        } => Some(*e),
+        SemanticType::Primitive {
+            endianness: None,
+            wire,
+        } => {
             match wire {
                 PrimitiveWireType::U16
                 | PrimitiveWireType::I16

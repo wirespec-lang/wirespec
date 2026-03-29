@@ -191,7 +191,10 @@ fn empty_state_no_fields() {
     .unwrap();
     match &m.items[0] {
         AstTopItem::StateMachine(sm) => {
-            assert!(sm.states[0].fields.is_empty(), "state A should have no fields");
+            assert!(
+                sm.states[0].fields.is_empty(),
+                "state A should have no fields"
+            );
         }
         other => panic!("expected StateMachine, got {:?}", other),
     }
@@ -214,7 +217,12 @@ fn nested_member_access_chain() {
     match &m.items[0] {
         AstTopItem::StaticAssert(sa) => {
             // The outermost expression should be Eq
-            if let AstExpr::Binary { op: BinOp::Eq, left, .. } = &sa.expr {
+            if let AstExpr::Binary {
+                op: BinOp::Eq,
+                left,
+                ..
+            } = &sa.expr
+            {
                 // The left side is a chain of MemberAccess
                 assert!(
                     matches!(**left, AstExpr::MemberAccess { .. }),
@@ -279,7 +287,11 @@ fn pattern_range_boundary_values() {
         AstTopItem::Frame(f) => {
             assert!(matches!(
                 &f.branches[0].pattern,
-                AstPattern::RangeInclusive { start: 0, end: 255, .. }
+                AstPattern::RangeInclusive {
+                    start: 0,
+                    end: 255,
+                    ..
+                }
             ));
         }
         other => panic!("expected Frame, got {:?}", other),
@@ -292,7 +304,10 @@ fn pattern_wildcard_only() {
     match &m.items[0] {
         AstTopItem::Frame(f) => {
             assert_eq!(f.branches.len(), 1);
-            assert!(matches!(&f.branches[0].pattern, AstPattern::Wildcard { .. }));
+            assert!(matches!(
+                &f.branches[0].pattern,
+                AstPattern::Wildcard { .. }
+            ));
         }
         other => panic!("expected Frame, got {:?}", other),
     }
@@ -379,7 +394,10 @@ fn annotation_with_named_value() {
 fn multiple_annotations_on_packet() {
     // Without module decl, all annotations flow to the first item
     let m = parse("@derive(debug)\n@strict\npacket P { x: u8 }").unwrap();
-    assert!(m.annotations.is_empty(), "no module-level annotations expected");
+    assert!(
+        m.annotations.is_empty(),
+        "no module-level annotations expected"
+    );
     match &m.items[0] {
         AstTopItem::Packet(p) => {
             assert_eq!(p.annotations.len(), 2);
@@ -451,7 +469,9 @@ fn error_unterminated_string() {
 #[test]
 fn error_completely_empty_frame() {
     // Frame with no branches at all
-    assert!(parse("frame F = match t: u8 {}").is_ok() || parse("frame F = match t: u8 {}").is_err());
+    assert!(
+        parse("frame F = match t: u8 {}").is_ok() || parse("frame F = match t: u8 {}").is_err()
+    );
     // This test just verifies the parser doesn't crash
 }
 
@@ -487,7 +507,11 @@ fn bytes_zero_fixed() {
             if let AstFieldItem::Field(f) = &p.fields[0] {
                 assert!(matches!(
                     &f.type_expr,
-                    AstTypeExpr::Bytes { kind: AstBytesKind::Fixed, fixed_size: Some(0), .. }
+                    AstTypeExpr::Bytes {
+                        kind: AstBytesKind::Fixed,
+                        fixed_size: Some(0),
+                        ..
+                    }
                 ));
             } else {
                 panic!("expected field");
@@ -505,7 +529,11 @@ fn bytes_large_fixed() {
             if let AstFieldItem::Field(f) = &p.fields[0] {
                 assert!(matches!(
                     &f.type_expr,
-                    AstTypeExpr::Bytes { kind: AstBytesKind::Fixed, fixed_size: Some(65535), .. }
+                    AstTypeExpr::Bytes {
+                        kind: AstBytesKind::Fixed,
+                        fixed_size: Some(65535),
+                        ..
+                    }
                 ));
             } else {
                 panic!("expected field");
@@ -670,10 +698,7 @@ fn capsule_with_expr_tag_shift() {
     .unwrap();
     match &m.items[0] {
         AstTopItem::Capsule(c) => {
-            assert!(matches!(
-                &c.payload_tag,
-                AstPayloadTagSelector::Expr { .. }
-            ));
+            assert!(matches!(&c.payload_tag, AstPayloadTagSelector::Expr { .. }));
             assert_eq!(c.branches.len(), 2);
         }
         other => panic!("expected Capsule, got {:?}", other),
@@ -817,8 +842,18 @@ fn precedence_multiply_before_add() {
     match &m.items[0] {
         AstTopItem::StaticAssert(sa) => {
             // Should be ((2 * 3) + 4) == 10
-            if let AstExpr::Binary { op: BinOp::Eq, left, .. } = &sa.expr {
-                if let AstExpr::Binary { op: BinOp::Add, left: add_l, .. } = &**left {
+            if let AstExpr::Binary {
+                op: BinOp::Eq,
+                left,
+                ..
+            } = &sa.expr
+            {
+                if let AstExpr::Binary {
+                    op: BinOp::Add,
+                    left: add_l,
+                    ..
+                } = &**left
+                {
                     assert!(
                         matches!(**add_l, AstExpr::Binary { op: BinOp::Mul, .. }),
                         "mul should be inside add"
@@ -873,7 +908,12 @@ fn expr_null_comparison() {
     let m = parse("static_assert x != null").unwrap();
     match &m.items[0] {
         AstTopItem::StaticAssert(sa) => {
-            if let AstExpr::Binary { op: BinOp::Ne, right, .. } = &sa.expr {
+            if let AstExpr::Binary {
+                op: BinOp::Ne,
+                right,
+                ..
+            } = &sa.expr
+            {
                 assert!(matches!(**right, AstExpr::Null { .. }));
             } else {
                 panic!("expected ne, got {:?}", sa.expr);
@@ -943,16 +983,40 @@ fn all_bytes_kinds_in_one_packet() {
             assert_eq!(p.fields.len(), 6);
             // Verify bytes kinds
             if let AstFieldItem::Field(f) = &p.fields[0] {
-                assert!(matches!(&f.type_expr, AstTypeExpr::Bytes { kind: AstBytesKind::Fixed, .. }));
+                assert!(matches!(
+                    &f.type_expr,
+                    AstTypeExpr::Bytes {
+                        kind: AstBytesKind::Fixed,
+                        ..
+                    }
+                ));
             }
             if let AstFieldItem::Field(f) = &p.fields[2] {
-                assert!(matches!(&f.type_expr, AstTypeExpr::Bytes { kind: AstBytesKind::Length, .. }));
+                assert!(matches!(
+                    &f.type_expr,
+                    AstTypeExpr::Bytes {
+                        kind: AstBytesKind::Length,
+                        ..
+                    }
+                ));
             }
             if let AstFieldItem::Field(f) = &p.fields[4] {
-                assert!(matches!(&f.type_expr, AstTypeExpr::Bytes { kind: AstBytesKind::LengthOrRemaining, .. }));
+                assert!(matches!(
+                    &f.type_expr,
+                    AstTypeExpr::Bytes {
+                        kind: AstBytesKind::LengthOrRemaining,
+                        ..
+                    }
+                ));
             }
             if let AstFieldItem::Field(f) = &p.fields[5] {
-                assert!(matches!(&f.type_expr, AstTypeExpr::Bytes { kind: AstBytesKind::Remaining, .. }));
+                assert!(matches!(
+                    &f.type_expr,
+                    AstTypeExpr::Bytes {
+                        kind: AstBytesKind::Remaining,
+                        ..
+                    }
+                ));
             }
         }
         other => panic!("expected Packet, got {:?}", other),
@@ -986,7 +1050,11 @@ fn array_expr_count() {
     match &m.items[0] {
         AstTopItem::Packet(p) => {
             if let AstFieldItem::Field(f) = &p.fields[1] {
-                if let AstTypeExpr::Array { count: AstArrayCount::Expr(expr), .. } = &f.type_expr {
+                if let AstTypeExpr::Array {
+                    count: AstArrayCount::Expr(expr),
+                    ..
+                } = &f.type_expr
+                {
                     assert!(matches!(expr, AstExpr::Binary { op: BinOp::Mul, .. }));
                 } else {
                     panic!("expected array with expr count, got {:?}", f.type_expr);
@@ -1034,10 +1102,15 @@ fn trailing_comma_in_frame() {
 
 #[test]
 fn multiple_require_clauses() {
-    let m = parse("packet P { x: u8, y: u8, require x > 0, require y < 100, require x != y }").unwrap();
+    let m =
+        parse("packet P { x: u8, y: u8, require x > 0, require y < 100, require x != y }").unwrap();
     match &m.items[0] {
         AstTopItem::Packet(p) => {
-            let require_count = p.fields.iter().filter(|f| matches!(f, AstFieldItem::Require(_))).count();
+            let require_count = p
+                .fields
+                .iter()
+                .filter(|f| matches!(f, AstFieldItem::Require(_)))
+                .count();
             assert_eq!(require_count, 3);
         }
         other => panic!("expected Packet, got {:?}", other),

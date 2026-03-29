@@ -4,7 +4,8 @@
 use wirespec_syntax::parse;
 
 fn parse_file(path: &str) -> wirespec_syntax::ast::AstModule {
-    let source = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("Failed to read {path}: {e}"));
+    let source =
+        std::fs::read_to_string(path).unwrap_or_else(|e| panic!("Failed to read {path}: {e}"));
     parse(&source).unwrap_or_else(|e| panic!("Failed to parse {path}: {e}"))
 }
 

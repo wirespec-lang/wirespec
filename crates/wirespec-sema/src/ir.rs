@@ -1,13 +1,13 @@
 // crates/wirespec-sema/src/ir.rs
-use wirespec_syntax::span::Span;
 use crate::expr::*;
 use crate::types::*;
+use wirespec_syntax::span::Span;
 
 // ── Root ──
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SemanticModule {
-    pub schema_version: String,         // Fixed: "semantic-ir/v1"
+    pub schema_version: String, // Fixed: "semantic-ir/v1"
     pub compliance_profile: String,
     pub module_name: String,
     pub module_endianness: Endianness,

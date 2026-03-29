@@ -67,7 +67,12 @@ fn compile_and_run(outdir: &Path, prefix: &str, test_c_code: &str) -> Result<(),
             "-o",
             &binary.to_string_lossy(),
         ])
-        .arg(outdir.join(format!("{prefix}.c")).to_string_lossy().as_ref())
+        .arg(
+            outdir
+                .join(format!("{prefix}.c"))
+                .to_string_lossy()
+                .as_ref(),
+        )
         .arg(test_file.to_string_lossy().as_ref())
         .output()
         .map_err(|e| format!("gcc not found: {e}"))?;
@@ -271,8 +276,7 @@ fn roundtrip_optional() {
     let outdir = PathBuf::from("/tmp/wirespec-roundtrip/optional");
     fs::create_dir_all(&outdir).unwrap();
 
-    let wspec =
-        "packet P { flags: u8, extra: if flags & 0x01 { u16 }, data: bytes[remaining] }";
+    let wspec = "packet P { flags: u8, extra: if flags & 0x01 { u16 }, data: bytes[remaining] }";
     generate_c_files(wspec, "test", &outdir);
 
     let test_c = r#"

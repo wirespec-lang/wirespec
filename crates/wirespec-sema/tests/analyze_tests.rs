@@ -1,5 +1,5 @@
-use wirespec_sema::analyze;
 use wirespec_sema::ComplianceProfile;
+use wirespec_sema::analyze;
 use wirespec_sema::types::Endianness;
 use wirespec_syntax::parse;
 
@@ -270,7 +270,10 @@ fn analyze_packet_with_optional() {
     let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
     assert_eq!(sem.packets[0].fields.len(), 2);
     // The second field should have Conditional presence
-    assert!(matches!(sem.packets[0].fields[1].presence, wirespec_sema::types::FieldPresence::Conditional { .. }));
+    assert!(matches!(
+        sem.packets[0].fields[1].presence,
+        wirespec_sema::types::FieldPresence::Conditional { .. }
+    ));
 }
 
 #[test]

@@ -1,10 +1,11 @@
-use wirespec_codec::lower::lower;
 use wirespec_codec::ir::*;
+use wirespec_codec::lower::lower;
 use wirespec_sema::ComplianceProfile;
 
 fn codec(src: &str) -> CodecModule {
     let ast = wirespec_syntax::parse(src).unwrap();
-    let sem = wirespec_sema::analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
+    let sem =
+        wirespec_sema::analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
     let layout = wirespec_layout::lower(&sem).unwrap();
     lower(&layout).unwrap()
 }
@@ -76,14 +77,21 @@ fn strategy_bytes_fixed() {
 #[test]
 fn strategy_bytes_remaining() {
     let c = codec("packet P { data: bytes[remaining] }");
-    assert_eq!(c.packets[0].fields[0].strategy, FieldStrategy::BytesRemaining);
+    assert_eq!(
+        c.packets[0].fields[0].strategy,
+        FieldStrategy::BytesRemaining
+    );
     assert_eq!(c.packets[0].fields[0].memory_tier, Some(MemoryTier::A));
 }
 
 #[test]
 fn strategy_bytes_length() {
     let c = codec("packet P { len: u16, data: bytes[length: len] }");
-    let data = c.packets[0].fields.iter().find(|f| f.name == "data").unwrap();
+    let data = c.packets[0]
+        .fields
+        .iter()
+        .find(|f| f.name == "data")
+        .unwrap();
     assert_eq!(data.strategy, FieldStrategy::BytesLength);
     assert_eq!(data.memory_tier, Some(MemoryTier::A));
     assert!(data.bytes_spec.is_some());
@@ -91,8 +99,14 @@ fn strategy_bytes_length() {
 
 #[test]
 fn strategy_bytes_lor() {
-    let c = codec("packet P { flags: u8, len: if flags & 0x01 { u16 }, data: bytes[length_or_remaining: len] }");
-    let data = c.packets[0].fields.iter().find(|f| f.name == "data").unwrap();
+    let c = codec(
+        "packet P { flags: u8, len: if flags & 0x01 { u16 }, data: bytes[length_or_remaining: len] }",
+    );
+    let data = c.packets[0]
+        .fields
+        .iter()
+        .find(|f| f.name == "data")
+        .unwrap();
     assert_eq!(data.strategy, FieldStrategy::BytesLor);
     assert_eq!(data.memory_tier, Some(MemoryTier::A));
 }
@@ -109,7 +123,11 @@ fn strategy_conditional() {
 #[test]
 fn strategy_array_scalar_tier_b() {
     let c = codec("packet P { count: u8, items: [u8; count] }");
-    let items = c.packets[0].fields.iter().find(|f| f.name == "items").unwrap();
+    let items = c.packets[0]
+        .fields
+        .iter()
+        .find(|f| f.name == "items")
+        .unwrap();
     assert_eq!(items.strategy, FieldStrategy::Array);
     assert_eq!(items.memory_tier, Some(MemoryTier::B));
     assert!(items.array_spec.is_some());
@@ -118,7 +136,11 @@ fn strategy_array_scalar_tier_b() {
 #[test]
 fn strategy_array_composite_tier_c() {
     let c = codec("packet Inner { x: u8 }\npacket Outer { count: u8, items: [Inner; count] }");
-    let items = c.packets[1].fields.iter().find(|f| f.name == "items").unwrap();
+    let items = c.packets[1]
+        .fields
+        .iter()
+        .find(|f| f.name == "items")
+        .unwrap();
     assert_eq!(items.strategy, FieldStrategy::Array);
     assert_eq!(items.memory_tier, Some(MemoryTier::C));
 }
@@ -150,7 +172,10 @@ fn strategy_checksum() {
 fn strategy_struct_ref() {
     let c = codec("packet Inner { x: u8 }\npacket Outer { inner: Inner }");
     assert_eq!(c.packets[1].fields[0].strategy, FieldStrategy::Struct);
-    assert_eq!(c.packets[1].fields[0].ref_type_name, Some("Inner".to_string()));
+    assert_eq!(
+        c.packets[1].fields[0].ref_type_name,
+        Some("Inner".to_string())
+    );
 }
 
 #[test]
@@ -231,7 +256,10 @@ fn wire_type_bytes() {
 #[test]
 fn wire_type_struct_ref() {
     let c = codec("packet Inner { x: u8 }\npacket Outer { inner: Inner }");
-    assert_eq!(c.packets[1].fields[0].wire_type, WireType::Struct("Inner".into()));
+    assert_eq!(
+        c.packets[1].fields[0].wire_type,
+        WireType::Struct("Inner".into())
+    );
 }
 
 #[test]
@@ -312,7 +340,9 @@ fn items_match_declaration_order() {
 #[test]
 fn items_multiple_requires() {
     let c = codec("packet P { x: u8, y: u8, require x > 0, require y < 100 }");
-    let require_count = c.packets[0].items.iter()
+    let require_count = c.packets[0]
+        .items
+        .iter()
         .filter(|i| matches!(i, CodecItem::Require(_)))
         .count();
     assert_eq!(require_count, 2);
@@ -321,7 +351,9 @@ fn items_multiple_requires() {
 #[test]
 fn items_multiple_derived() {
     let c = codec("packet P { x: u8, let a: bool = x != 0, let b: u64 = x + 1 }");
-    let derived_count = c.packets[0].items.iter()
+    let derived_count = c.packets[0]
+        .items
+        .iter()
         .filter(|i| matches!(i, CodecItem::Derived(_)))
         .count();
     assert_eq!(derived_count, 2);
@@ -333,7 +365,10 @@ fn items_multiple_derived() {
 fn bytes_spec_fixed_size() {
     let c = codec("packet P { data: bytes[6] }");
     let field = &c.packets[0].fields[0];
-    assert!(matches!(field.bytes_spec, Some(BytesSpec::Fixed { size: 6 })));
+    assert!(matches!(
+        field.bytes_spec,
+        Some(BytesSpec::Fixed { size: 6 })
+    ));
 }
 
 #[test]
@@ -346,7 +381,11 @@ fn bytes_spec_remaining() {
 #[test]
 fn bytes_spec_length_has_expr() {
     let c = codec("packet P { len: u16, data: bytes[length: len] }");
-    let data = c.packets[0].fields.iter().find(|f| f.name == "data").unwrap();
+    let data = c.packets[0]
+        .fields
+        .iter()
+        .find(|f| f.name == "data")
+        .unwrap();
     assert!(matches!(data.bytes_spec, Some(BytesSpec::Length { .. })));
 }
 
@@ -355,7 +394,11 @@ fn bytes_spec_length_has_expr() {
 #[test]
 fn array_spec_element_wire_type() {
     let c = codec("packet P { count: u8, items: [u16; count] }");
-    let items = c.packets[0].fields.iter().find(|f| f.name == "items").unwrap();
+    let items = c.packets[0]
+        .fields
+        .iter()
+        .find(|f| f.name == "items")
+        .unwrap();
     let spec = items.array_spec.as_ref().unwrap();
     assert_eq!(spec.element_wire_type, WireType::U16);
 }
@@ -363,7 +406,11 @@ fn array_spec_element_wire_type() {
 #[test]
 fn array_spec_element_strategy_primitive() {
     let c = codec("packet P { count: u8, items: [u8; count] }");
-    let items = c.packets[0].fields.iter().find(|f| f.name == "items").unwrap();
+    let items = c.packets[0]
+        .fields
+        .iter()
+        .find(|f| f.name == "items")
+        .unwrap();
     let spec = items.array_spec.as_ref().unwrap();
     assert_eq!(spec.element_strategy, FieldStrategy::Primitive);
 }
@@ -371,7 +418,11 @@ fn array_spec_element_strategy_primitive() {
 #[test]
 fn array_spec_composite_element() {
     let c = codec("packet Inner { x: u8 }\npacket P { count: u8, items: [Inner; count] }");
-    let items = c.packets[1].fields.iter().find(|f| f.name == "items").unwrap();
+    let items = c.packets[1]
+        .fields
+        .iter()
+        .find(|f| f.name == "items")
+        .unwrap();
     let spec = items.array_spec.as_ref().unwrap();
     assert_eq!(spec.element_wire_type, WireType::Struct("Inner".into()));
     assert_eq!(spec.element_ref_type_name, Some("Inner".to_string()));
@@ -380,7 +431,11 @@ fn array_spec_composite_element() {
 #[test]
 fn array_max_elements() {
     let c = codec("packet P { count: u8, @max_len(256) items: [u8; count] }");
-    let items = c.packets[0].fields.iter().find(|f| f.name == "items").unwrap();
+    let items = c.packets[0]
+        .fields
+        .iter()
+        .find(|f| f.name == "items")
+        .unwrap();
     assert_eq!(items.max_elements, Some(256));
 }
 
@@ -422,7 +477,9 @@ fn enums_preserved() {
 
 #[test]
 fn state_machines_preserved() {
-    let c = codec("state machine S { state A state B [terminal] initial A transition A -> B { on done } }\npacket P { x: u8 }");
+    let c = codec(
+        "state machine S { state A state B [terminal] initial A transition A -> B { on done } }\npacket P { x: u8 }",
+    );
     assert_eq!(c.state_machines.len(), 1);
 }
 
@@ -445,37 +502,58 @@ fn frame_tag_wire_type() {
 
 #[test]
 fn frame_variant_patterns() {
-    let c = codec(r#"frame F = match t: u8 {
+    let c = codec(
+        r#"frame F = match t: u8 {
         0x00 => A {},
         0x01..=0x03 => B { x: u8 },
         _ => C { data: bytes[remaining] },
-    }"#);
-    assert!(matches!(c.frames[0].variants[0].pattern, VariantPattern::Exact { value: 0 }));
-    assert!(matches!(c.frames[0].variants[1].pattern, VariantPattern::RangeInclusive { start: 1, end: 3 }));
-    assert!(matches!(c.frames[0].variants[2].pattern, VariantPattern::Wildcard));
+    }"#,
+    );
+    assert!(matches!(
+        c.frames[0].variants[0].pattern,
+        VariantPattern::Exact { value: 0 }
+    ));
+    assert!(matches!(
+        c.frames[0].variants[1].pattern,
+        VariantPattern::RangeInclusive { start: 1, end: 3 }
+    ));
+    assert!(matches!(
+        c.frames[0].variants[2].pattern,
+        VariantPattern::Wildcard
+    ));
 }
 
 #[test]
 fn frame_variant_fields_strategies() {
-    let c = codec(r#"frame F = match t: u8 {
+    let c = codec(
+        r#"frame F = match t: u8 {
         0 => A { x: u8, y: u16 },
         _ => B { data: bytes[remaining] },
-    }"#);
-    assert_eq!(c.frames[0].variants[0].fields[0].strategy, FieldStrategy::Primitive);
-    assert_eq!(c.frames[0].variants[1].fields[0].strategy, FieldStrategy::BytesRemaining);
+    }"#,
+    );
+    assert_eq!(
+        c.frames[0].variants[0].fields[0].strategy,
+        FieldStrategy::Primitive
+    );
+    assert_eq!(
+        c.frames[0].variants[1].fields[0].strategy,
+        FieldStrategy::BytesRemaining
+    );
 }
 
 // ── Capsule codec ──
 
 #[test]
 fn capsule_header_fields() {
-    let c = codec(r#"capsule C {
+    let c = codec(
+        r#"capsule C {
         type_field: u8, length: u16,
         payload: match type_field within length {
             0 => D { data: bytes[remaining] },
             _ => U { data: bytes[remaining] },
         },
-    }"#);
+    }"#,
+    );
     assert_eq!(c.capsules[0].header_fields.len(), 2);
     assert_eq!(c.capsules[0].header_fields[0].name, "type_field");
     assert_eq!(c.capsules[0].header_fields[1].name, "length");
@@ -483,37 +561,43 @@ fn capsule_header_fields() {
 
 #[test]
 fn capsule_within_field() {
-    let c = codec(r#"capsule C {
+    let c = codec(
+        r#"capsule C {
         type_field: u8, length: u16,
         payload: match type_field within length {
             0 => D { data: bytes[remaining] },
             _ => U { data: bytes[remaining] },
         },
-    }"#);
+    }"#,
+    );
     assert_eq!(c.capsules[0].within_field, "length");
 }
 
 #[test]
 fn capsule_tag_expr_from_expr_syntax() {
-    let c = codec(r#"capsule C {
+    let c = codec(
+        r#"capsule C {
         header: u8, length: u16,
         payload: match (header >> 4) within length {
             1 => A { data: bytes[remaining] },
             _ => B { data: bytes[remaining] },
         },
-    }"#);
+    }"#,
+    );
     assert!(c.capsules[0].tag_expr.is_some());
 }
 
 #[test]
 fn capsule_tag_expr_none_for_field_syntax() {
-    let c = codec(r#"capsule C {
+    let c = codec(
+        r#"capsule C {
         type_field: u8, length: u16,
         payload: match type_field within length {
             0 => D { data: bytes[remaining] },
             _ => U { data: bytes[remaining] },
         },
-    }"#);
+    }"#,
+    );
     assert!(c.capsules[0].tag_expr.is_none());
 }
 
@@ -536,7 +620,10 @@ fn module_endianness_default_big() {
 #[test]
 fn module_endianness_explicit_little() {
     let c = codec("@endian little\nmodule test\npacket P { x: u8 }");
-    assert_eq!(c.module_endianness, wirespec_sema::types::Endianness::Little);
+    assert_eq!(
+        c.module_endianness,
+        wirespec_sema::types::Endianness::Little
+    );
 }
 
 // ── Field endianness in codec ──
@@ -550,13 +637,19 @@ fn field_endianness_u8_none() {
 #[test]
 fn field_endianness_u16_big_default() {
     let c = codec("packet P { x: u16 }");
-    assert_eq!(c.packets[0].fields[0].endianness, Some(wirespec_sema::types::Endianness::Big));
+    assert_eq!(
+        c.packets[0].fields[0].endianness,
+        Some(wirespec_sema::types::Endianness::Big)
+    );
 }
 
 #[test]
 fn field_endianness_u16le_override() {
     let c = codec("@endian big\nmodule test\npacket P { x: u16le }");
-    assert_eq!(c.packets[0].fields[0].endianness, Some(wirespec_sema::types::Endianness::Little));
+    assert_eq!(
+        c.packets[0].fields[0].endianness,
+        Some(wirespec_sema::types::Endianness::Little)
+    );
 }
 
 // ── Conditional field inner wire type ──

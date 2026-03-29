@@ -1,5 +1,5 @@
-use wirespec_sema::analyze;
 use wirespec_sema::ComplianceProfile;
+use wirespec_sema::analyze;
 use wirespec_syntax::parse;
 
 #[test]
@@ -20,7 +20,12 @@ fn checksum_internet_accepted() {
         }
     "#;
     let ast = parse(src).unwrap();
-    let sem = analyze(&ast, ComplianceProfile::Phase2StrictV1_0, &Default::default()).unwrap();
+    let sem = analyze(
+        &ast,
+        ComplianceProfile::Phase2StrictV1_0,
+        &Default::default(),
+    )
+    .unwrap();
     assert_eq!(sem.packets.len(), 1);
     let checksum_field = sem.packets[0]
         .fields
@@ -44,7 +49,11 @@ fn checksum_fletcher16_rejected_under_strict() {
         }
     "#;
     let ast = parse(src).unwrap();
-    let result = analyze(&ast, ComplianceProfile::Phase2StrictV1_0, &Default::default());
+    let result = analyze(
+        &ast,
+        ComplianceProfile::Phase2StrictV1_0,
+        &Default::default(),
+    );
     assert!(
         result.is_err(),
         "fletcher16 should be rejected under Phase2StrictV1_0 profile"
@@ -61,7 +70,12 @@ fn checksum_fletcher16_accepted_under_extended() {
         }
     "#;
     let ast = parse(src).unwrap();
-    let sem = analyze(&ast, ComplianceProfile::Phase2ExtendedCurrent, &Default::default()).unwrap();
+    let sem = analyze(
+        &ast,
+        ComplianceProfile::Phase2ExtendedCurrent,
+        &Default::default(),
+    )
+    .unwrap();
     let checksum_field = sem.packets[0]
         .fields
         .iter()
@@ -85,7 +99,11 @@ fn checksum_wrong_field_type_error() {
         }
     "#;
     let ast = parse(src).unwrap();
-    let result = analyze(&ast, ComplianceProfile::Phase2StrictV1_0, &Default::default());
+    let result = analyze(
+        &ast,
+        ComplianceProfile::Phase2StrictV1_0,
+        &Default::default(),
+    );
     assert!(
         result.is_err(),
         "checksum field type mismatch should be rejected"
@@ -105,9 +123,10 @@ fn duplicate_checksum_error() {
         }
     "#;
     let ast = parse(src).unwrap();
-    let result = analyze(&ast, ComplianceProfile::Phase2StrictV1_0, &Default::default());
-    assert!(
-        result.is_err(),
-        "duplicate checksum should be rejected"
+    let result = analyze(
+        &ast,
+        ComplianceProfile::Phase2StrictV1_0,
+        &Default::default(),
     );
+    assert!(result.is_err(), "duplicate checksum should be rejected");
 }

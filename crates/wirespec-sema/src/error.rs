@@ -197,7 +197,11 @@ pub fn levenshtein(a: &str, b: &str) -> usize {
 }
 
 /// Suggest the most similar name from a list of candidates.
-pub fn suggest_similar<'a>(name: &str, candidates: &[&'a str], max_distance: usize) -> Option<&'a str> {
+pub fn suggest_similar<'a>(
+    name: &str,
+    candidates: &[&'a str],
+    max_distance: usize,
+) -> Option<&'a str> {
     candidates
         .iter()
         .map(|c| (*c, levenshtein(name, c)))

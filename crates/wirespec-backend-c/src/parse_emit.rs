@@ -11,7 +11,10 @@ use crate::type_map::*;
 /// Returns true if the wire type is a signed integer that needs a cast
 /// when passed to the unsigned cursor-read / write functions.
 fn needs_signed_cast(wt: &WireType) -> bool {
-    matches!(wt, WireType::I8 | WireType::I16 | WireType::I32 | WireType::I64)
+    matches!(
+        wt,
+        WireType::I8 | WireType::I16 | WireType::I32 | WireType::I64
+    )
 }
 
 /// Returns the unsigned C type corresponding to a signed wire type.
@@ -38,7 +41,15 @@ pub fn emit_parse_items(
     indent: &str,
     struct_prefix: &str,
 ) {
-    emit_parse_items_with_ctx(out, fields, items, prefix, indent, struct_prefix, &ExprContext::Parse);
+    emit_parse_items_with_ctx(
+        out,
+        fields,
+        items,
+        prefix,
+        indent,
+        struct_prefix,
+        &ExprContext::Parse,
+    );
 }
 
 /// Like `emit_parse_items` but with an explicit `ExprContext` for expression evaluation.
@@ -58,7 +69,16 @@ pub fn emit_parse_items_with_ctx(
         match item {
             CodecItem::Field { field_id } => {
                 if let Some(f) = fields.iter().find(|f| &f.field_id == field_id) {
-                    emit_field_parse_with_ctx(out, f, fields, prefix, indent, struct_prefix, &mut emitted_bitgroups, expr_ctx);
+                    emit_field_parse_with_ctx(
+                        out,
+                        f,
+                        fields,
+                        prefix,
+                        indent,
+                        struct_prefix,
+                        &mut emitted_bitgroups,
+                        expr_ctx,
+                    );
                 }
             }
             CodecItem::Derived(d) => {
@@ -87,7 +107,16 @@ fn emit_field_parse(
     struct_prefix: &str,
     emitted_bitgroups: &mut Vec<u32>,
 ) {
-    emit_field_parse_with_ctx(out, f, all_fields, prefix, indent, struct_prefix, emitted_bitgroups, &ExprContext::Parse);
+    emit_field_parse_with_ctx(
+        out,
+        f,
+        all_fields,
+        prefix,
+        indent,
+        struct_prefix,
+        emitted_bitgroups,
+        &ExprContext::Parse,
+    );
 }
 
 fn emit_field_parse_with_ctx(
@@ -172,9 +201,7 @@ fn emit_field_parse_with_ctx(
                     "{indent}    r = wirespec_cursor_read_bytes(cur, (size_t){len_expr}, &{struct_prefix}{});\n",
                     f.name
                 ));
-                out.push_str(&format!(
-                    "{indent}    if (r != WIRESPEC_OK) return r;\n"
-                ));
+                out.push_str(&format!("{indent}    if (r != WIRESPEC_OK) return r;\n"));
                 out.push_str(&format!("{indent}}} else {{\n"));
                 out.push_str(&format!(
                     "{indent}    {struct_prefix}{}.ptr = cur->base + cur->pos;\n",
@@ -204,7 +231,9 @@ fn emit_field_parse_with_ctx(
                         "{indent}    r = {parse_fn}(cur, &{struct_prefix}{});\n",
                         f.name
                     ));
-                } else if f.ref_type_name.is_some() && matches!(inner_wt, WireType::VarInt | WireType::ContVarInt) {
+                } else if f.ref_type_name.is_some()
+                    && matches!(inner_wt, WireType::VarInt | WireType::ContVarInt)
+                {
                     let ref_name = f.ref_type_name.as_ref().unwrap();
                     let parse_fn = c_func_name(prefix, ref_name, "parse_cursor");
                     out.push_str(&format!(
@@ -219,7 +248,10 @@ fn emit_field_parse_with_ctx(
                     ));
                 }
                 out.push_str(&format!("{indent}    if (r != WIRESPEC_OK) return r;\n"));
-                out.push_str(&format!("{indent}    {struct_prefix}has_{} = true;\n", f.name));
+                out.push_str(&format!(
+                    "{indent}    {struct_prefix}has_{} = true;\n",
+                    f.name
+                ));
                 out.push_str(&format!("{indent}}}\n"));
             }
         }
@@ -279,7 +311,11 @@ fn emit_bitgroup_parse(
                 let shift = mbg.member_offset_bits;
                 let ctype = wire_type_to_c(&f.wire_type, "");
                 // Use the simplest unsigned type for the cast
-                let cast_type = if ctype.contains("int") { &ctype } else { "uint8_t" };
+                let cast_type = if ctype.contains("int") {
+                    &ctype
+                } else {
+                    "uint8_t"
+                };
                 out.push_str(&format!(
                     "{indent}    {struct_prefix}{} = ({cast_type})(({var_name} >> {shift}) & 0x{mask:x});\n",
                     f.name
@@ -383,7 +419,9 @@ fn emit_array_parse_with_ctx(
                     "{indent}        r = {read_fn}({cur_var}, &{struct_prefix}{}[{struct_prefix}{}_count]);\n",
                     f.name, f.name
                 ));
-                out.push_str(&format!("{indent}        if (r != WIRESPEC_OK) return r;\n"));
+                out.push_str(&format!(
+                    "{indent}        if (r != WIRESPEC_OK) return r;\n"
+                ));
             }
             FieldStrategy::Struct => {
                 if let Some(ref ref_name) = arr.element_ref_type_name {
@@ -392,7 +430,9 @@ fn emit_array_parse_with_ctx(
                         "{indent}        r = {parse_fn}({cur_var}, &{struct_prefix}{}[{struct_prefix}{}_count]);\n",
                         f.name, f.name
                     ));
-                    out.push_str(&format!("{indent}        if (r != WIRESPEC_OK) return r;\n"));
+                    out.push_str(&format!(
+                        "{indent}        if (r != WIRESPEC_OK) return r;\n"
+                    ));
                 }
             }
             _ => {
@@ -423,12 +463,7 @@ fn get_value_ref_id(expr: &CodecExpr) -> String {
 }
 
 /// Emit parse for frame variants (the switch dispatch).
-pub fn emit_frame_parse_body(
-    out: &mut String,
-    frame: &CodecFrame,
-    prefix: &str,
-    indent: &str,
-) {
+pub fn emit_frame_parse_body(out: &mut String, frame: &CodecFrame, prefix: &str, indent: &str) {
     let struct_prefix = "out->";
 
     // Read the tag field
@@ -444,7 +479,9 @@ pub fn emit_frame_parse_body(
             } else {
                 // Fallback: read as u8 if no ref_type_name (should not happen in practice)
                 out.push_str(&format!("{indent}uint64_t _tag_val;\n"));
-                out.push_str(&format!("{indent}r = wirespec_cursor_read_u8(cur, (uint8_t *)&_tag_val);\n"));
+                out.push_str(&format!(
+                    "{indent}r = wirespec_cursor_read_u8(cur, (uint8_t *)&_tag_val);\n"
+                ));
                 out.push_str(&format!("{indent}if (r != WIRESPEC_OK) return r;\n"));
             }
         }
@@ -452,9 +489,7 @@ pub fn emit_frame_parse_body(
             // Primitive tag
             let tag_ctype = wire_type_to_c(&frame.tag.wire_type, prefix);
             out.push_str(&format!("{indent}{tag_ctype} _tag_val;\n"));
-            out.push_str(&format!(
-                "{indent}r = {tag_read_fn}(cur, &_tag_val);\n"
-            ));
+            out.push_str(&format!("{indent}r = {tag_read_fn}(cur, &_tag_val);\n"));
             out.push_str(&format!("{indent}if (r != WIRESPEC_OK) return r;\n"));
         }
     }
@@ -473,7 +508,9 @@ pub fn emit_frame_parse_body(
     }
     if !has_wildcard {
         out.push_str(&format!("{indent}    default:\n"));
-        out.push_str(&format!("{indent}        return WIRESPEC_ERR_INVALID_TAG;\n"));
+        out.push_str(&format!(
+            "{indent}        return WIRESPEC_ERR_INVALID_TAG;\n"
+        ));
     }
     out.push_str(&format!("{indent}}}\n"));
 }
@@ -497,7 +534,9 @@ fn emit_variant_case(
         VariantPattern::RangeInclusive { start, end } => {
             let count = end.saturating_sub(*start).saturating_add(1);
             if count > 4096 {
-                panic!("range pattern {start}..={end} too large ({count} values) for switch expansion");
+                panic!(
+                    "range pattern {start}..={end} too large ({count} values) for switch expansion"
+                );
             }
             for v in *start..=*end {
                 out.push_str(&format!("{indent}    case {v}:\n"));
@@ -548,7 +587,11 @@ pub fn emit_capsule_parse_body(
     for item in &capsule.header_items {
         match item {
             CodecItem::Field { field_id } => {
-                if let Some(f) = capsule.header_fields.iter().find(|f| &f.field_id == field_id) {
+                if let Some(f) = capsule
+                    .header_fields
+                    .iter()
+                    .find(|f| &f.field_id == field_id)
+                {
                     emit_field_parse(
                         out,
                         f,
@@ -626,7 +669,9 @@ fn emit_capsule_variant_case(
         VariantPattern::RangeInclusive { start, end } => {
             let count = end.saturating_sub(*start).saturating_add(1);
             if count > 4096 {
-                panic!("range pattern {start}..={end} too large ({count} values) for switch expansion");
+                panic!(
+                    "range pattern {start}..={end} too large ({count} values) for switch expansion"
+                );
             }
             for v in *start..=*end {
                 out.push_str(&format!("{indent}    case {v}:\n"));
@@ -760,7 +805,10 @@ fn emit_capsule_field_parse(
                     ));
                 }
                 out.push_str(&format!("{indent}    if (r != WIRESPEC_OK) return r;\n"));
-                out.push_str(&format!("{indent}    {struct_prefix}has_{} = true;\n", f.name));
+                out.push_str(&format!(
+                    "{indent}    {struct_prefix}has_{} = true;\n",
+                    f.name
+                ));
                 out.push_str(&format!("{indent}}}\n"));
             }
         }
@@ -800,7 +848,16 @@ fn emit_capsule_field_parse(
             // `&sub` to use the sub-cursor.
             let mut tmp = String::new();
             let mut dummy_bg = Vec::new();
-            emit_field_parse_with_ctx(&mut tmp, f, all_fields, prefix, indent, struct_prefix, &mut dummy_bg, expr_ctx);
+            emit_field_parse_with_ctx(
+                &mut tmp,
+                f,
+                all_fields,
+                prefix,
+                indent,
+                struct_prefix,
+                &mut dummy_bg,
+                expr_ctx,
+            );
             // Replace cursor variable: (cur, -> (&sub, and cur-> -> sub.
             let tmp = tmp.replace("(cur, ", "(&sub, ");
             let tmp = tmp.replace("cur->", "sub.");

@@ -44,7 +44,7 @@ fn catalog_field_metadata() {
 
 #[test]
 fn catalog_verify_modes() {
-    use checksum_catalog::{ChecksumVerifyMode, ChecksumInputModel};
+    use checksum_catalog::{ChecksumInputModel, ChecksumVerifyMode};
 
     let internet = checksum_catalog::lookup("internet").unwrap();
     assert_eq!(internet.verify_mode, ChecksumVerifyMode::ZeroSum);
@@ -52,9 +52,15 @@ fn catalog_verify_modes() {
 
     let crc32 = checksum_catalog::lookup("crc32").unwrap();
     assert_eq!(crc32.verify_mode, ChecksumVerifyMode::RecomputeCompare);
-    assert_eq!(crc32.input_model, ChecksumInputModel::RecomputeWithSkippedField);
+    assert_eq!(
+        crc32.input_model,
+        ChecksumInputModel::RecomputeWithSkippedField
+    );
 
     let fletcher16 = checksum_catalog::lookup("fletcher16").unwrap();
     assert_eq!(fletcher16.verify_mode, ChecksumVerifyMode::RecomputeCompare);
-    assert_eq!(fletcher16.input_model, ChecksumInputModel::RecomputeWithSkippedField);
+    assert_eq!(
+        fletcher16.input_model,
+        ChecksumInputModel::RecomputeWithSkippedField
+    );
 }

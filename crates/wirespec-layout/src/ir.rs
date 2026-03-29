@@ -7,7 +7,7 @@ use wirespec_syntax::span::Span;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LayoutModule {
-    pub schema_version: String,         // "layout-ir/v1"
+    pub schema_version: String, // "layout-ir/v1"
     pub compliance_profile: String,
     pub module_name: String,
     pub module_endianness: Endianness,
@@ -107,7 +107,7 @@ pub struct LayoutField {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LayoutBitGroup {
-    pub bitgroup_id: String,            // "<scope_id>.bitgroup[<index>]"
+    pub bitgroup_id: String, // "<scope_id>.bitgroup[<index>]"
     pub scope_id: String,
     pub total_bits: u16,
     pub endianness: Endianness,

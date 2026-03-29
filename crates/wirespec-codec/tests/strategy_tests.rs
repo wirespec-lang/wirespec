@@ -134,10 +134,22 @@ fn strategy_array() {
 
 #[test]
 fn tier_bytes_is_a() {
-    assert_eq!(assign_memory_tier(FieldStrategy::BytesFixed), Some(MemoryTier::A));
-    assert_eq!(assign_memory_tier(FieldStrategy::BytesLength), Some(MemoryTier::A));
-    assert_eq!(assign_memory_tier(FieldStrategy::BytesRemaining), Some(MemoryTier::A));
-    assert_eq!(assign_memory_tier(FieldStrategy::BytesLor), Some(MemoryTier::A));
+    assert_eq!(
+        assign_memory_tier(FieldStrategy::BytesFixed),
+        Some(MemoryTier::A)
+    );
+    assert_eq!(
+        assign_memory_tier(FieldStrategy::BytesLength),
+        Some(MemoryTier::A)
+    );
+    assert_eq!(
+        assign_memory_tier(FieldStrategy::BytesRemaining),
+        Some(MemoryTier::A)
+    );
+    assert_eq!(
+        assign_memory_tier(FieldStrategy::BytesLor),
+        Some(MemoryTier::A)
+    );
 }
 
 #[test]
@@ -149,7 +161,11 @@ fn tier_primitive_is_none() {
 #[test]
 fn strategy_enum_ref() {
     let s = assign_strategy(&StrategyInput {
-        ty: &SemanticType::EnumRef { enum_id: "enum:E".into(), name: "E".into(), is_flags: false },
+        ty: &SemanticType::EnumRef {
+            enum_id: "enum:E".into(),
+            name: "E".into(),
+            is_flags: false,
+        },
         is_optional: false,
         has_checksum: false,
         has_bitgroup: false,
@@ -160,7 +176,10 @@ fn strategy_enum_ref() {
 #[test]
 fn strategy_frame_ref() {
     let s = assign_strategy(&StrategyInput {
-        ty: &SemanticType::FrameRef { frame_id: "frame:F".into(), name: "F".into() },
+        ty: &SemanticType::FrameRef {
+            frame_id: "frame:F".into(),
+            name: "F".into(),
+        },
         is_optional: false,
         has_checksum: false,
         has_bitgroup: false,
@@ -171,7 +190,10 @@ fn strategy_frame_ref() {
 #[test]
 fn strategy_capsule_ref() {
     let s = assign_strategy(&StrategyInput {
-        ty: &SemanticType::CapsuleRef { capsule_id: "capsule:C".into(), name: "C".into() },
+        ty: &SemanticType::CapsuleRef {
+            capsule_id: "capsule:C".into(),
+            name: "C".into(),
+        },
         is_optional: false,
         has_checksum: false,
         has_bitgroup: false,
@@ -182,7 +204,11 @@ fn strategy_capsule_ref() {
 #[test]
 fn strategy_bytes_length() {
     let s = assign_strategy(&StrategyInput {
-        ty: &SemanticType::Bytes { bytes_kind: SemanticBytesKind::Length, fixed_size: None, size_expr: None },
+        ty: &SemanticType::Bytes {
+            bytes_kind: SemanticBytesKind::Length,
+            fixed_size: None,
+            size_expr: None,
+        },
         is_optional: false,
         has_checksum: false,
         has_bitgroup: false,
@@ -193,7 +219,11 @@ fn strategy_bytes_length() {
 #[test]
 fn strategy_bytes_lor() {
     let s = assign_strategy(&StrategyInput {
-        ty: &SemanticType::Bytes { bytes_kind: SemanticBytesKind::LengthOrRemaining, fixed_size: None, size_expr: None },
+        ty: &SemanticType::Bytes {
+            bytes_kind: SemanticBytesKind::LengthOrRemaining,
+            fixed_size: None,
+            size_expr: None,
+        },
         is_optional: false,
         has_checksum: false,
         has_bitgroup: false,
@@ -214,15 +244,34 @@ fn strategy_bits() {
 
 #[test]
 fn tier_array_scalar_is_b() {
-    assert_eq!(assign_array_memory_tier(&SemanticType::Primitive { wire: PrimitiveWireType::U8, endianness: None }), MemoryTier::B);
+    assert_eq!(
+        assign_array_memory_tier(&SemanticType::Primitive {
+            wire: PrimitiveWireType::U8,
+            endianness: None
+        }),
+        MemoryTier::B
+    );
 }
 
 #[test]
 fn tier_array_composite_is_c() {
-    assert_eq!(assign_array_memory_tier(&SemanticType::PacketRef { packet_id: "p".into(), name: "P".into() }), MemoryTier::C);
+    assert_eq!(
+        assign_array_memory_tier(&SemanticType::PacketRef {
+            packet_id: "p".into(),
+            name: "P".into()
+        }),
+        MemoryTier::C
+    );
 }
 
 #[test]
 fn tier_array_enum_is_c() {
-    assert_eq!(assign_array_memory_tier(&SemanticType::EnumRef { enum_id: "e".into(), name: "E".into(), is_flags: false }), MemoryTier::C);
+    assert_eq!(
+        assign_array_memory_tier(&SemanticType::EnumRef {
+            enum_id: "e".into(),
+            name: "E".into(),
+            is_flags: false
+        }),
+        MemoryTier::C
+    );
 }

@@ -81,9 +81,10 @@ fn is_bit_field(field: &LayoutField) -> bool {
     matches!(
         &field.ty,
         wirespec_sema::types::SemanticType::Bits { .. }
-        | wirespec_sema::types::SemanticType::Primitive {
-            wire: wirespec_sema::types::PrimitiveWireType::Bit, ..
-        }
+            | wirespec_sema::types::SemanticType::Primitive {
+                wire: wirespec_sema::types::PrimitiveWireType::Bit,
+                ..
+            }
     )
 }
 
@@ -103,9 +104,7 @@ fn finalize_group(
     }
     if total_bits % 8 != 0 {
         return Err(BitGroupError {
-            msg: format!(
-                "bitgroup sums to {total_bits} bits, must be multiple of 8"
-            ),
+            msg: format!("bitgroup sums to {total_bits} bits, must be multiple of 8"),
         });
     }
 

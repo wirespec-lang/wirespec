@@ -62,22 +62,37 @@ fn cli_compile_c_target() {
     let input = dir.path().join("test.wspec");
 
     let output = wirespec_bin()
-        .args(["compile", input.to_str().unwrap(), "-o", out_dir.path().to_str().unwrap(), "-t", "c"])
+        .args([
+            "compile",
+            input.to_str().unwrap(),
+            "-o",
+            out_dir.path().to_str().unwrap(),
+            "-t",
+            "c",
+        ])
         .output()
         .unwrap();
 
     let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "compile should succeed: {stderr}");
     assert!(
-        output.status.success(),
-        "compile should succeed: {stderr}"
+        stderr.contains("wrote"),
+        "should print wrote messages: {stderr}"
     );
-    assert!(stderr.contains("wrote"), "should print wrote messages: {stderr}");
 
     // Verify output files exist
     let h_path = out_dir.path().join("test.h");
     let c_path = out_dir.path().join("test.c");
-    assert!(h_path.exists(), "header file should exist: {}", h_path.display());
-    assert!(c_path.exists(), "source file should exist: {}", c_path.display());
+    assert!(
+        h_path.exists(),
+        "header file should exist: {}",
+        h_path.display()
+    );
+    assert!(
+        c_path.exists(),
+        "source file should exist: {}",
+        c_path.display()
+    );
 
     // Verify files are non-empty
     let h_content = fs::read_to_string(&h_path).unwrap();
@@ -98,7 +113,14 @@ fn cli_compile_rust_target() {
     let input = dir.path().join("test.wspec");
 
     let output = wirespec_bin()
-        .args(["compile", input.to_str().unwrap(), "-o", out_dir.path().to_str().unwrap(), "-t", "rust"])
+        .args([
+            "compile",
+            input.to_str().unwrap(),
+            "-o",
+            out_dir.path().to_str().unwrap(),
+            "-t",
+            "rust",
+        ])
         .output()
         .unwrap();
 
@@ -109,7 +131,11 @@ fn cli_compile_rust_target() {
     );
 
     let rs_path = out_dir.path().join("test.rs");
-    assert!(rs_path.exists(), "rust source should exist: {}", rs_path.display());
+    assert!(
+        rs_path.exists(),
+        "rust source should exist: {}",
+        rs_path.display()
+    );
     let rs_content = fs::read_to_string(&rs_path).unwrap();
     assert!(!rs_content.is_empty(), "rust source should be non-empty");
 }
@@ -126,7 +152,12 @@ fn cli_compile_default_target_is_c() {
     let input = dir.path().join("test.wspec");
 
     let output = wirespec_bin()
-        .args(["compile", input.to_str().unwrap(), "-o", out_dir.path().to_str().unwrap()])
+        .args([
+            "compile",
+            input.to_str().unwrap(),
+            "-o",
+            out_dir.path().to_str().unwrap(),
+        ])
         .output()
         .unwrap();
 
@@ -137,8 +168,14 @@ fn cli_compile_default_target_is_c() {
     );
 
     // Default target is C
-    assert!(out_dir.path().join("test.h").exists(), "should produce .h (default target is C)");
-    assert!(out_dir.path().join("test.c").exists(), "should produce .c (default target is C)");
+    assert!(
+        out_dir.path().join("test.h").exists(),
+        "should produce .h (default target is C)"
+    );
+    assert!(
+        out_dir.path().join("test.c").exists(),
+        "should produce .c (default target is C)"
+    );
 }
 
 #[test]
@@ -154,25 +191,33 @@ fn cli_compile_unknown_target_fails() {
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("unknown target"), "should report unknown target: {stderr}");
+    assert!(
+        stderr.contains("unknown target"),
+        "should report unknown target: {stderr}"
+    );
 }
 
 #[test]
 fn cli_compile_missing_input_fails() {
-    let output = wirespec_bin()
-        .args(["compile"])
-        .output()
-        .unwrap();
+    let output = wirespec_bin().args(["compile"]).output().unwrap();
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("no input file"), "should report no input file: {stderr}");
+    assert!(
+        stderr.contains("no input file"),
+        "should report no input file: {stderr}"
+    );
 }
 
 #[test]
 fn cli_compile_nonexistent_file_fails() {
     let output = wirespec_bin()
-        .args(["compile", "/nonexistent/file.wspec", "-o", "/tmp/wirespec-cli-test-nonexist"])
+        .args([
+            "compile",
+            "/nonexistent/file.wspec",
+            "-o",
+            "/tmp/wirespec-cli-test-nonexist",
+        ])
         .output()
         .unwrap();
 
@@ -223,36 +268,39 @@ fn cli_check_invalid_syntax_fails() {
 
 #[test]
 fn cli_check_missing_input_fails() {
-    let output = wirespec_bin()
-        .args(["check"])
-        .output()
-        .unwrap();
+    let output = wirespec_bin().args(["check"]).output().unwrap();
 
     assert!(!output.status.success());
 }
 
 #[test]
 fn cli_compile_help() {
-    let output = wirespec_bin()
-        .args(["compile", "--help"])
-        .output()
-        .unwrap();
+    let output = wirespec_bin().args(["compile", "--help"]).output().unwrap();
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("--output"), "compile help should mention --output: {stderr}");
-    assert!(stderr.contains("--target"), "compile help should mention --target: {stderr}");
-    assert!(stderr.contains("--include-path"), "compile help should mention --include-path: {stderr}");
+    assert!(
+        stderr.contains("--output"),
+        "compile help should mention --output: {stderr}"
+    );
+    assert!(
+        stderr.contains("--target"),
+        "compile help should mention --target: {stderr}"
+    );
+    assert!(
+        stderr.contains("--include-path"),
+        "compile help should mention --include-path: {stderr}"
+    );
 }
 
 #[test]
 fn cli_check_help() {
-    let output = wirespec_bin()
-        .args(["check", "--help"])
-        .output()
-        .unwrap();
+    let output = wirespec_bin().args(["check", "--help"]).output().unwrap();
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("check"), "check help should mention check: {stderr}");
+    assert!(
+        stderr.contains("check"),
+        "check help should mention check: {stderr}"
+    );
 }
 
 #[test]
@@ -268,7 +316,14 @@ fn cli_compile_wire_extension() {
     let input = dir.path().join("proto.wire");
 
     let output = wirespec_bin()
-        .args(["compile", input.to_str().unwrap(), "-o", out_dir.path().to_str().unwrap(), "-t", "c"])
+        .args([
+            "compile",
+            input.to_str().unwrap(),
+            "-o",
+            out_dir.path().to_str().unwrap(),
+            "-t",
+            "c",
+        ])
         .output()
         .unwrap();
 

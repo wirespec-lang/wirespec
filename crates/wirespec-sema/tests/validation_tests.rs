@@ -1,5 +1,5 @@
-use wirespec_sema::validate::*;
 use wirespec_sema::error::ErrorKind;
+use wirespec_sema::validate::*;
 
 #[test]
 fn remaining_not_last_ok() {

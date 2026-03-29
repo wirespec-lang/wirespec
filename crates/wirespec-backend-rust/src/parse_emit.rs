@@ -27,10 +27,7 @@ pub fn emit_parse_items(
             }
             CodecItem::Derived(d) => {
                 let expr_str = expr_to_rust(&d.expr, &ExprContext::Parse);
-                out.push_str(&format!(
-                    "{indent}let {} = {expr_str};\n",
-                    d.name
-                ));
+                out.push_str(&format!("{indent}let {} = {expr_str};\n", d.name));
             }
             CodecItem::Require(r) => {
                 let expr_str = expr_to_rust(&r.expr, &ExprContext::Parse);
@@ -52,10 +49,7 @@ fn emit_field_parse(
     match f.strategy {
         FieldStrategy::Primitive | FieldStrategy::Checksum => {
             let read_method = cursor_read_method(&f.wire_type, f.endianness);
-            out.push_str(&format!(
-                "{indent}let {} = cur.{read_method}()?;\n",
-                f.name
-            ));
+            out.push_str(&format!("{indent}let {} = cur.{read_method}()?;\n", f.name));
         }
         FieldStrategy::BitGroup => {
             if let Some(ref bg) = f.bitgroup_member {
@@ -83,10 +77,7 @@ fn emit_field_parse(
             }
         }
         FieldStrategy::BytesRemaining => {
-            out.push_str(&format!(
-                "{indent}let {} = cur.read_remaining();\n",
-                f.name
-            ));
+            out.push_str(&format!("{indent}let {} = cur.read_remaining();\n", f.name));
         }
         FieldStrategy::BytesLor => {
             if let Some(BytesSpec::LengthOrRemaining { ref expr }) = f.bytes_spec {
@@ -170,16 +161,10 @@ fn emit_field_parse(
         FieldStrategy::VarInt | FieldStrategy::ContVarInt => {
             if let Some(ref ref_name) = f.ref_type_name {
                 let parse_fn = format!("{}_parse", crate::names::to_snake_case(ref_name));
-                out.push_str(&format!(
-                    "{indent}let {} = {parse_fn}(cur)?;\n",
-                    f.name
-                ));
+                out.push_str(&format!("{indent}let {} = {parse_fn}(cur)?;\n", f.name));
             } else {
                 // Fallback: read as u64
-                out.push_str(&format!(
-                    "{indent}let {} = cur.read_u64be()?;\n",
-                    f.name
-                ));
+                out.push_str(&format!("{indent}let {} = cur.read_u64be()?;\n", f.name));
             }
         }
     }
@@ -195,9 +180,7 @@ fn emit_bitgroup_parse(
     let read_method = bitgroup_read_method(bg.total_bits, bg.group_endianness);
     let var_name = format!("_bg{group_id}");
 
-    out.push_str(&format!(
-        "{indent}let {var_name} = cur.{read_method}()?;\n"
-    ));
+    out.push_str(&format!("{indent}let {var_name} = cur.{read_method}()?;\n"));
 
     // Extract all fields in this group
     for f in all_fields {
@@ -215,12 +198,7 @@ fn emit_bitgroup_parse(
     }
 }
 
-fn emit_array_parse(
-    out: &mut String,
-    f: &CodecField,
-    arr: &ArraySpec,
-    indent: &str,
-) {
+fn emit_array_parse(out: &mut String, f: &CodecField, arr: &ArraySpec, indent: &str) {
     if let Some(ref count_expr) = arr.count_expr {
         let count_str = expr_to_rust(count_expr, &ExprContext::Parse);
         let max_elems = f.max_elements.unwrap_or(256);
@@ -241,10 +219,7 @@ fn emit_array_parse(
             f.name
         ));
 
-        out.push_str(&format!(
-            "{indent}for _i in 0..{}_count {{\n",
-            f.name
-        ));
+        out.push_str(&format!("{indent}for _i in 0..{}_count {{\n", f.name));
 
         match arr.element_strategy {
             FieldStrategy::Primitive => {
@@ -283,11 +258,7 @@ fn get_value_ref_id(expr: &CodecExpr) -> String {
 }
 
 /// Emit parse for frame variants: reads tag, matches, parses variant fields.
-pub fn emit_frame_parse_body(
-    out: &mut String,
-    frame: &CodecFrame,
-    indent: &str,
-) {
+pub fn emit_frame_parse_body(out: &mut String, frame: &CodecFrame, indent: &str) {
     // Read the tag field
     let tag_read_method = cursor_read_method(&frame.tag.wire_type, frame.tag.endianness);
     out.push_str(&format!(
@@ -305,11 +276,7 @@ pub fn emit_frame_parse_body(
     out.push_str(&format!("{indent}Ok((_result, _tag_val))\n"));
 }
 
-fn emit_variant_parse_arm(
-    out: &mut String,
-    variant: &CodecVariantScope,
-    indent: &str,
-) {
+fn emit_variant_parse_arm(out: &mut String, variant: &CodecVariantScope, indent: &str) {
     let variant_name = to_pascal_case(&variant.name);
     let inner_indent = format!("{indent}        ");
 
@@ -326,7 +293,12 @@ fn emit_variant_parse_arm(
         }
     }
 
-    if variant.fields.is_empty() && variant.items.iter().all(|i| matches!(i, CodecItem::Require(_))) {
+    if variant.fields.is_empty()
+        && variant
+            .items
+            .iter()
+            .all(|i| matches!(i, CodecItem::Require(_)))
+    {
         // Handle requires for empty variants
         for item in &variant.items {
             if let CodecItem::Require(r) = item {
@@ -374,11 +346,7 @@ fn emit_variant_parse_arm(
 }
 
 /// Emit parse for capsule (header fields + sub-cursor dispatch).
-pub fn emit_capsule_parse_body(
-    out: &mut String,
-    capsule: &CodecCapsule,
-    indent: &str,
-) {
+pub fn emit_capsule_parse_body(out: &mut String, capsule: &CodecCapsule, indent: &str) {
     // Parse header fields
     emit_parse_items(out, &capsule.header_fields, &capsule.header_items, indent);
 
@@ -404,11 +372,7 @@ pub fn emit_capsule_parse_body(
     out.push_str(&format!("{indent}}}\n"));
 }
 
-fn emit_capsule_variant_arm(
-    out: &mut String,
-    variant: &CodecVariantScope,
-    indent: &str,
-) {
+fn emit_capsule_variant_arm(out: &mut String, variant: &CodecVariantScope, indent: &str) {
     let _variant_name = to_pascal_case(&variant.name);
     let inner_indent = format!("{indent}        ");
 
@@ -448,10 +412,7 @@ fn emit_capsule_variant_parse_items(
             }
             CodecItem::Derived(d) => {
                 let expr_str = expr_to_rust(&d.expr, &ExprContext::Parse);
-                out.push_str(&format!(
-                    "{indent}let {} = {expr_str};\n",
-                    d.name
-                ));
+                out.push_str(&format!("{indent}let {} = {expr_str};\n", d.name));
             }
             CodecItem::Require(r) => {
                 let expr_str = expr_to_rust(&r.expr, &ExprContext::Parse);
@@ -474,16 +435,10 @@ fn emit_capsule_field_parse(
     match f.strategy {
         FieldStrategy::Primitive | FieldStrategy::Checksum => {
             let read_method = cursor_read_method(&f.wire_type, f.endianness);
-            out.push_str(&format!(
-                "{indent}let {} = sub.{read_method}()?;\n",
-                f.name
-            ));
+            out.push_str(&format!("{indent}let {} = sub.{read_method}()?;\n", f.name));
         }
         FieldStrategy::BytesRemaining => {
-            out.push_str(&format!(
-                "{indent}let {} = sub.read_remaining();\n",
-                f.name
-            ));
+            out.push_str(&format!("{indent}let {} = sub.read_remaining();\n", f.name));
         }
         FieldStrategy::BytesFixed => {
             if let Some(BytesSpec::Fixed { size }) = &f.bytes_spec {
@@ -505,10 +460,7 @@ fn emit_capsule_field_parse(
         _ => {
             // Fallback for other strategies
             let read_method = cursor_read_method(&f.wire_type, f.endianness);
-            out.push_str(&format!(
-                "{indent}let {} = sub.{read_method}()?;\n",
-                f.name
-            ));
+            out.push_str(&format!("{indent}let {} = sub.{read_method}()?;\n", f.name));
         }
     }
 }

@@ -45,9 +45,7 @@ pub fn expr_to_rust(expr: &CodecExpr, ctx: &ExprContext) -> String {
                     format!("{n}")
                 }
             }
-            LiteralValue::Bool(b) => {
-                if *b { "true" } else { "false" }.into()
-            }
+            LiteralValue::Bool(b) => if *b { "true" } else { "false" }.into(),
             LiteralValue::String(s) => format!("\"{s}\""),
             LiteralValue::Null => "None".into(),
         },
@@ -65,7 +63,10 @@ pub fn expr_to_rust(expr: &CodecExpr, ctx: &ExprContext) -> String {
             let o = expr_to_rust(operand, ctx);
             format!("({op}{o})")
         }
-        CodecExpr::Coalesce { expr: e, default: d } => {
+        CodecExpr::Coalesce {
+            expr: e,
+            default: d,
+        } => {
             let d_str = expr_to_rust(d, ctx);
             // For optional field coalesce: field.unwrap_or(default)
             if let CodecExpr::ValueRef { reference } = e.as_ref() {

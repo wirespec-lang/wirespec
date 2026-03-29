@@ -150,7 +150,11 @@ fn cmd_compile(args: &[String]) {
     let factory = match registry.get_factory(target_id) {
         Ok(f) => f,
         Err(_) => {
-            let available: Vec<String> = registry.available_targets().iter().map(|t| t.to_string()).collect();
+            let available: Vec<String> = registry
+                .available_targets()
+                .iter()
+                .map(|t| t.to_string())
+                .collect();
             eprintln!("error: unknown target: {target}");
             eprintln!("  supported targets: {}", available.join(", "));
             process::exit(1);
@@ -168,20 +172,30 @@ fn cmd_compile(args: &[String]) {
     match result {
         Ok(result) => {
             if let Err(e) = std::fs::create_dir_all(&output) {
-                eprintln!("error: cannot create output directory {}: {e}", output.display());
+                eprintln!(
+                    "error: cannot create output directory {}: {e}",
+                    output.display()
+                );
                 process::exit(1);
             }
 
             for compiled_module in &result.modules {
-                let is_entry = compiled_module.module_name
-                    == result.modules.last().unwrap().module_name;
+                let is_entry =
+                    compiled_module.module_name == result.modules.last().unwrap().module_name;
 
                 // Without --recursive, only emit the entry module
                 if !is_entry && !recursive {
                     continue;
                 }
 
-                emit_module(compiled_module, backend.as_ref(), factory, &output, is_entry, fuzz);
+                emit_module(
+                    compiled_module,
+                    backend.as_ref(),
+                    factory,
+                    &output,
+                    is_entry,
+                    fuzz,
+                );
             }
         }
         Err(e) => {
@@ -216,7 +230,9 @@ fn emit_module(
 ) {
     // Build target options, applying --fuzz flag for C backend
     let target_options: Box<dyn std::any::Any + Send + Sync> = if backend.id().0 == "c" && fuzz {
-        Box::new(CBackendOptions { emit_fuzz_harness: true })
+        Box::new(CBackendOptions {
+            emit_fuzz_harness: true,
+        })
     } else {
         factory.default_options()
     };
@@ -245,7 +261,10 @@ fn emit_module(
             }
         }
         Err(e) => {
-            eprintln!("error: backend error for module '{}': {e}", module.module_name);
+            eprintln!(
+                "error: backend error for module '{}': {e}",
+                module.module_name
+            );
             process::exit(1);
         }
     }

@@ -14,7 +14,10 @@ fn format_error_with_source_line() {
         formatted.contains("error: undefined type 'Unknown'"),
         "formatted = {formatted}"
     );
-    assert!(formatted.contains("--> test.wspec:2:"), "formatted = {formatted}");
+    assert!(
+        formatted.contains("--> test.wspec:2:"),
+        "formatted = {formatted}"
+    );
     assert!(formatted.contains("x: Unknown"), "formatted = {formatted}");
     assert!(formatted.contains("^^^^^^^"), "formatted = {formatted}");
     assert!(

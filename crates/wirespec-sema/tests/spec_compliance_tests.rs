@@ -9,9 +9,9 @@
 //!   7. Wildcard transition priority (concrete overrides wildcard)
 //!   8. Match exhaustiveness (wildcard required in frames/capsules)
 
+use wirespec_sema::ComplianceProfile;
 use wirespec_sema::analyze;
 use wirespec_sema::error::ErrorKind;
-use wirespec_sema::ComplianceProfile;
 use wirespec_syntax::parse;
 
 fn check(src: &str) -> Result<wirespec_sema::SemanticModule, wirespec_sema::error::SemaError> {
@@ -166,14 +166,24 @@ fn ok_sm_field_references_sm_type() {
         }
     "#;
     let result = check(src);
-    assert!(result.is_ok(), "SM-typed state field should be allowed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "SM-typed state field should be allowed: {:?}",
+        result.err()
+    );
     let sem = result.unwrap();
     let parent = &sem.state_machines[1];
     let active_state = &parent.states[0];
     assert_eq!(active_state.fields.len(), 1);
     assert_eq!(active_state.fields[0].name, "child");
-    assert!(active_state.fields[0].child_sm_id.is_some(), "child_sm_id should be populated");
-    assert_eq!(active_state.fields[0].child_sm_name.as_deref(), Some("Child"));
+    assert!(
+        active_state.fields[0].child_sm_id.is_some(),
+        "child_sm_id should be populated"
+    );
+    assert_eq!(
+        active_state.fields[0].child_sm_name.as_deref(),
+        Some("Child")
+    );
 }
 
 #[test]
@@ -187,7 +197,10 @@ fn error_sm_type_in_packet_field_still_rejected() {
         packet P { x: SM }
     "#;
     let result = check(src);
-    assert!(result.is_err(), "SM type in packet field should still be rejected");
+    assert!(
+        result.is_err(),
+        "SM type in packet field should still be rejected"
+    );
     assert_eq!(result.unwrap_err().kind, ErrorKind::TypeMismatch);
 }
 
@@ -198,19 +211,27 @@ fn error_sm_type_in_packet_field_still_rejected() {
 #[test]
 fn error_bool_wire_field() {
     let result = check("packet P { flag: bool }");
-    assert!(result.is_err(), "bool should be rejected as wire field type");
+    assert!(
+        result.is_err(),
+        "bool should be rejected as wire field type"
+    );
     let err = result.unwrap_err();
     assert_eq!(err.kind, ErrorKind::TypeMismatch);
     assert!(
         err.msg.contains("semantic type"),
-        "error message should mention 'semantic type': {}", err.msg
+        "error message should mention 'semantic type': {}",
+        err.msg
     );
 }
 
 #[test]
 fn ok_bool_derived_field() {
     let result = check("packet P { x: u8, let flag: bool = x != 0 }");
-    assert!(result.is_ok(), "bool should be valid in derived fields: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "bool should be valid in derived fields: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -222,7 +243,10 @@ fn error_bool_in_frame_wire_field() {
         }
     "#;
     let result = check(src);
-    assert!(result.is_err(), "bool in frame wire field should be rejected");
+    assert!(
+        result.is_err(),
+        "bool in frame wire field should be rejected"
+    );
     assert_eq!(result.unwrap_err().kind, ErrorKind::TypeMismatch);
 }
 
@@ -235,7 +259,11 @@ fn ok_bool_in_frame_derived_field() {
         }
     "#;
     let result = check(src);
-    assert!(result.is_ok(), "bool in frame derived field should be valid: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "bool in frame derived field should be valid: {:?}",
+        result.err()
+    );
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -254,14 +282,28 @@ fn ok_wildcard_with_concrete_override() {
     // A has concrete "on error", wildcard also has "on error"
     // Concrete should take priority, not duplicate error
     let result = check(src);
-    assert!(result.is_ok(), "concrete should override wildcard: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "concrete should override wildcard: {:?}",
+        result.err()
+    );
     let sem = result.unwrap();
     let sm = &sem.state_machines[0];
     // A -> C on error (concrete), B -> C on error (wildcard expansion)
     // A -> B on next, B -> C on done
     // Total: 4 transitions
-    assert_eq!(sm.transitions.len(), 4, "expected 4 transitions, got {:?}",
-        sm.transitions.iter().map(|t| format!("{} -({})-> {}", t.src_state_name, t.event_name, t.dst_state_name)).collect::<Vec<_>>());
+    assert_eq!(
+        sm.transitions.len(),
+        4,
+        "expected 4 transitions, got {:?}",
+        sm.transitions
+            .iter()
+            .map(|t| format!(
+                "{} -({})-> {}",
+                t.src_state_name, t.event_name, t.dst_state_name
+            ))
+            .collect::<Vec<_>>()
+    );
 }
 
 #[test]
@@ -274,7 +316,11 @@ fn ok_wildcard_expands_to_uncovered_states() {
     }"#;
     // Neither A nor B has concrete "on error", so wildcard expands to both
     let result = check(src);
-    assert!(result.is_ok(), "wildcard should expand to uncovered states: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "wildcard should expand to uncovered states: {:?}",
+        result.err()
+    );
     let sem = result.unwrap();
     let sm = &sem.state_machines[0];
     // A -> B on next, B -> C on done, A -> C on error (wildcard), B -> C on error (wildcard)
@@ -297,8 +343,11 @@ fn error_frame_missing_wildcard() {
     assert!(result.is_err(), "frame without wildcard should be rejected");
     let err = result.unwrap_err();
     assert_eq!(err.kind, ErrorKind::TypeMismatch);
-    assert!(err.msg.contains("exhaustive") || err.msg.contains("wildcard"),
-        "error message should mention exhaustiveness: {}", err.msg);
+    assert!(
+        err.msg.contains("exhaustive") || err.msg.contains("wildcard"),
+        "error message should mention exhaustiveness: {}",
+        err.msg
+    );
 }
 
 #[test]
@@ -326,11 +375,17 @@ fn error_capsule_missing_wildcard() {
         }
     "#;
     let result = check(src);
-    assert!(result.is_err(), "capsule without wildcard should be rejected");
+    assert!(
+        result.is_err(),
+        "capsule without wildcard should be rejected"
+    );
     let err = result.unwrap_err();
     assert_eq!(err.kind, ErrorKind::TypeMismatch);
-    assert!(err.msg.contains("exhaustive") || err.msg.contains("wildcard"),
-        "error message should mention exhaustiveness: {}", err.msg);
+    assert!(
+        err.msg.contains("exhaustive") || err.msg.contains("wildcard"),
+        "error message should mention exhaustiveness: {}",
+        err.msg
+    );
 }
 
 #[test]
@@ -365,7 +420,10 @@ fn error_sm_missing_dst_assignment() {
     }"#;
     // A->B: B.x has no default and no action assigns it
     let result = check(src);
-    assert!(result.is_err(), "should fail: B.x has no default and no action assigns it");
+    assert!(
+        result.is_err(),
+        "should fail: B.x has no default and no action assigns it"
+    );
     assert_eq!(result.unwrap_err().kind, ErrorKind::SmMissingAssignment);
 }
 
@@ -396,7 +454,10 @@ fn ok_sm_dst_field_has_default() {
         transition B -> C { on done }
     }"#;
     // B.x has default = 0, so no assignment needed
-    assert!(check(src).is_ok(), "B.x has default value, no assignment needed");
+    assert!(
+        check(src).is_ok(),
+        "B.x has default value, no assignment needed"
+    );
 }
 
 #[test]
@@ -424,7 +485,10 @@ fn ok_sm_terminal_no_fields() {
         transition A -> Done { on finish }
     }"#;
     // Done has no fields, nothing to assign
-    assert!(check(src).is_ok(), "terminal state with no fields needs no assignment");
+    assert!(
+        check(src).is_ok(),
+        "terminal state with no fields needs no assignment"
+    );
 }
 
 #[test]
@@ -445,7 +509,11 @@ fn error_sm_missing_one_of_multiple_dst_fields() {
     assert!(result.is_err(), "should fail: B.y not assigned");
     let err = result.unwrap_err();
     assert_eq!(err.kind, ErrorKind::SmMissingAssignment);
-    assert!(err.msg.contains("y"), "error should mention field 'y': {}", err.msg);
+    assert!(
+        err.msg.contains("y"),
+        "error should mention field 'y': {}",
+        err.msg
+    );
 }
 
 #[test]
@@ -492,7 +560,10 @@ fn error_sm_self_transition_missing_assignment() {
     }"#;
     // A->A: A.x has no default and no action assigns it (not a delegate)
     let result = check(src);
-    assert!(result.is_err(), "self-transition without action should fail if fields have no default");
+    assert!(
+        result.is_err(),
+        "self-transition without action should fail if fields have no default"
+    );
     assert_eq!(result.unwrap_err().kind, ErrorKind::SmMissingAssignment);
 }
 
@@ -508,5 +579,8 @@ fn ok_sm_self_transition_field_assigned() {
         }
         transition A -> B { on done }
     }"#;
-    assert!(check(src).is_ok(), "self-transition with assignment is valid");
+    assert!(
+        check(src).is_ok(),
+        "self-transition with assignment is valid"
+    );
 }
