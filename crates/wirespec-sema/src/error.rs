@@ -4,13 +4,10 @@ use wirespec_syntax::span::Span;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorKind {
     UndefinedType,
-    UndefinedField,
     UndefinedState,
-    UndefinedEvent,
     ForwardReference,
     TypeMismatch,
     RemainingNotLast,
-    InvalidAnnotation,
     DuplicateDefinition,
     InvalidChecksumType,
     DuplicateChecksum,
