@@ -401,6 +401,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "wirespec-rt"
+version = "0.1.0"
+
+[[package]]
 name = "wirespec-sema"
 version = "0.1.0"
 dependencies = [
