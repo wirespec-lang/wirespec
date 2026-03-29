@@ -1,0 +1,150 @@
+module tls.tls13
+@endian big
+
+# --- Enums ---
+enum ContentType: u8 {
+    ChangeCipherSpec = 20, Alert = 21, Handshake = 22, ApplicationData = 23,
+}
+
+enum HandshakeType: u8 {
+    ClientHello = 1, ServerHello = 2, NewSessionTicket = 4,
+    EncryptedExtensions = 8, Certificate = 11, CertificateRequest = 13,
+    CertificateVerify = 15, Finished = 20, KeyUpdate = 24,
+}
+
+# --- Extension (TLV) ---
+capsule Extension {
+    extension_type: u16,
+    length: u16,
+    payload: match extension_type within length {
+        0x002b => SupportedVersions { data: bytes[remaining] },
+        0x000d => SignatureAlgorithms { data: bytes[remaining] },
+        0x0033 => KeyShare { data: bytes[remaining] },
+        0x0000 => ServerName { data: bytes[remaining] },
+        _ => Unknown { data: bytes[remaining] },
+    },
+}
+
+# --- Handshake Messages ---
+packet ClientHello {
+    legacy_version: u16,
+    random: bytes[32],
+    session_id_length: u8,
+    session_id: bytes[session_id_length],
+    cipher_suites_length: u16,
+    cipher_suites: [u16; cipher_suites_length / 2],
+    compression_methods_length: u8,
+    compression_methods: bytes[compression_methods_length],
+    extensions_length: u16,
+    extensions: [Extension; fill] within extensions_length,
+}
+
+packet ServerHello {
+    legacy_version: u16,
+    random: bytes[32],
+    session_id_length: u8,
+    session_id_echo: bytes[session_id_length],
+    cipher_suite: u16,
+    compression_method: u8,
+    extensions_length: u16,
+    extensions: [Extension; fill] within extensions_length,
+}
+
+packet CertificateEntry {
+    cert_data_length: u24,
+    cert_data: bytes[cert_data_length],
+    extensions_length: u16,
+    extensions: bytes[extensions_length],
+}
+
+packet Certificate {
+    request_context_length: u8,
+    request_context: bytes[request_context_length],
+    certificate_list_length: u24,
+    certificate_list: [CertificateEntry; fill] within certificate_list_length,
+}
+
+packet CertificateVerify {
+    algorithm: u16,
+    signature_length: u16,
+    signature: bytes[signature_length],
+}
+
+packet Finished {
+    verify_data: bytes[remaining],
+}
+
+packet NewSessionTicket {
+    ticket_lifetime: u32,
+    ticket_age_add: u32,
+    nonce_length: u8,
+    nonce: bytes[nonce_length],
+    ticket_length: u16,
+    ticket: bytes[ticket_length],
+    extensions_length: u16,
+    extensions: [Extension; fill] within extensions_length,
+}
+
+# --- Handshake Framing ---
+capsule HandshakeMessage {
+    msg_type: HandshakeType,
+    length: u24,
+    payload: match msg_type within length {
+        1 => ClientHello {
+            legacy_version: u16,
+            random: bytes[32],
+            session_id_length: u8,
+            session_id: bytes[session_id_length],
+            cipher_suites_length: u16,
+            cipher_suites: [u16; cipher_suites_length / 2],
+            compression_methods_length: u8,
+            compression_methods: bytes[compression_methods_length],
+            extensions_length: u16,
+            extensions: [Extension; fill] within extensions_length,
+        },
+        2 => ServerHello {
+            legacy_version: u16,
+            random: bytes[32],
+            session_id_length: u8,
+            session_id_echo: bytes[session_id_length],
+            cipher_suite: u16,
+            compression_method: u8,
+            extensions_length: u16,
+            extensions: [Extension; fill] within extensions_length,
+        },
+        4 => NewSessionTicket {
+            ticket_lifetime: u32, ticket_age_add: u32,
+            nonce_length: u8, nonce: bytes[nonce_length],
+            ticket_length: u16, ticket: bytes[ticket_length],
+            extensions_length: u16,
+            extensions: [Extension; fill] within extensions_length,
+        },
+        11 => Certificate {
+            request_context_length: u8,
+            request_context: bytes[request_context_length],
+            certificate_list_length: u24,
+            certificate_list: [CertificateEntry; fill] within certificate_list_length,
+        },
+        15 => CertificateVerify {
+            algorithm: u16,
+            signature_length: u16,
+            signature: bytes[signature_length],
+        },
+        20 => Finished { verify_data: bytes[remaining] },
+        _ => Unknown { data: bytes[remaining] },
+    },
+}
+
+# --- TLS Record Layer ---
+capsule TlsRecord {
+    content_type: ContentType,
+    legacy_version: u16,
+    length: u16,
+    payload: match content_type within length {
+        22 => Handshake { data: bytes[remaining] },
+        21 => Alert { level: u8, description: u8 },
+        20 => ChangeCipherSpec { value: u8 },
+        23 => ApplicationData { data: bytes[remaining] },
+        _ => Unknown { data: bytes[remaining] },
+    },
+}

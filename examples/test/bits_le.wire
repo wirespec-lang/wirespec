@@ -1,0 +1,19 @@
+@endian little
+module test.bits_le
+
+# Little-endian bits[N] field test.
+# Normal field (separator) breaks the two bit groups.
+packet LeBits {
+    # Group 0 (8-bit): LE packing — flag_a at LSB (offset 0), flag_b at offset 3
+    #   Wire byte = (flag_b << 3) | flag_a
+    flag_a: bits[3],
+    flag_b: bits[5],
+    # Non-bits field separates the groups
+    separator: u8,
+    # Group 1 (16-bit): LE packing — lo at offset 0, mid at offset 4, hi at offset 8
+    #   16-bit value = (hi << 8) | (mid << 4) | lo
+    #   Wire bytes (LE): byte[0] = (mid << 4) | lo, byte[1] = hi
+    lo: bits[4],
+    mid: bits[4],
+    hi: bits[8],
+}

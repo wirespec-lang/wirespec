@@ -1,0 +1,13 @@
+module checksum.frame_checksum_test
+@endian big
+
+frame TestFrame = match kind: u8 {
+    0x01 => Data {
+        id: u16,
+        @checksum(crc32)
+        cksum: u32,
+    },
+    _ => Unknown {
+        data: bytes[remaining],
+    },
+}

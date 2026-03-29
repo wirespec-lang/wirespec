@@ -1,0 +1,19 @@
+module quic.maxlen_test
+
+type VarInt = {
+    prefix: bits[2],
+    value: match prefix {
+        0b00 => bits[6],
+        0b01 => bits[14],
+        0b10 => bits[30],
+        0b11 => bits[62],
+    },
+}
+
+packet Entry { key: u8, val: u16 }
+
+packet Container {
+    count: VarInt,
+    @max_len(128)
+    entries: [Entry; count],
+}

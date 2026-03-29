@@ -1,0 +1,9 @@
+# BLE L2CAP Basic Frame
+@endian little
+module ble.l2cap
+
+packet L2capFrame {
+    length: u16le,
+    channel_id: u16le,
+    payload: bytes[length],
+}

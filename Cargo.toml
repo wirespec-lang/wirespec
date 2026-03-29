@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/wirespec-syntax",
+    "crates/wirespec-sema",
+    "crates/wirespec-layout",
+    "crates/wirespec-codec",
+    "crates/wirespec-backend-api",
+    "crates/wirespec-backend-c",
+    "crates/wirespec-backend-rust",
+    "crates/wirespec-driver",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"

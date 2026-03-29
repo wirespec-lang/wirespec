@@ -1,0 +1,38 @@
+module mpquic.array_sm
+
+state machine ItemState {
+    state Active { value: u8 }
+    state Done [terminal]
+
+    initial Active
+
+    transition Active -> Done { on complete }
+    transition * -> Done { on force_stop }
+}
+
+state machine ArrayContainer {
+    state Running { items: [ItemState; 4], count: u8 = 0 }
+    state Finished [terminal]
+
+    initial Running
+
+    transition Running -> Running {
+        on add_item(val: u8)
+        guard src.count < 4
+        action {
+            dst.items = src.items;
+            dst.items[src.count] = ItemState::Active(val);
+            dst.count = src.count + 1;
+        }
+    }
+
+    transition Running -> Running {
+        on reset_all
+        action {
+            dst.items = fill(ItemState::Done, 4);
+            dst.count = 0;
+        }
+    }
+
+    transition * -> Finished { on shutdown }
+}

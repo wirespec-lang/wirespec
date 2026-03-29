@@ -1,0 +1,9 @@
+[package]
+name = "wirespec-backend-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Backend trait and common lowering contracts for wirespec"
+
+[dependencies]
+wirespec-codec = { path = "../wirespec-codec" }

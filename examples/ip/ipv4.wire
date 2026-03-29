@@ -1,0 +1,21 @@
+module ip.v4
+@endian big
+
+# IPv4 Header (RFC 791)
+# Fixed 20-byte header (no options for simplicity)
+packet IPv4Header {
+    version: bits[4],
+    ihl: bits[4],
+    dscp: bits[6],
+    ecn: bits[2],
+    total_length: u16,
+    identification: u16,
+    flags: bits[3],
+    fragment_offset: bits[13],
+    ttl: u8,
+    protocol: u8,
+    @checksum(internet)
+    header_checksum: u16,
+    src_addr: u32,
+    dst_addr: u32,
+}

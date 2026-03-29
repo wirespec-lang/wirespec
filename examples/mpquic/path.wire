@@ -1,0 +1,43 @@
+module mpquic.path
+
+import quic.varint.VarInt
+
+state machine PathState {
+    state Init       { path_id: VarInt }
+    state Validating { path_id: VarInt, challenge: bytes[8] }
+    state Active     { path_id: VarInt, rtt: u64 = 0, cwnd: u64 = 0 }
+    state Standby    { path_id: VarInt }
+    state Closing    { path_id: VarInt, error_code: VarInt }
+    state Closed [terminal]
+
+    initial Init
+
+    transition Init -> Validating {
+        on send_path_challenge(c: bytes[8])
+        action { dst.path_id = src.path_id; dst.challenge = c; }
+    }
+    transition Validating -> Active {
+        on recv_path_response(r: bytes[8])
+        guard r == src.challenge
+        action { dst.path_id = src.path_id; }
+    }
+    transition Validating -> Closed { on validation_timeout }
+    transition Active -> Standby {
+        on recv_path_standby
+        action { dst.path_id = src.path_id; }
+    }
+    transition Standby -> Active {
+        on recv_path_available
+        action { dst.path_id = src.path_id; }
+    }
+    transition Active -> Closing {
+        on send_path_abandon(code: VarInt)
+        action { dst.path_id = src.path_id; dst.error_code = code; }
+    }
+    transition Standby -> Closing {
+        on send_path_abandon(code: VarInt)
+        action { dst.path_id = src.path_id; dst.error_code = code; }
+    }
+    transition Closing -> Closed { on closing_complete }
+    transition * -> Closed { on connection_closed }
+}

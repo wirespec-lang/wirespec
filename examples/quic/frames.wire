@@ -1,0 +1,83 @@
+# QUIC Frames (wirespec_spec.md Appendix A — complete)
+module quic.frames
+@endian big
+
+type VarInt = {
+    prefix: bits[2],
+    value: match prefix {
+        0b00 => bits[6],
+        0b01 => bits[14],
+        0b10 => bits[30],
+        0b11 => bits[62],
+    },
+}
+
+const MAX_CID_LENGTH: u8 = 20
+
+packet LengthPrefixedCid {
+    length: u8,
+    value: bytes[length],
+    require length <= MAX_CID_LENGTH,
+}
+
+packet AckRange {
+    gap: VarInt,
+    ack_range: VarInt,
+}
+
+packet EcnCounts {
+    ect0: VarInt,
+    ect1: VarInt,
+    ecn_ce: VarInt,
+}
+
+frame QuicFrame = match frame_type: VarInt {
+    0x00 => Padding {},
+    0x01 => Ping {},
+    0x02..=0x03 => Ack {
+        largest_ack: VarInt,
+        ack_delay: VarInt,
+        ack_range_count: VarInt,
+        first_ack_range: VarInt,
+        ack_ranges: [AckRange; ack_range_count],
+        ecn_counts: if frame_type == 0x03 { EcnCounts },
+    },
+    0x06 => Crypto {
+        offset: VarInt,
+        length: VarInt,
+        data: bytes[length],
+    },
+    0x08..=0x0f => Stream {
+        stream_id: VarInt,
+        offset_raw: if frame_type & 0x04 { VarInt },
+        length_raw: if frame_type & 0x02 { VarInt },
+        data: bytes[length_or_remaining: length_raw],
+        let offset: u64 = offset_raw ?? 0,
+        let fin: bool = (frame_type & 0x01) != 0,
+    },
+    0x18 => NewConnectionId {
+        sequence: VarInt,
+        retire_prior: VarInt,
+        cid_length: u8,
+        cid: bytes[cid_length],
+        reset_token: bytes[16],
+    },
+    0x1c..=0x1d => ConnectionClose {
+        error_code: VarInt,
+        offending_frame_type: if frame_type == 0x1c { VarInt },
+        reason_length: VarInt,
+        reason_phrase: bytes[reason_length],
+    },
+    0x1e => HandshakeDone {},
+    0x15228c00 => PathAbandon {
+        path_id: VarInt,
+        error_code: VarInt,
+        reason_length: VarInt,
+        reason_phrase: bytes[reason_length],
+    },
+    0x30..=0x31 => Datagram {
+        length: if frame_type & 0x01 { VarInt },
+        data: bytes[length_or_remaining: length],
+    },
+    _ => Unknown { data: bytes[remaining] },
+}

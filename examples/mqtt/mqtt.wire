@@ -1,0 +1,70 @@
+@endian big
+module mqtt
+
+// Continuation-bit VarInt — MQTT Remaining Length (S2.2.3)
+type MqttLength = varint {
+    continuation_bit: msb,
+    value_bits: 7,
+    max_bytes: 4,
+    byte_order: little,
+}
+
+// UTF-8 string (u16be length prefix + data)
+packet MqttString {
+    length: u16,
+    data: bytes[length],
+}
+
+// Binary data with u16be length prefix (NOT UTF-8 validated)
+// Used for Will Message and Password per MQTT 3.1.1 S3.1.3.3/S3.1.3.5
+packet MqttBytes {
+    length: u16,
+    data: bytes[length],
+}
+
+// MQTT Control Packet — Fixed Header + Remaining Length + Body
+capsule MqttPacket {
+    type_and_flags: u8,
+    remaining_length: MqttLength,
+    payload: match (type_and_flags >> 4) within remaining_length {
+        1 => Connect {
+            protocol_name: MqttString,
+            protocol_level: u8,
+            connect_flags: u8,
+            keep_alive: u16,
+            client_id: MqttString,
+            will_topic: if connect_flags & 0x04 { MqttString },
+            will_message: if connect_flags & 0x04 { MqttBytes },
+            username: if connect_flags & 0x80 { MqttString },
+            password: if connect_flags & 0x40 { MqttBytes },
+        },
+        2 => ConnAck {
+            ack_flags: u8,
+            return_code: u8,
+        },
+        3 => Publish {
+            topic: MqttString,
+            let qos: u8 = (type_and_flags & 0x06) >> 1,
+            packet_id: if qos > 0 { u16 },
+            payload: bytes[remaining],
+        },
+        4 => PubAck {
+            packet_id: u16,
+        },
+        8 => Subscribe {
+            require type_and_flags & 0x0F == 0x02,
+            packet_id: u16,
+            subscriptions: bytes[remaining],
+        },
+        9 => SubAck {
+            packet_id: u16,
+            return_codes: bytes[remaining],
+        },
+        12 => PingReq {},
+        13 => PingResp {},
+        14 => Disconnect {},
+        _ => Unknown {
+            data: bytes[remaining],
+        },
+    },
+}

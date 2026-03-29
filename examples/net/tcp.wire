@@ -1,0 +1,24 @@
+module net.tcp
+@endian big
+
+packet TcpSegment {
+    src_port: u16,
+    dst_port: u16,
+    seq_num: u32,
+    ack_num: u32,
+    data_offset: bits[4],
+    reserved: bits[4],
+    cwr: bit,
+    ece: bit,
+    urg: bit,
+    ack: bit,
+    psh: bit,
+    rst: bit,
+    syn: bit,
+    fin: bit,
+    window: u16,
+    checksum: u16,
+    urgent_pointer: u16,
+    require data_offset >= 5,
+    options: bytes[length: data_offset * 4 - 20],
+}

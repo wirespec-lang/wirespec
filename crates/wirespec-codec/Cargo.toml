@@ -1,0 +1,11 @@
+[package]
+name = "wirespec-codec"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Backend-neutral Codec IR for wirespec"
+
+[dependencies]
+wirespec-layout = { path = "../wirespec-layout" }
+wirespec-sema = { path = "../wirespec-sema" }
+wirespec-syntax = { path = "../wirespec-syntax" }

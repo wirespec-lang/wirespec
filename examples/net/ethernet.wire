@@ -1,0 +1,9 @@
+module net.ethernet
+@endian big
+
+packet EthernetFrame {
+    dst_mac: bytes[6],
+    src_mac: bytes[6],
+    ether_type: u16,
+    payload: bytes[remaining],
+}

@@ -1,0 +1,15 @@
+[package]
+name = "wirespec-backend-c"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "C backend for wirespec"
+
+[dependencies]
+wirespec-backend-api = { path = "../wirespec-backend-api" }
+wirespec-codec = { path = "../wirespec-codec" }
+wirespec-sema = { path = "../wirespec-sema" }
+
+[dev-dependencies]
+wirespec-syntax = { path = "../wirespec-syntax" }
+wirespec-layout = { path = "../wirespec-layout" }

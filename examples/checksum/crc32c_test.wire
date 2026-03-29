@@ -1,0 +1,11 @@
+module checksum.crc32c_test
+@endian big
+
+packet Crc32cPacket {
+    id: u16,
+    length: u16,
+    require length >= 8,
+    data: bytes[length: length - 8],
+    @checksum(crc32c)
+    checksum: u32,
+}

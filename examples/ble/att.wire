@@ -1,0 +1,26 @@
+# BLE ATT Protocol (wirespec_spec.md Appendix B)
+@endian little
+module ble.att
+
+type AttHandle = u16le
+type Uuid16 = u16le
+
+enum AttErrorCode: u8 {
+    InvalidHandle = 0x01,
+    ReadNotPermitted = 0x02,
+    WriteNotPermitted = 0x03,
+    AttributeNotFound = 0x0a,
+}
+
+frame AttPdu = match opcode: u8 {
+    0x01 => ErrorRsp { request_opcode: u8, handle: AttHandle, error_code: AttErrorCode },
+    0x02 => ExchangeMtuReq { client_rx_mtu: u16le },
+    0x03 => ExchangeMtuRsp { server_rx_mtu: u16le },
+    0x0a => ReadReq { handle: AttHandle },
+    0x0b => ReadRsp { value: bytes[remaining] },
+    0x12 => WriteReq { handle: AttHandle, value: bytes[remaining] },
+    0x13 => WriteRsp {},
+    0x1b => Notification { handle: AttHandle, value: bytes[remaining] },
+    0x52 => WriteCmd { handle: AttHandle, value: bytes[remaining] },
+    _ => Unknown { data: bytes[remaining] },
+}

@@ -1,0 +1,13 @@
+# QUIC Variable-Length Integer Encoding (RFC 9000 Section 16)
+module quic.varint
+
+@strict
+type VarInt = {
+    prefix: bits[2],
+    value: match prefix {
+        0b00 => bits[6],
+        0b01 => bits[14],
+        0b10 => bits[30],
+        0b11 => bits[62],
+    },
+}

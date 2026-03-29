@@ -1,0 +1,11 @@
+module net.udp
+@endian big
+
+packet UdpDatagram {
+    src_port: u16,
+    dst_port: u16,
+    length: u16,
+    checksum: u16,
+    require length >= 8,
+    data: bytes[length: length - 8],
+}

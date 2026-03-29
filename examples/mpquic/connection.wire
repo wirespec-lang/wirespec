@@ -1,0 +1,24 @@
+module mpquic.connection
+
+state machine ChildProcess {
+    state Running { value: u8 }
+    state Stopped [terminal]
+    initial Running
+    transition Running -> Stopped { on halt }
+    transition * -> Stopped { on force_stop }
+}
+
+state machine SimpleDelegateExample {
+    state Active { child: ChildProcess, data: u64 }
+    state Closed [terminal]
+
+    initial Active
+
+    transition Active -> Active {
+        on child_event(ev: u8)
+        delegate src.child <- ev
+    }
+
+    transition Active -> Closed { on disconnect }
+    transition * -> Closed { on error }
+}

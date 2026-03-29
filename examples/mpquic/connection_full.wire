@@ -1,0 +1,48 @@
+module mpquic.connection_full
+
+state machine PathState {
+    state Active { path_id: u8, rtt: u64 = 0 }
+    state Closed [terminal]
+    initial Active
+    transition Active -> Closed { on close_path }
+    transition * -> Closed { on force_close }
+}
+
+state machine FullConnection {
+    state Idle
+    state Connected { paths: [PathState; 4], path_count: u8 = 1 }
+    state Done [terminal]
+
+    initial Idle
+
+    transition Idle -> Connected {
+        on connect(pid: u8)
+        action {
+            dst.paths = fill(PathState::Closed, 4);
+            dst.paths[0] = PathState::Active(pid, 0);
+            dst.path_count = 1;
+        }
+    }
+
+    transition Connected -> Connected {
+        on add_path(pid: u8)
+        guard src.path_count < 4
+        action {
+            dst.paths = src.paths;
+            dst.paths[src.path_count] = PathState::Active(pid, 0);
+            dst.path_count = src.path_count + 1;
+        }
+    }
+
+    transition Connected -> Connected {
+        on path_event(idx: u8, ev: u8)
+        delegate src.paths[idx] <- ev
+    }
+
+    transition Connected -> Done {
+        on child_state_changed
+        guard all(src.paths[0..src.path_count], in_state(Closed))
+    }
+
+    transition * -> Done { on shutdown }
+}

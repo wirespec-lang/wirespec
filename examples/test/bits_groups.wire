@@ -1,0 +1,24 @@
+module test.bits_groups
+@endian big
+
+# Test packet with multiple bit groups + normal fields
+packet BitTest {
+    # Group 0: 8 bits
+    a4: bits[4],
+    b4: bits[4],
+    # Normal field breaks group
+    middle: u16,
+    # Group 1: 16 bits
+    c6: bits[6],
+    d2: bits[2],
+    e8: bits[8],
+    # Normal field
+    tail: u8,
+}
+
+# Test 32-bit group
+packet BitTest32 {
+    x4: bits[4],
+    y12: bits[12],
+    z16: bits[16],
+}

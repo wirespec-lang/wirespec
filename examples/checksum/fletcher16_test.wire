@@ -1,0 +1,11 @@
+module checksum.fletcher16_test
+@endian big
+
+packet Fletcher16Packet {
+    id: u16,
+    length: u16,
+    require length >= 6,
+    data: bytes[length: length - 6],
+    @checksum(fletcher16)
+    checksum: u16,
+}

@@ -1,0 +1,19 @@
+module checksum.capsule_checksum_test
+@endian big
+
+capsule TestCapsule {
+    kind: u8,
+    length: u8,
+    @checksum(internet)
+    hdr_ck: u16,
+    payload: match kind within length {
+        0x01 => Data {
+            value: u8,
+            @checksum(fletcher16)
+            payload_ck: u16,
+        },
+        _ => Unknown {
+            data: bytes[remaining],
+        },
+    },
+}

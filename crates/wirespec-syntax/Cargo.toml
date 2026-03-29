@@ -1,0 +1,6 @@
+[package]
+name = "wirespec-syntax"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Parser and AST for the wirespec protocol description language"

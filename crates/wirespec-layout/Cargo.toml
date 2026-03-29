@@ -1,0 +1,10 @@
+[package]
+name = "wirespec-layout"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Layout IR for wirespec"
+
+[dependencies]
+wirespec-sema = { path = "../wirespec-sema" }
+wirespec-syntax = { path = "../wirespec-syntax" }
