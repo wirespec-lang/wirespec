@@ -47,11 +47,11 @@ jobs:
 
       - name: GCC example verification
         run: |
-          for f in examples/net/udp.wire examples/net/tcp.wire examples/net/ethernet.wire \
-                   examples/quic/varint.wire examples/test/bits_groups.wire \
-                   examples/ble/att.wire examples/mqtt/mqtt.wire \
-                   examples/ip/ipv4.wire examples/tls/tls13.wire; do
-            name=$(echo $f | tr '/' '_' | sed 's/.wire//')
+          for f in examples/net/udp.wspec examples/net/tcp.wspec examples/net/ethernet.wspec \
+                   examples/quic/varint.wspec examples/test/bits_groups.wspec \
+                   examples/ble/att.wspec examples/mqtt/mqtt.wspec \
+                   examples/ip/ipv4.wspec examples/tls/tls13.wspec; do
+            name=$(echo $f | tr '/' '_' | sed 's/.wspec//')
             outdir="/tmp/ci-gcc/$name"
             mkdir -p "$outdir"
             ./target/release/wirespec compile "$f" -o "$outdir" -t c -I examples --recursive 2>/dev/null
