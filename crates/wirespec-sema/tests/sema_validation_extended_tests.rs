@@ -61,3 +61,129 @@ fn ok_enum_value_max_u8() {
 fn ok_enum_value_max_u16() {
     expect_ok("enum E: u16 { X = 65535 }");
 }
+
+// ── bytes[length_or_remaining] edge cases ──
+
+#[test]
+fn ok_lor_option_u16() {
+    expect_ok(
+        "packet P { flags: u8, len: if flags & 1 { u16 }, data: bytes[length_or_remaining: len] }",
+    );
+}
+
+// ── fill array position ──
+
+#[test]
+fn error_fill_then_wire_field() {
+    expect_error(
+        "packet P { items: [u8; fill], extra: u8 }",
+        ErrorKind::RemainingNotLast,
+    );
+}
+
+#[test]
+fn ok_fill_then_derived() {
+    // let and require can follow fill
+    expect_ok("packet P { items: [u8; fill], let count: bool = true }");
+}
+
+// ── remaining in frame variant scope ──
+
+#[test]
+fn ok_remaining_in_frame_variant() {
+    expect_ok(
+        "frame F = match tag: u8 { 0 => A { data: bytes[remaining] }, _ => B { data: bytes[remaining] } }",
+    );
+}
+
+// ── capsule within scope ──
+
+#[test]
+fn ok_capsule_basic() {
+    expect_ok(
+        r#"capsule C {
+            type_id: u8,
+            length: u16,
+            payload: match type_id within length {
+                0 => D { data: bytes[remaining] },
+                _ => U { data: bytes[remaining] },
+            },
+        }"#,
+    );
+}
+
+// ── state machine edge cases ──
+
+#[test]
+fn error_sm_duplicate_concrete_transitions() {
+    // Two concrete transitions with the same (state, event) = duplicate
+    expect_error(
+        r#"state machine S {
+            state A {}
+            state B [terminal]
+            initial A
+            transition A -> B { on close }
+            transition A -> B { on close }
+        }"#,
+        ErrorKind::SmDuplicateTransition,
+    );
+}
+
+#[test]
+fn ok_sm_wildcard_no_conflict() {
+    expect_ok(
+        r#"state machine S {
+            state A {}
+            state B {}
+            state C [terminal]
+            initial A
+            transition A -> B { on go }
+            transition * -> C { on close }
+        }"#,
+    );
+}
+
+#[test]
+fn error_sm_event_named_src() {
+    expect_error(
+        r#"state machine S {
+            state A {}
+            state B [terminal]
+            initial A
+            transition A -> B { on src }
+        }"#,
+        ErrorKind::ReservedIdentifier,
+    );
+}
+
+// ── Checksum in frame variant ──
+
+#[test]
+fn ok_checksum_in_frame_variant() {
+    expect_ok(
+        r#"frame F = match tag: u8 {
+            0 => A { data: u32, @checksum(internet) cksum: u16 },
+            _ => B { x: u8 },
+        }"#,
+    );
+}
+
+// ── Multiple remaining in same scope ──
+
+#[test]
+fn error_double_remaining() {
+    expect_error(
+        "packet P { a: bytes[remaining], b: bytes[remaining] }",
+        ErrorKind::RemainingNotLast,
+    );
+}
+
+// ── Cross-module type that's not registered ──
+
+#[test]
+fn error_undefined_type_in_array_element_nested() {
+    expect_error(
+        "packet P { count: u8, items: [NoSuchType; count] }",
+        ErrorKind::UndefinedType,
+    );
+}
