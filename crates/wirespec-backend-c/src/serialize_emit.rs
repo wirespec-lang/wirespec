@@ -98,8 +98,9 @@ fn emit_field_serialize(
             out.push_str(&format!("{indent}if (val->has_{}) {{\n", f.name));
             let inner_wt = f.inner_wire_type.as_ref().unwrap_or(&f.wire_type);
             // Check if the inner type is a struct or VarInt reference
-            if f.ref_type_name.is_some() && matches!(inner_wt, WireType::Struct(_)) {
-                let ref_name = f.ref_type_name.as_ref().unwrap();
+            if let Some(ref ref_name) = f.ref_type_name
+                && matches!(inner_wt, WireType::Struct(_))
+            {
                 let serialize_fn = c_func_name(prefix, ref_name, "serialize");
                 out.push_str(&format!(
                     "{indent}    {{\n{indent}        size_t _written = 0;\n"
@@ -113,10 +114,9 @@ fn emit_field_serialize(
                 ));
                 out.push_str(&format!("{indent}        pos += _written;\n"));
                 out.push_str(&format!("{indent}    }}\n"));
-            } else if f.ref_type_name.is_some()
+            } else if let Some(ref ref_name) = f.ref_type_name
                 && matches!(inner_wt, WireType::VarInt | WireType::ContVarInt)
             {
-                let ref_name = f.ref_type_name.as_ref().unwrap();
                 let serialize_fn = c_func_name(prefix, ref_name, "serialize");
                 out.push_str(&format!(
                     "{indent}    {{\n{indent}        size_t _written = 0;\n"
@@ -424,8 +424,9 @@ fn emit_variant_field_serialize(
             out.push_str(&format!("{indent}if ({val_prefix}has_{}) {{\n", f.name));
             let inner_wt = f.inner_wire_type.as_ref().unwrap_or(&f.wire_type);
             // Check if the inner type is a struct or VarInt reference
-            if f.ref_type_name.is_some() && matches!(inner_wt, WireType::Struct(_)) {
-                let ref_name = f.ref_type_name.as_ref().unwrap();
+            if let Some(ref ref_name) = f.ref_type_name
+                && matches!(inner_wt, WireType::Struct(_))
+            {
                 let serialize_fn = c_func_name(prefix, ref_name, "serialize");
                 out.push_str(&format!(
                     "{indent}    {{\n{indent}        size_t _written = 0;\n"
@@ -439,10 +440,9 @@ fn emit_variant_field_serialize(
                 ));
                 out.push_str(&format!("{indent}        pos += _written;\n"));
                 out.push_str(&format!("{indent}    }}\n"));
-            } else if f.ref_type_name.is_some()
+            } else if let Some(ref ref_name) = f.ref_type_name
                 && matches!(inner_wt, WireType::VarInt | WireType::ContVarInt)
             {
-                let ref_name = f.ref_type_name.as_ref().unwrap();
                 let serialize_fn = c_func_name(prefix, ref_name, "serialize");
                 out.push_str(&format!(
                     "{indent}    {{\n{indent}        size_t _written = 0;\n"
@@ -606,17 +606,17 @@ fn emit_field_serialized_len(
                     "{indent}if ({val_prefix}has_{}) len += {w};\n",
                     f.name
                 ));
-            } else if f.ref_type_name.is_some() && matches!(inner_wt, WireType::Struct(_)) {
-                let ref_name = f.ref_type_name.as_ref().unwrap();
+            } else if let Some(ref ref_name) = f.ref_type_name
+                && matches!(inner_wt, WireType::Struct(_))
+            {
                 let len_fn = c_func_name(prefix, ref_name, "serialized_len");
                 out.push_str(&format!(
                     "{indent}if ({val_prefix}has_{}) len += {len_fn}(&{val_prefix}{});\n",
                     f.name, f.name
                 ));
-            } else if f.ref_type_name.is_some()
+            } else if let Some(ref ref_name) = f.ref_type_name
                 && matches!(inner_wt, WireType::VarInt | WireType::ContVarInt)
             {
-                let ref_name = f.ref_type_name.as_ref().unwrap();
                 let len_fn = c_func_name(prefix, ref_name, "wire_size");
                 out.push_str(&format!(
                     "{indent}if ({val_prefix}has_{}) len += {len_fn}({val_prefix}{});\n",

@@ -228,13 +228,12 @@ fn emit_field_parse_with_ctx(
                 // Parse the inner field
                 let inner_wt = f.inner_wire_type.as_ref().unwrap_or(&f.wire_type);
                 // Check if the inner type is a struct reference
-                if f.ref_type_name.is_some()
+                if let Some(ref ref_name) = f.ref_type_name
                     && matches!(
                         inner_wt,
                         WireType::Struct(_) | WireType::VarInt | WireType::ContVarInt
                     )
                 {
-                    let ref_name = f.ref_type_name.as_ref().unwrap();
                     let parse_fn = c_func_name(prefix, ref_name, "parse_cursor");
                     out.push_str(&format!(
                         "{indent}    r = {parse_fn}(cur, &{struct_prefix}{});\n",
@@ -790,8 +789,9 @@ fn emit_capsule_field_parse(
                 let inner_wt = f.inner_wire_type.as_ref().unwrap_or(&f.wire_type);
 
                 // Check if the inner type is a struct reference
-                if f.ref_type_name.is_some() && matches!(inner_wt, WireType::Struct(_)) {
-                    let ref_name = f.ref_type_name.as_ref().unwrap();
+                if let Some(ref ref_name) = f.ref_type_name
+                    && matches!(inner_wt, WireType::Struct(_))
+                {
                     let parse_fn = c_func_name(prefix, ref_name, "parse_cursor");
                     out.push_str(&format!(
                         "{indent}    r = {parse_fn}(&sub, &{struct_prefix}{});\n",
