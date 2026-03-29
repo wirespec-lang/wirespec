@@ -22,19 +22,19 @@ fn layout_file(path: &str) -> wirespec_layout::ir::LayoutModule {
 
 #[test]
 fn corpus_quic_varint() {
-    let m = layout_file("../../protospec/examples/quic/varint.wire");
+    let m = layout_file("../../examples/quic/varint.wire");
     assert!(!m.varints.is_empty());
 }
 
 #[test]
 fn corpus_udp() {
-    let m = layout_file("../../protospec/examples/net/udp.wire");
+    let m = layout_file("../../examples/net/udp.wire");
     assert_eq!(m.packets.len(), 1);
 }
 
 #[test]
 fn corpus_tcp() {
-    let m = layout_file("../../protospec/examples/net/tcp.wire");
+    let m = layout_file("../../examples/net/tcp.wire");
     assert_eq!(m.packets.len(), 1);
     // TCP has bit fields -> should have bitgroups
     assert!(!m.packets[0].bitgroups.is_empty());
@@ -42,13 +42,13 @@ fn corpus_tcp() {
 
 #[test]
 fn corpus_ethernet() {
-    let m = layout_file("../../protospec/examples/net/ethernet.wire");
+    let m = layout_file("../../examples/net/ethernet.wire");
     assert_eq!(m.packets.len(), 1);
 }
 
 #[test]
 fn corpus_bits_groups() {
-    let m = layout_file("../../protospec/examples/test/bits_groups.wire");
+    let m = layout_file("../../examples/test/bits_groups.wire");
     assert_eq!(m.packets.len(), 2);
     // BitTest: bits[4]+bits[4] | u16 | bits[6]+bits[2]+bits[8] | u8 -> 2 groups
     assert_eq!(m.packets[0].bitgroups.len(), 2);
@@ -59,12 +59,12 @@ fn corpus_bits_groups() {
 
 #[test]
 fn corpus_ble_att() {
-    let m = layout_file("../../protospec/examples/ble/att.wire");
+    let m = layout_file("../../examples/ble/att.wire");
     assert!(!m.frames.is_empty());
 }
 
 #[test]
 fn corpus_mqtt() {
-    let m = layout_file("../../protospec/examples/mqtt/mqtt.wire");
+    let m = layout_file("../../examples/mqtt/mqtt.wire");
     assert!(!m.capsules.is_empty());
 }
