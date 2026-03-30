@@ -1177,12 +1177,56 @@ impl Parser {
             _ => {
                 let span = self.span();
                 let name = self.parse_type_ref_name()?;
+                // Check for asn1(...) function-call syntax
+                if name == "asn1" && self.at(&TokenKind::LParen) {
+                    return self.parse_asn1_type_expr(span);
+                }
                 Ok(AstTypeExpr::Named {
                     name,
                     span: Some(span),
                 })
             }
         }
+    }
+
+    fn parse_asn1_type_expr(&mut self, _start: Span) -> Result<AstTypeExpr> {
+        self.expect(&TokenKind::LParen)?;
+
+        // Type name
+        let (type_name, _) = self.expect_name()?;
+        self.expect(&TokenKind::Comma)?;
+
+        // encoding: <name>
+        let (enc_kw, _) = self.expect_name()?;
+        if enc_kw != "encoding" {
+            return Err(self.error(format!("expected 'encoding', found '{enc_kw}'")));
+        }
+        self.expect(&TokenKind::Colon)?;
+        let (encoding, _) = self.expect_name()?;
+        self.expect(&TokenKind::Comma)?;
+
+        // length: <expr> OR remaining
+        let length = if self.eat(&TokenKind::Remaining) {
+            Asn1Length::Remaining
+        } else {
+            let (len_kw, _) = self.expect_name()?;
+            if len_kw != "length" {
+                return Err(self.error(format!(
+                    "expected 'length' or 'remaining', found '{len_kw}'"
+                )));
+            }
+            self.expect(&TokenKind::Colon)?;
+            let expr = self.parse_expr()?;
+            Asn1Length::Expr(Box::new(expr))
+        };
+
+        self.expect(&TokenKind::RParen)?;
+
+        Ok(AstTypeExpr::Asn1 {
+            type_name,
+            encoding,
+            length,
+        })
     }
 
     fn parse_match_type_expr(&mut self) -> Result<AstTypeExpr> {

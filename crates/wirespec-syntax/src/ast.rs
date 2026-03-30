@@ -157,6 +157,14 @@ pub enum UnaryOp {
     Neg,
 }
 
+// ── ASN.1 Length ──
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Asn1Length {
+    Expr(Box<AstExpr>),
+    Remaining,
+}
+
 // ── Type Expressions ──
 
 #[derive(Debug, Clone, PartialEq)]
@@ -190,6 +198,11 @@ pub enum AstTypeExpr {
         condition: AstExpr,
         inner_type: Box<AstTypeExpr>,
         span: Option<Span>,
+    },
+    Asn1 {
+        type_name: String,
+        encoding: String,
+        length: Asn1Length,
     },
 }
 

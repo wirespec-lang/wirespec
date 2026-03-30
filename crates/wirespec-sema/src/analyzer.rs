@@ -1351,6 +1351,10 @@ impl Analyzer {
                     ))
                 }
             }
+            AstTypeExpr::Asn1 { .. } => Err(SemaError::new(
+                ErrorKind::TypeMismatch,
+                "ASN.1 field types not yet implemented",
+            )),
         }
     }
 
@@ -2216,6 +2220,7 @@ fn type_expr_name(texpr: &AstTypeExpr) -> String {
         }
         AstTypeExpr::Optional { inner_type, .. } => type_expr_name(inner_type),
         AstTypeExpr::Match { .. } => "match".to_string(),
+        AstTypeExpr::Asn1 { type_name, .. } => format!("asn1({})", type_name),
     }
 }
 
@@ -2268,6 +2273,11 @@ fn collect_type_expr_refs(texpr: &AstTypeExpr, out: &mut Vec<String>) {
         AstTypeExpr::Match { branches, .. } => {
             for b in branches {
                 collect_type_expr_refs(&b.result_type, out);
+            }
+        }
+        AstTypeExpr::Asn1 { length, .. } => {
+            if let Asn1Length::Expr(expr) = length {
+                collect_expr_refs(expr, out);
             }
         }
     }
