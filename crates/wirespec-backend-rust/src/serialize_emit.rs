@@ -92,11 +92,11 @@ fn emit_field_serialize(
         | FieldStrategy::BytesLength
         | FieldStrategy::BytesRemaining
         | FieldStrategy::BytesLor => {
-            if let Some(ref _hint) = f.asn1_hint {
+            if let Some(ref hint) = f.asn1_hint {
                 // Encode payload first
                 out.push_str(&format!(
-                    "{indent}let _{}_encoded = uper::encode(&{val_prefix}{}).map_err(|_| Error::Asn1Encode)?;\n",
-                    f.name, f.name
+                    "{indent}let _{}_encoded = {}::encode(&{val_prefix}{}).map_err(|_| Error::Asn1Encode)?;\n",
+                    f.name, hint.encoding, f.name
                 ));
                 // For length-prefixed ASN.1 fields, write the recomputed length before the payload
                 if let Some(BytesSpec::Length {
@@ -297,10 +297,10 @@ fn emit_field_serialized_len(
             }
         }
         FieldStrategy::BytesLength | FieldStrategy::BytesRemaining | FieldStrategy::BytesLor => {
-            if let Some(ref _hint) = f.asn1_hint {
+            if let Some(ref hint) = f.asn1_hint {
                 out.push_str(&format!(
-                    "{indent}len += uper::encode(&{val_prefix}{}).map(|b| b.len()).unwrap_or(0);\n",
-                    f.name
+                    "{indent}len += {}::encode(&{val_prefix}{}).map(|b| b.len()).unwrap_or(0);\n",
+                    hint.encoding, f.name
                 ));
             } else {
                 out.push_str(&format!("{indent}len += {val_prefix}{}.len();\n", f.name));
@@ -582,10 +582,10 @@ fn emit_variant_field_serialize(
         | FieldStrategy::BytesLength
         | FieldStrategy::BytesRemaining
         | FieldStrategy::BytesLor => {
-            if let Some(ref _hint) = f.asn1_hint {
+            if let Some(ref hint) = f.asn1_hint {
                 out.push_str(&format!(
-                    "{indent}let _{}_encoded = uper::encode(&{}).map_err(|_| Error::Asn1Encode)?;\n",
-                    f.name, f.name
+                    "{indent}let _{}_encoded = {}::encode(&{}).map_err(|_| Error::Asn1Encode)?;\n",
+                    f.name, hint.encoding, f.name
                 ));
                 out.push_str(&format!("{indent}w.write_bytes(&_{}_encoded)?;\n", f.name));
             } else {
@@ -667,10 +667,10 @@ fn emit_variant_field_serialized_len(
             }
         }
         FieldStrategy::BytesLength | FieldStrategy::BytesRemaining | FieldStrategy::BytesLor => {
-            if let Some(ref _hint) = f.asn1_hint {
+            if let Some(ref hint) = f.asn1_hint {
                 out.push_str(&format!(
-                    "{indent}len += uper::encode(&{}).map(|b| b.len()).unwrap_or(0);\n",
-                    f.name
+                    "{indent}len += {}::encode(&{}).map(|b| b.len()).unwrap_or(0);\n",
+                    hint.encoding, f.name
                 ));
             } else {
                 out.push_str(&format!("{indent}len += {}.len();\n", f.name));

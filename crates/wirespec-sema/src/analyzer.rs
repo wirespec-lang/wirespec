@@ -1392,13 +1392,15 @@ impl Analyzer {
                 let extern_path = extern_decl.path.clone();
                 let rust_module = extern_decl.rust_module.clone();
 
-                // Validate encoding (v0.2.0: only uper)
-                if encoding != "uper" {
+                // Validate encoding
+                const SUPPORTED_ENCODINGS: &[&str] = &["uper", "ber", "der", "aper", "oer", "coer"];
+                if !SUPPORTED_ENCODINGS.contains(&encoding.as_str()) {
                     return Err(SemaError::new(
                         ErrorKind::UnsupportedAsn1Encoding,
                         format!(
-                            "unsupported ASN.1 encoding '{}'; only 'uper' is supported",
-                            encoding
+                            "unsupported ASN.1 encoding '{}'; supported: {}",
+                            encoding,
+                            SUPPORTED_ENCODINGS.join(", ")
                         ),
                     ));
                 }

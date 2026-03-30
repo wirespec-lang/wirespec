@@ -54,10 +54,60 @@ fn error_unsupported_encoding() {
         extern asn1 "s.asn1" { Foo }
         packet P {
             length: u16,
-            payload: asn1(Foo, encoding: ber, length: length),
+            payload: asn1(Foo, encoding: xml, length: length),
         }
         "#,
         ErrorKind::UnsupportedAsn1Encoding,
+    );
+}
+
+#[test]
+fn ok_encoding_ber() {
+    expect_ok(
+        r#"
+        extern asn1 "s.asn1" { Foo }
+        packet P { len: u16, data: asn1(Foo, encoding: ber, length: len) }
+    "#,
+    );
+}
+
+#[test]
+fn ok_encoding_der() {
+    expect_ok(
+        r#"
+        extern asn1 "s.asn1" { Foo }
+        packet P { len: u16, data: asn1(Foo, encoding: der, length: len) }
+    "#,
+    );
+}
+
+#[test]
+fn ok_encoding_aper() {
+    expect_ok(
+        r#"
+        extern asn1 "s.asn1" { Foo }
+        packet P { len: u16, data: asn1(Foo, encoding: aper, length: len) }
+    "#,
+    );
+}
+
+#[test]
+fn ok_encoding_oer() {
+    expect_ok(
+        r#"
+        extern asn1 "s.asn1" { Foo }
+        packet P { len: u16, data: asn1(Foo, encoding: oer, length: len) }
+    "#,
+    );
+}
+
+#[test]
+fn ok_encoding_coer() {
+    expect_ok(
+        r#"
+        extern asn1 "s.asn1" { Foo }
+        packet P { len: u16, data: asn1(Foo, encoding: coer, length: len) }
+    "#,
     );
 }
 

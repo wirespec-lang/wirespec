@@ -175,7 +175,31 @@ pub fn emit_source(module: &CodecModule, _prefix: &str) -> String {
                     .any(|v| v.fields.iter().any(|f| f.asn1_hint.is_some()))
         });
     if has_asn1 {
-        out.push_str("use rasn::uper;\n");
+        // Collect unique encodings from all ASN.1 hints
+        let mut encodings = std::collections::BTreeSet::new();
+        let all_fields_iter = module
+            .packets
+            .iter()
+            .flat_map(|p| p.fields.iter())
+            .chain(
+                module
+                    .frames
+                    .iter()
+                    .flat_map(|fr| fr.variants.iter().flat_map(|v| v.fields.iter())),
+            )
+            .chain(module.capsules.iter().flat_map(|c| {
+                c.header_fields
+                    .iter()
+                    .chain(c.variants.iter().flat_map(|v| v.fields.iter()))
+            }));
+        for f in all_fields_iter {
+            if let Some(ref hint) = f.asn1_hint {
+                encodings.insert(hint.encoding.clone());
+            }
+        }
+        for enc in &encodings {
+            out.push_str(&format!("use rasn::{enc};\n"));
+        }
 
         // Collect unique imports from ASN.1 hints
         let mut imports: std::collections::BTreeMap<String, Vec<String>> =

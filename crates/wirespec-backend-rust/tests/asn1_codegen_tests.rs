@@ -216,3 +216,108 @@ fn asn1_remaining_parse() {
         rs
     );
 }
+
+#[test]
+fn asn1_encoding_ber_generates_ber_codec() {
+    let rs = generate_rust(
+        r#"
+        extern asn1 "s.asn1" { Foo }
+        packet P { len: u16, data: asn1(Foo, encoding: ber, length: len) }
+    "#,
+    );
+    assert!(
+        rs.contains("use rasn::ber;"),
+        "should import rasn::ber, got:\n{}",
+        rs
+    );
+    assert!(
+        rs.contains("ber::decode::<Foo>"),
+        "should use ber::decode, got:\n{}",
+        rs
+    );
+    assert!(
+        rs.contains("ber::encode("),
+        "should use ber::encode, got:\n{}",
+        rs
+    );
+}
+
+#[test]
+fn asn1_encoding_der_generates_der_codec() {
+    let rs = generate_rust(
+        r#"
+        extern asn1 "s.asn1" { Foo }
+        packet P { len: u16, data: asn1(Foo, encoding: der, length: len) }
+    "#,
+    );
+    assert!(
+        rs.contains("use rasn::der;"),
+        "should import rasn::der, got:\n{}",
+        rs
+    );
+    assert!(
+        rs.contains("der::decode::<Foo>"),
+        "should use der::decode, got:\n{}",
+        rs
+    );
+}
+
+#[test]
+fn asn1_encoding_aper_generates_aper_codec() {
+    let rs = generate_rust(
+        r#"
+        extern asn1 "s.asn1" { Foo }
+        packet P { len: u16, data: asn1(Foo, encoding: aper, length: len) }
+    "#,
+    );
+    assert!(
+        rs.contains("use rasn::aper;"),
+        "should import rasn::aper, got:\n{}",
+        rs
+    );
+    assert!(
+        rs.contains("aper::decode::<Foo>"),
+        "should use aper::decode, got:\n{}",
+        rs
+    );
+}
+
+#[test]
+fn asn1_encoding_oer_generates_oer_codec() {
+    let rs = generate_rust(
+        r#"
+        extern asn1 "s.asn1" { Foo }
+        packet P { len: u16, data: asn1(Foo, encoding: oer, length: len) }
+    "#,
+    );
+    assert!(
+        rs.contains("use rasn::oer;"),
+        "should import rasn::oer, got:\n{}",
+        rs
+    );
+}
+
+#[test]
+fn asn1_multiple_encodings_import_both() {
+    let rs = generate_rust(
+        r#"
+        extern asn1 "s.asn1" { Foo, Bar }
+        packet P {
+            len1: u16,
+            a: asn1(Foo, encoding: uper, length: len1),
+            len2: u16,
+            b: asn1(Bar, encoding: der, length: len2),
+        }
+    "#,
+    );
+    assert!(
+        rs.contains("use rasn::uper;"),
+        "should import uper, got:\n{}",
+        rs
+    );
+    assert!(
+        rs.contains("use rasn::der;"),
+        "should import der, got:\n{}",
+        rs
+    );
+}

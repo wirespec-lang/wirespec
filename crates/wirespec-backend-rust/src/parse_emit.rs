@@ -76,8 +76,8 @@ fn emit_field_parse(
                         f.name
                     ));
                     out.push_str(&format!(
-                        "{indent}let {} = uper::decode::<{}>(_{}_bytes).map_err(|_| Error::Asn1Decode)?;\n",
-                        f.name, hint.type_name, f.name
+                        "{indent}let {} = {}::decode::<{}>(_{}_bytes).map_err(|_| Error::Asn1Decode)?;\n",
+                        f.name, hint.encoding, hint.type_name, f.name
                     ));
                 } else {
                     out.push_str(&format!(
@@ -580,8 +580,8 @@ fn emit_capsule_field_parse(
                         f.name
                     ));
                     out.push_str(&format!(
-                        "{indent}let {} = uper::decode::<{}>(_{}_bytes).map_err(|_| Error::Asn1Decode)?;\n",
-                        f.name, hint.type_name, f.name
+                        "{indent}let {} = {}::decode::<{}>(_{}_bytes).map_err(|_| Error::Asn1Decode)?;\n",
+                        f.name, hint.encoding, hint.type_name, f.name
                     ));
                 } else {
                     out.push_str(&format!(
