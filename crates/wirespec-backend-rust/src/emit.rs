@@ -724,6 +724,8 @@ fn emit_capsule(out: &mut String, capsule: &CodecCapsule, enums: &[SemanticEnum]
         "        ",
         "self.",
     );
+    // Serialize payload variants
+    serialize_emit::emit_capsule_serialize_body(out, &resolved_capsule, "        ");
     out.push_str("        Ok(())\n");
     out.push_str("    }\n\n");
 
@@ -737,6 +739,8 @@ fn emit_capsule(out: &mut String, capsule: &CodecCapsule, enums: &[SemanticEnum]
         "        ",
         "self.",
     );
+    // Payload variant lengths
+    serialize_emit::emit_capsule_serialized_len_body(out, &resolved_capsule, "        ");
     out.push_str("        len\n");
     out.push_str("    }\n");
 

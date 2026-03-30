@@ -435,6 +435,64 @@ pub fn emit_frame_serialized_len_body(out: &mut String, frame: &CodecFrame, inde
     out.push_str(&format!("{indent}}}\n"));
 }
 
+/// Emit serialize body for capsule payload variants.
+pub fn emit_capsule_serialize_body(out: &mut String, capsule: &CodecCapsule, indent: &str) {
+    let payload_type = format!("{}Payload", to_pascal_case(&capsule.name));
+
+    out.push_str(&format!("{indent}match &self.payload {{\n"));
+
+    for variant in &capsule.variants {
+        let variant_name = to_pascal_case(&variant.name);
+        let inner_indent = format!("{indent}        ");
+
+        if variant.fields.is_empty() {
+            out.push_str(&format!(
+                "{indent}    {payload_type}::{variant_name} => {{}}\n"
+            ));
+        } else {
+            out.push_str(&format!("{indent}    {payload_type}::{variant_name} {{ "));
+            let field_names: Vec<String> = collect_variant_field_names(variant);
+            out.push_str(&field_names.join(", "));
+            out.push_str(" } => {\n");
+
+            emit_variant_serialize_fields(out, variant, &inner_indent);
+
+            out.push_str(&format!("{indent}    }}\n"));
+        }
+    }
+
+    out.push_str(&format!("{indent}}}\n"));
+}
+
+/// Emit serialized_len body for capsule payload variants.
+pub fn emit_capsule_serialized_len_body(out: &mut String, capsule: &CodecCapsule, indent: &str) {
+    let payload_type = format!("{}Payload", to_pascal_case(&capsule.name));
+
+    out.push_str(&format!("{indent}match &self.payload {{\n"));
+
+    for variant in &capsule.variants {
+        let variant_name = to_pascal_case(&variant.name);
+
+        if variant.fields.is_empty() {
+            out.push_str(&format!(
+                "{indent}    {payload_type}::{variant_name} => {{}}\n"
+            ));
+        } else {
+            out.push_str(&format!("{indent}    {payload_type}::{variant_name} {{ "));
+            let field_names: Vec<String> = collect_variant_field_names(variant);
+            out.push_str(&field_names.join(", "));
+            out.push_str(" } => {\n");
+
+            let inner_indent = format!("{indent}        ");
+            emit_variant_serialized_len_fields(out, variant, &inner_indent);
+
+            out.push_str(&format!("{indent}    }}\n"));
+        }
+    }
+
+    out.push_str(&format!("{indent}}}\n"));
+}
+
 /// Collect field names from a variant (for destructuring in match arms).
 fn collect_variant_field_names(variant: &CodecVariantScope) -> Vec<String> {
     let mut names = Vec::new();

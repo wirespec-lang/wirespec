@@ -469,3 +469,58 @@ fn codegen_rust_sm_plus_assign() {
     assert!(rs.contains("count"), "should contain count field");
     assert!(rs.contains("+ 1"), "should contain increment expression");
 }
+
+#[test]
+fn codegen_capsule_serialize_includes_payload() {
+    let src = r#"
+        capsule C {
+            tag: u8,
+            length: u16,
+            payload: match tag within length {
+                1 => Data { x: u8, y: u16 },
+                _ => Unknown { data: bytes[remaining] },
+            },
+        }
+    "#;
+    let rs = generate_rust(src);
+
+    // serialize must write payload variants, not just header
+    let serialize_section = rs.split("fn serialize").nth(1).unwrap_or("");
+    assert!(
+        serialize_section.contains("match"),
+        "serialize should match on payload variant, got:\n{}",
+        rs
+    );
+    assert!(
+        serialize_section.contains("Data"),
+        "serialize should handle Data variant, got:\n{}",
+        rs
+    );
+    assert!(
+        serialize_section.contains("Unknown"),
+        "serialize should handle Unknown variant, got:\n{}",
+        rs
+    );
+}
+
+#[test]
+fn codegen_capsule_serialized_len_includes_payload() {
+    let src = r#"
+        capsule C {
+            tag: u8,
+            length: u16,
+            payload: match tag within length {
+                1 => Data { x: u8, y: u16 },
+                _ => Unknown { data: bytes[remaining] },
+            },
+        }
+    "#;
+    let rs = generate_rust(src);
+
+    let len_section = rs.split("fn serialized_len").nth(1).unwrap_or("");
+    assert!(
+        len_section.contains("match"),
+        "serialized_len should match on payload variant, got:\n{}",
+        rs
+    );
+}
