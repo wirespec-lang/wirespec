@@ -28,6 +28,10 @@ pub enum Error {
     Noncanonical,
     /// `@checksum` validation failed.
     Checksum,
+    /// ASN.1 decode (rasn) failed.
+    Asn1Decode,
+    /// ASN.1 encode (rasn) failed.
+    Asn1Encode,
 }
 
 impl fmt::Display for Error {
@@ -43,6 +47,8 @@ impl fmt::Display for Error {
             Error::TrailingData => write!(f, "trailing data in scope"),
             Error::Noncanonical => write!(f, "non-canonical encoding"),
             Error::Checksum => write!(f, "checksum mismatch"),
+            Error::Asn1Decode => write!(f, "ASN.1 decode failed"),
+            Error::Asn1Encode => write!(f, "ASN.1 encode failed"),
         }
     }
 }
