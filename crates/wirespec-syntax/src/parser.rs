@@ -1189,7 +1189,7 @@ impl Parser {
         }
     }
 
-    fn parse_asn1_type_expr(&mut self, _start: Span) -> Result<AstTypeExpr> {
+    fn parse_asn1_type_expr(&mut self, start: Span) -> Result<AstTypeExpr> {
         self.expect(&TokenKind::LParen)?;
 
         // Type name
@@ -1226,6 +1226,7 @@ impl Parser {
             type_name,
             encoding,
             length,
+            span: Some(start),
         })
     }
 

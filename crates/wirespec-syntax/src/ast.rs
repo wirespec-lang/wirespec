@@ -203,6 +203,7 @@ pub enum AstTypeExpr {
         type_name: String,
         encoding: String,
         length: Asn1Length,
+        span: Option<Span>,
     },
 }
 

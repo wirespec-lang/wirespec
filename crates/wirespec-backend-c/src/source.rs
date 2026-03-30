@@ -780,7 +780,7 @@ fn emit_guard(out: &mut String, guard: &SemanticExpr, ctx: &SmExprContext, inden
                 _ => {
                     let coll_c = crate::expr::sema_expr_to_c(collection, ctx);
                     out.push_str(&format!(
-                        "{indent}/* all guard on {coll_c} — unsupported collection form */\n"
+                        "{indent}/* all() guard: non-slice collection ({coll_c}) — treating as no-op */\n"
                     ));
                 }
             }
@@ -1328,9 +1328,7 @@ fn emit_checksum_verify(out: &mut String, plan: &ChecksumPlan, indent: &str) {
             out.push_str(&format!("{indent}}}\n"));
         }
         None => {
-            out.push_str(&format!(
-                "{indent}/* unsupported checksum algorithm: {algo} */\n"
-            ));
+            unreachable!("unknown checksum algorithm: {algo}");
         }
     }
 }
@@ -1369,9 +1367,7 @@ fn emit_checksum_compute(out: &mut String, plan: &ChecksumPlan, indent: &str) {
             out.push_str(&format!("{indent}}}\n"));
         }
         None => {
-            out.push_str(&format!(
-                "{indent}/* unsupported checksum algorithm: {algo} */\n"
-            ));
+            unreachable!("unknown checksum algorithm: {algo}");
         }
     }
 }

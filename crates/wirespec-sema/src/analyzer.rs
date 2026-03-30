@@ -1374,6 +1374,7 @@ impl Analyzer {
                 type_name,
                 encoding,
                 length,
+                ..
             } => {
                 // Validate type name exists in extern declarations
                 let extern_decl = self

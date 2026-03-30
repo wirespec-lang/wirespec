@@ -372,11 +372,20 @@ fn emit_array_parse_with_ctx(
                     out.push_str(&format!("{indent}    if (r != WIRESPEC_OK) return r;\n"));
                 }
             }
-            _ => {
-                out.push_str(&format!(
-                    "{indent}    /* unsupported array element strategy */\n"
-                ));
+            FieldStrategy::VarInt | FieldStrategy::ContVarInt => {
+                if let Some(ref ref_name) = arr.element_ref_type_name {
+                    let parse_fn = c_func_name(prefix, ref_name, "parse_cursor");
+                    out.push_str(&format!(
+                        "{indent}    r = {parse_fn}(cur, &{struct_prefix}{}[_i]);\n",
+                        f.name
+                    ));
+                    out.push_str(&format!("{indent}    if (r != WIRESPEC_OK) return r;\n"));
+                }
             }
+            _ => unreachable!(
+                "unexpected array element strategy: {:?}",
+                arr.element_strategy
+            ),
         }
 
         out.push_str(&format!("{indent}}}\n"));
@@ -434,11 +443,22 @@ fn emit_array_parse_with_ctx(
                     ));
                 }
             }
-            _ => {
-                out.push_str(&format!(
-                    "{indent}        /* unsupported fill array element strategy */\n"
-                ));
+            FieldStrategy::VarInt | FieldStrategy::ContVarInt => {
+                if let Some(ref ref_name) = arr.element_ref_type_name {
+                    let parse_fn = c_func_name(prefix, ref_name, "parse_cursor");
+                    out.push_str(&format!(
+                        "{indent}        r = {parse_fn}({cur_var}, &{struct_prefix}{}[{struct_prefix}{}_count]);\n",
+                        f.name, f.name
+                    ));
+                    out.push_str(&format!(
+                        "{indent}        if (r != WIRESPEC_OK) return r;\n"
+                    ));
+                }
             }
+            _ => unreachable!(
+                "unexpected fill array element strategy: {:?}",
+                arr.element_strategy
+            ),
         }
 
         out.push_str(&format!(
@@ -466,8 +486,6 @@ pub fn emit_frame_parse_body(out: &mut String, frame: &CodecFrame, prefix: &str,
     let struct_prefix = "out->";
 
     // Read the tag field
-    let tag_read_fn = cursor_read_fn(&frame.tag.wire_type, frame.tag.endianness);
-
     match &frame.tag.wire_type {
         WireType::VarInt | WireType::ContVarInt => {
             if let Some(ref ref_name) = frame.tag.ref_type_name {
@@ -486,6 +504,7 @@ pub fn emit_frame_parse_body(out: &mut String, frame: &CodecFrame, prefix: &str,
         }
         _ => {
             // Primitive tag
+            let tag_read_fn = cursor_read_fn(&frame.tag.wire_type, frame.tag.endianness);
             let tag_ctype = wire_type_to_c(&frame.tag.wire_type, prefix);
             out.push_str(&format!("{indent}{tag_ctype} _tag_val;\n"));
             out.push_str(&format!("{indent}r = {tag_read_fn}(cur, &_tag_val);\n"));

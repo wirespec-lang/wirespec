@@ -140,7 +140,7 @@ pub fn expr_to_c(expr: &CodecExpr, ctx: &ExprContext) -> String {
         | CodecExpr::StateConstructor { .. }
         | CodecExpr::Fill { .. }
         | CodecExpr::Slice { .. }
-        | CodecExpr::All { .. } => "/* unsupported expr */".into(),
+        | CodecExpr::All { .. } => unreachable!("SM expression in non-SM context"),
     }
 }
 

@@ -68,7 +68,7 @@ fn error_sema_rejects_undeclared_asn1_type() {
 fn error_unsupported_encoding_through_pipeline() {
     let src = r#"
         extern asn1 "test.asn1" { SimpleMessage }
-        packet P { len: u16, data: asn1(SimpleMessage, encoding: ber, length: len) }
+        packet P { len: u16, data: asn1(SimpleMessage, encoding: xml, length: len) }
     "#;
     let result = wirespec_driver::pipeline::compile_module(
         src,

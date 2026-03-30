@@ -218,6 +218,26 @@ fn asn1_remaining_parse() {
 }
 
 #[test]
+fn asn1_encoding_ber_remaining_uses_ber_not_uper() {
+    let rs = generate_rust(
+        r#"
+        extern asn1 "s.asn1" { Foo }
+        packet P { data: asn1(Foo, encoding: ber, remaining) }
+    "#,
+    );
+    assert!(
+        rs.contains("ber::decode::<Foo>"),
+        "remaining+ber should use ber::decode, got:\n{}",
+        rs
+    );
+    assert!(
+        !rs.contains("uper::decode"),
+        "should NOT contain uper::decode, got:\n{}",
+        rs
+    );
+}
+
+#[test]
 fn asn1_encoding_ber_generates_ber_codec() {
     let rs = generate_rust(
         r#"

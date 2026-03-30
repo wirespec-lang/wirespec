@@ -55,6 +55,7 @@ fn parse_asn1_field_with_length() {
                 type_name,
                 encoding,
                 length,
+                ..
             } => {
                 assert_eq!(type_name, "Foo");
                 assert_eq!(encoding, "uper");
@@ -92,6 +93,7 @@ fn parse_asn1_field_with_remaining() {
                 type_name,
                 encoding,
                 length,
+                ..
             } => {
                 assert_eq!(type_name, "Bar");
                 assert_eq!(encoding, "uper");

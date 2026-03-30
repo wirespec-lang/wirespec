@@ -250,11 +250,27 @@ fn emit_array_serialize(
                 out.push_str(&format!("{indent}    }}\n"));
             }
         }
-        _ => {
-            out.push_str(&format!(
-                "{indent}    /* unsupported array element strategy */\n"
-            ));
+        FieldStrategy::VarInt | FieldStrategy::ContVarInt => {
+            if let Some(ref ref_name) = arr.element_ref_type_name {
+                let serialize_fn = c_func_name(prefix, ref_name, "serialize");
+                out.push_str(&format!(
+                    "{indent}    {{\n{indent}        size_t _written = 0;\n"
+                ));
+                out.push_str(&format!(
+                    "{indent}        r = {serialize_fn}(val->{}[_i], buf + pos, cap - pos, &_written);\n",
+                    f.name
+                ));
+                out.push_str(&format!(
+                    "{indent}        if (r != WIRESPEC_OK) return r;\n"
+                ));
+                out.push_str(&format!("{indent}        pos += _written;\n"));
+                out.push_str(&format!("{indent}    }}\n"));
+            }
         }
+        _ => unreachable!(
+            "unexpected array element strategy: {:?}",
+            arr.element_strategy
+        ),
     }
 
     out.push_str(&format!("{indent}}}\n"));
@@ -498,11 +514,27 @@ fn emit_variant_field_serialize(
                             out.push_str(&format!("{indent}    }}\n"));
                         }
                     }
-                    _ => {
-                        out.push_str(&format!(
-                            "{indent}    /* unsupported array element strategy */\n"
-                        ));
+                    FieldStrategy::VarInt | FieldStrategy::ContVarInt => {
+                        if let Some(ref ref_name) = arr.element_ref_type_name {
+                            let serialize_fn = c_func_name(prefix, ref_name, "serialize");
+                            out.push_str(&format!(
+                                "{indent}    {{\n{indent}        size_t _written = 0;\n"
+                            ));
+                            out.push_str(&format!(
+                                "{indent}        r = {serialize_fn}({val_prefix}{}[_i], buf + pos, cap - pos, &_written);\n",
+                                f.name
+                            ));
+                            out.push_str(&format!(
+                                "{indent}        if (r != WIRESPEC_OK) return r;\n"
+                            ));
+                            out.push_str(&format!("{indent}        pos += _written;\n"));
+                            out.push_str(&format!("{indent}    }}\n"));
+                        }
                     }
+                    _ => unreachable!(
+                        "unexpected array element strategy: {:?}",
+                        arr.element_strategy
+                    ),
                 }
                 out.push_str(&format!("{indent}}}\n"));
             }
