@@ -9,6 +9,7 @@ members = [
     "crates/wirespec-backend-c",
     "crates/wirespec-backend-rust",
     "crates/wirespec-driver",
+    "crates/wirespec-rt",
 ]
 
 [workspace.package]

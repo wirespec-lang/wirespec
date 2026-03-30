@@ -18,6 +18,7 @@ pub struct CompileRequest {
     pub entry: PathBuf,
     pub include_paths: Vec<PathBuf>,
     pub profile: ComplianceProfile,
+    pub asn1_modules: crate::pipeline::Asn1ModuleMap,
 }
 
 /// A single compiled module with its codec IR.
@@ -73,7 +74,12 @@ pub fn compile(request: &CompileRequest) -> Result<CompileResult, DriverError> {
     let mut compiled = Vec::new();
 
     for module in &resolved {
-        let codec = pipeline::compile_module(&module.source, request.profile, &external_types)?;
+        let codec = pipeline::compile_module(
+            &module.source,
+            request.profile,
+            &external_types,
+            &request.asn1_modules,
+        )?;
 
         // Register exported types for downstream modules
         pipeline::collect_external_types(

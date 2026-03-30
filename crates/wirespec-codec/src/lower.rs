@@ -329,6 +329,7 @@ fn lower_field(
         bitgroup_member,
         max_elements: f.max_elements,
         checksum_algorithm: f.checksum_algorithm.clone(),
+        asn1_hint: f.asn1_hint.clone(),
         span: f.span,
     })
 }

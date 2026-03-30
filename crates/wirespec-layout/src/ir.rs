@@ -100,6 +100,7 @@ pub struct LayoutField {
     pub wire_width_bits: Option<u16>,
     pub endianness: Option<Endianness>,
     pub bitgroup_member: Option<LayoutBitGroupMemberRef>,
+    pub asn1_hint: Option<wirespec_sema::types::Asn1Hint>,
     pub span: Option<Span>,
 }
 

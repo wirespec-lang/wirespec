@@ -10,8 +10,74 @@ use crate::type_map::*;
 use wirespec_codec::ir::*;
 use wirespec_sema::expr::{SemanticExpr, SemanticLiteral, TransitionPeerKind};
 use wirespec_sema::ir::*;
+use wirespec_sema::types::PrimitiveWireType;
 
 const MAX_ARRAY_ELEMENTS: u32 = 256;
+
+/// Resolve enum fields: change strategy from Struct to Primitive and set
+/// wire_type to the enum's underlying primitive type. This allows the
+/// standard primitive read/write codegen path to handle enum fields.
+fn resolve_enum_fields(fields: &[CodecField], enums: &[SemanticEnum]) -> Vec<CodecField> {
+    fields
+        .iter()
+        .map(|f| {
+            if f.strategy == FieldStrategy::Struct
+                && let WireType::Enum(ref name) = f.wire_type
+                && let Some(e) = enums.iter().find(|e| &e.name == name)
+            {
+                let underlying_wt = semantic_type_to_wire_type_simple(&e.underlying_type);
+                let mut f2 = f.clone();
+                f2.strategy = FieldStrategy::Primitive;
+                f2.wire_type = underlying_wt;
+                f2.ref_type_name = None;
+                // Propagate endianness from the enum's underlying type
+                if let wirespec_sema::types::SemanticType::Primitive { endianness, .. } =
+                    &e.underlying_type
+                {
+                    f2.endianness = *endianness;
+                }
+                return f2;
+            }
+            f.clone()
+        })
+        .collect()
+}
+
+/// Simple mapping from SemanticType (Primitive only) to WireType.
+fn semantic_type_to_wire_type_simple(ty: &wirespec_sema::types::SemanticType) -> WireType {
+    use wirespec_sema::types::SemanticType;
+    match ty {
+        SemanticType::Primitive { wire, .. } => match wire {
+            PrimitiveWireType::U8 => WireType::U8,
+            PrimitiveWireType::U16 => WireType::U16,
+            PrimitiveWireType::U24 => WireType::U24,
+            PrimitiveWireType::U32 => WireType::U32,
+            PrimitiveWireType::U64 => WireType::U64,
+            PrimitiveWireType::I8 => WireType::I8,
+            PrimitiveWireType::I16 => WireType::I16,
+            PrimitiveWireType::I32 => WireType::I32,
+            PrimitiveWireType::I64 => WireType::I64,
+            PrimitiveWireType::Bool => WireType::Bool,
+            PrimitiveWireType::Bit => WireType::Bit,
+        },
+        _ => WireType::U8, // fallback for unexpected types
+    }
+}
+
+/// Resolve enum fields in variant scopes (for frames and capsules).
+fn resolve_enum_variants(
+    variants: &[CodecVariantScope],
+    enums: &[SemanticEnum],
+) -> Vec<CodecVariantScope> {
+    variants
+        .iter()
+        .map(|v| {
+            let mut v2 = v.clone();
+            v2.fields = resolve_enum_fields(&v.fields, enums);
+            v2
+        })
+        .collect()
+}
 
 /// Check if any field in a list uses bytes (needs lifetime `<'a>`).
 fn fields_need_lifetime(fields: &[CodecField]) -> bool {
@@ -20,7 +86,12 @@ fn fields_need_lifetime(fields: &[CodecField]) -> bool {
             FieldStrategy::BytesFixed
             | FieldStrategy::BytesLength
             | FieldStrategy::BytesRemaining
-            | FieldStrategy::BytesLor => return true,
+            | FieldStrategy::BytesLor => {
+                if f.asn1_hint.is_some() {
+                    continue; // ASN.1 decoded fields are owned, no lifetime
+                }
+                return true;
+            }
             FieldStrategy::Conditional => {
                 let inner = f.inner_wire_type.as_ref().unwrap_or(&f.wire_type);
                 if matches!(inner, WireType::Bytes) {
@@ -32,6 +103,10 @@ fn fields_need_lifetime(fields: &[CodecField]) -> bool {
                 }
             }
             FieldStrategy::Struct => {
+                // Enum refs are type aliases for primitives, no lifetime needed
+                if matches!(f.wire_type, WireType::Enum(_)) {
+                    continue;
+                }
                 // Named struct types might have lifetimes; conservative
                 return true;
             }
@@ -74,14 +149,139 @@ fn lifetime_suffix(needs: bool) -> &'static str {
     if needs { "<'a>" } else { "" }
 }
 
+fn collect_named_types_needing_lifetime(module: &CodecModule) -> std::collections::HashSet<String> {
+    let mut names = std::collections::HashSet::new();
+
+    for packet in &module.packets {
+        if packet_needs_lifetime(packet) {
+            names.insert(packet.name.clone());
+        }
+    }
+    for frame in &module.frames {
+        if frame_needs_lifetime(frame) {
+            names.insert(frame.name.clone());
+        }
+    }
+    for capsule in &module.capsules {
+        if capsule_needs_lifetime(capsule) {
+            names.insert(capsule.name.clone());
+        }
+    }
+
+    names
+}
+
 /// Emit the complete .rs source file content.
 pub fn emit_source(module: &CodecModule, _prefix: &str) -> String {
     let mut out = String::new();
+    let named_types_needing_lifetime = collect_named_types_needing_lifetime(module);
 
     // Header
     out.push_str("// Auto-generated by wirespec. Do not edit.\n");
     out.push_str("#![allow(unused_imports, unused_variables, dead_code, unused_mut, unused_parens, unreachable_patterns)]\n\n");
     out.push_str("use wirespec_rt::*;\n\n");
+
+    // Check if any field in any packet/frame/capsule has asn1_hint
+    let has_asn1 = module
+        .packets
+        .iter()
+        .any(|p| p.fields.iter().any(|f| f.asn1_hint.is_some()))
+        || module.frames.iter().any(|fr| {
+            fr.variants
+                .iter()
+                .any(|v| v.fields.iter().any(|f| f.asn1_hint.is_some()))
+        })
+        || module.capsules.iter().any(|c| {
+            c.header_fields.iter().any(|f| f.asn1_hint.is_some())
+                || c.variants
+                    .iter()
+                    .any(|v| v.fields.iter().any(|f| f.asn1_hint.is_some()))
+        });
+    if has_asn1 {
+        // Collect unique encodings from all ASN.1 hints
+        let mut encodings = std::collections::BTreeSet::new();
+        let all_fields_iter = module
+            .packets
+            .iter()
+            .flat_map(|p| p.fields.iter())
+            .chain(
+                module
+                    .frames
+                    .iter()
+                    .flat_map(|fr| fr.variants.iter().flat_map(|v| v.fields.iter())),
+            )
+            .chain(module.capsules.iter().flat_map(|c| {
+                c.header_fields
+                    .iter()
+                    .chain(c.variants.iter().flat_map(|v| v.fields.iter()))
+            }));
+        for f in all_fields_iter {
+            if let Some(ref hint) = f.asn1_hint {
+                encodings.insert(hint.encoding.clone());
+            }
+        }
+        for enc in &encodings {
+            out.push_str(&format!("use rasn::{enc};\n"));
+        }
+
+        // Collect unique imports from ASN.1 hints
+        let mut imports: std::collections::BTreeMap<String, Vec<String>> =
+            std::collections::BTreeMap::new();
+        for packet in &module.packets {
+            for f in &packet.fields {
+                if let Some(ref hint) = f.asn1_hint
+                    && let Some(ref rust_mod) = hint.rust_module
+                {
+                    imports
+                        .entry(rust_mod.clone())
+                        .or_default()
+                        .push(hint.type_name.clone());
+                }
+            }
+        }
+        for frame in &module.frames {
+            for v in &frame.variants {
+                for f in &v.fields {
+                    if let Some(ref hint) = f.asn1_hint
+                        && let Some(ref rust_mod) = hint.rust_module
+                    {
+                        imports
+                            .entry(rust_mod.clone())
+                            .or_default()
+                            .push(hint.type_name.clone());
+                    }
+                }
+            }
+        }
+        for capsule in &module.capsules {
+            for f in capsule
+                .header_fields
+                .iter()
+                .chain(capsule.variants.iter().flat_map(|v| v.fields.iter()))
+            {
+                if let Some(ref hint) = f.asn1_hint
+                    && let Some(ref rust_mod) = hint.rust_module
+                {
+                    imports
+                        .entry(rust_mod.clone())
+                        .or_default()
+                        .push(hint.type_name.clone());
+                }
+            }
+        }
+
+        // Emit use statements
+        for (mod_path, mut types) in imports {
+            types.sort();
+            types.dedup();
+            if types.len() == 1 {
+                out.push_str(&format!("use {}::{};\n", mod_path, types[0]));
+            } else {
+                out.push_str(&format!("use {}::{{{}}};\n", mod_path, types.join(", ")));
+            }
+        }
+        out.push('\n');
+    }
 
     // VarInts
     for vi in &module.varints {
@@ -103,22 +303,37 @@ pub fn emit_source(module: &CodecModule, _prefix: &str) -> String {
 
     // Packets
     for packet in &module.packets {
-        emit_packet(&mut out, packet);
+        emit_packet(
+            &mut out,
+            packet,
+            &module.enums,
+            &named_types_needing_lifetime,
+        );
     }
 
     // Frames
     for frame in &module.frames {
-        emit_frame(&mut out, frame);
+        emit_frame(
+            &mut out,
+            frame,
+            &module.enums,
+            &named_types_needing_lifetime,
+        );
     }
 
     // Capsules
     for capsule in &module.capsules {
-        emit_capsule(&mut out, capsule);
+        emit_capsule(
+            &mut out,
+            capsule,
+            &module.enums,
+            &named_types_needing_lifetime,
+        );
     }
 
     // State Machines
     for sm in &module.state_machines {
-        emit_state_machine(&mut out, sm);
+        emit_state_machine(&mut out, sm, &module.state_machines);
     }
 
     out
@@ -133,9 +348,10 @@ fn emit_const(out: &mut String, c: &wirespec_sema::ir::SemanticConst) {
     out.push_str(&format!("pub const {name}: {ty} = {val};\n"));
 }
 
-fn semantic_type_to_rust(ty: &wirespec_sema::types::SemanticType) -> &'static str {
+fn semantic_type_to_rust(ty: &wirespec_sema::types::SemanticType) -> String {
+    use wirespec_sema::types::SemanticType;
     match ty {
-        wirespec_sema::types::SemanticType::Primitive { wire, .. } => match wire {
+        SemanticType::Primitive { wire, .. } => match wire {
             wirespec_sema::types::PrimitiveWireType::U8 => "u8",
             wirespec_sema::types::PrimitiveWireType::U16 => "u16",
             wirespec_sema::types::PrimitiveWireType::U24 => "u32",
@@ -147,19 +363,46 @@ fn semantic_type_to_rust(ty: &wirespec_sema::types::SemanticType) -> &'static st
             wirespec_sema::types::PrimitiveWireType::I64 => "i64",
             wirespec_sema::types::PrimitiveWireType::Bool => "bool",
             wirespec_sema::types::PrimitiveWireType::Bit => "u8",
-        },
-        wirespec_sema::types::SemanticType::Bits { width_bits } => {
-            if *width_bits <= 8 {
-                "u8"
-            } else if *width_bits <= 16 {
-                "u16"
-            } else if *width_bits <= 32 {
-                "u32"
+        }
+        .to_string(),
+        SemanticType::Bits { width_bits } => if *width_bits <= 8 {
+            "u8"
+        } else if *width_bits <= 16 {
+            "u16"
+        } else if *width_bits <= 32 {
+            "u32"
+        } else {
+            "u64"
+        }
+        .to_string(),
+        SemanticType::PacketRef { name, .. } => to_pascal_case(name),
+        SemanticType::FrameRef { name, .. } => to_pascal_case(name),
+        SemanticType::CapsuleRef { name, .. } => to_pascal_case(name),
+        SemanticType::EnumRef { name, .. } => to_pascal_case(name),
+        SemanticType::VarIntRef { .. } => "u64".to_string(),
+        SemanticType::Array { element_type, .. } => {
+            let elem = semantic_type_to_rust(element_type);
+            format!("Vec<{elem}>")
+        }
+        SemanticType::Bytes { .. } => "Vec<u8>".to_string(),
+    }
+}
+
+/// Map a SM state field to its Rust type, using `child_sm_name` for
+/// child-SM references and handling arrays of child SMs.
+fn sm_field_type_to_rust(field: &wirespec_sema::ir::SemanticStateField) -> String {
+    use wirespec_sema::types::SemanticType;
+    match &field.ty {
+        SemanticType::Array { element_type, .. } => {
+            if let Some(ref child_sm) = field.child_sm_name {
+                format!("Vec<{}>", to_pascal_case(child_sm))
             } else {
-                "u64"
+                let elem_ty = semantic_type_to_rust(element_type);
+                format!("Vec<{elem_ty}>")
             }
         }
-        _ => "u64",
+        _ if field.child_sm_name.is_some() => to_pascal_case(field.child_sm_name.as_ref().unwrap()),
+        _ => semantic_type_to_rust(&field.ty),
     }
 }
 
@@ -195,10 +438,18 @@ fn emit_enum(out: &mut String, e: &wirespec_sema::ir::SemanticEnum) {
 
 // ── Packets ──
 
-fn emit_packet(out: &mut String, packet: &CodecPacket) {
+fn emit_packet(
+    out: &mut String,
+    packet: &CodecPacket,
+    enums: &[SemanticEnum],
+    named_types_needing_lifetime: &std::collections::HashSet<String>,
+) {
     let type_name = to_pascal_case(&packet.name);
     let needs_lt = packet_needs_lifetime(packet);
     let lt = lifetime_suffix(needs_lt);
+
+    // Resolve enum fields for parse/serialize code (struct declaration keeps original types)
+    let resolved_fields = resolve_enum_fields(&packet.fields, enums);
 
     let has_cksum = packet.checksum_plan.is_some();
     // Parse needs offset tracking for recompute-compare algorithms (CRC, fletcher)
@@ -209,16 +460,29 @@ fn emit_packet(out: &mut String, packet: &CodecPacket) {
             .is_some_and(|p| p.input_model == ChecksumInputModel::RecomputeWithSkippedField);
     // Serialize always needs offset tracking when checksum is present (all algorithms need it)
 
-    // Struct definition
+    // Struct definition (uses original fields to preserve enum type aliases)
     out.push_str("#[derive(Debug, Clone, PartialEq)]\n");
     out.push_str(&format!("pub struct {type_name}{lt} {{\n"));
-    emit_struct_fields(out, &packet.fields, &packet.items);
+    emit_struct_fields(
+        out,
+        &packet.fields,
+        &packet.items,
+        named_types_needing_lifetime,
+    );
+    out.push_str("}\n\n");
+
+    out.push_str(&format!("impl{lt} Default for {type_name}{lt} {{\n"));
+    out.push_str("    fn default() -> Self {\n");
+    out.push_str("        Self {\n");
+    emit_default_struct_items(out, &packet.fields, &packet.items, "            ");
+    out.push_str("        }\n");
+    out.push_str("    }\n");
     out.push_str("}\n\n");
 
     // Impl block
     out.push_str(&format!("impl{lt} {type_name}{lt} {{\n"));
 
-    // parse method
+    // parse method (uses resolved fields)
     out.push_str(&format!(
         "    pub fn parse(cur: &mut Cursor{}) -> Result<Self> {{\n",
         if needs_lt { "<'a>" } else { "<'_>" }
@@ -237,13 +501,13 @@ fn emit_packet(out: &mut String, packet: &CodecPacket) {
         let cksum_plan = packet.checksum_plan.as_ref().unwrap();
         emit_parse_items_with_cksum_tracking(
             out,
-            &packet.fields,
+            &resolved_fields,
             &packet.items,
             "        ",
             &cksum_plan.field_name,
         );
     } else {
-        parse_emit::emit_parse_items(out, &packet.fields, &packet.items, "        ");
+        parse_emit::emit_parse_items(out, &resolved_fields, &packet.items, "        ");
     }
 
     // Checksum verify after parse, before returning
@@ -253,11 +517,11 @@ fn emit_packet(out: &mut String, packet: &CodecPacket) {
 
     // Return Ok(Self { ... })
     out.push_str("        Ok(Self {\n");
-    emit_struct_init_fields(out, &packet.fields, &packet.items, "            ");
+    emit_struct_init_fields(out, &resolved_fields, &packet.items, "            ");
     out.push_str("        })\n");
     out.push_str("    }\n\n");
 
-    // serialize method
+    // serialize method (uses resolved fields)
     out.push_str("    pub fn serialize(&self, w: &mut Writer<'_>) -> Result<()> {\n");
 
     if has_cksum {
@@ -266,7 +530,7 @@ fn emit_packet(out: &mut String, packet: &CodecPacket) {
         let cksum_plan = packet.checksum_plan.as_ref().unwrap();
         emit_serialize_items_with_cksum_tracking(
             out,
-            &packet.fields,
+            &resolved_fields,
             &packet.items,
             "        ",
             "self.",
@@ -275,7 +539,7 @@ fn emit_packet(out: &mut String, packet: &CodecPacket) {
     } else {
         serialize_emit::emit_serialize_items(
             out,
-            &packet.fields,
+            &resolved_fields,
             &packet.items,
             "        ",
             "self.",
@@ -290,12 +554,12 @@ fn emit_packet(out: &mut String, packet: &CodecPacket) {
     out.push_str("        Ok(())\n");
     out.push_str("    }\n\n");
 
-    // serialized_len method
+    // serialized_len method (uses resolved fields)
     out.push_str("    pub fn serialized_len(&self) -> usize {\n");
     out.push_str("        let mut len = 0usize;\n");
     serialize_emit::emit_serialized_len_items(
         out,
-        &packet.fields,
+        &resolved_fields,
         &packet.items,
         "        ",
         "self.",
@@ -385,9 +649,7 @@ fn emit_checksum_verify_rust(out: &mut String, plan: &ChecksumPlan, indent: &str
             out.push_str(&format!("{indent}}}\n"));
         }
         None => {
-            out.push_str(&format!(
-                "{indent}// TODO: unsupported checksum algorithm '{algo}'\n"
-            ));
+            unreachable!("unknown checksum algorithm: {algo}");
         }
     }
 }
@@ -429,22 +691,28 @@ fn emit_checksum_compute_rust(out: &mut String, plan: &ChecksumPlan, indent: &st
             out.push_str(&format!("{indent}}}\n"));
         }
         None => {
-            out.push_str(&format!(
-                "{indent}// TODO: unsupported checksum algorithm '{algo}'\n"
-            ));
+            unreachable!("unknown checksum algorithm: {algo}");
         }
     }
 }
 
 // ── Frames ──
 
-fn emit_frame(out: &mut String, frame: &CodecFrame) {
+fn emit_frame(
+    out: &mut String,
+    frame: &CodecFrame,
+    enums: &[SemanticEnum],
+    named_types_needing_lifetime: &std::collections::HashSet<String>,
+) {
     let type_name = to_pascal_case(&frame.name);
     let needs_lt = frame_needs_lifetime(frame);
     let lt = lifetime_suffix(needs_lt);
     let tag_type = wire_type_to_rust(&frame.tag.wire_type);
 
-    // Enum definition
+    // Resolve enum fields in variants for parse/serialize
+    let resolved_variants = resolve_enum_variants(&frame.variants, enums);
+
+    // Enum definition (uses original fields to preserve types)
     out.push_str("#[derive(Debug, Clone, PartialEq)]\n");
     out.push_str(&format!("pub enum {type_name}{lt} {{\n"));
     for variant in &frame.variants {
@@ -458,11 +726,21 @@ fn emit_frame(out: &mut String, frame: &CodecFrame) {
             out.push_str(&format!("    {variant_name},\n"));
         } else {
             out.push_str(&format!("    {variant_name} {{\n"));
-            emit_variant_struct_fields(out, variant);
+            emit_variant_struct_fields(out, variant, named_types_needing_lifetime);
             out.push_str("    },\n");
         }
     }
     out.push_str("}\n\n");
+
+    emit_default_enum_impl(out, &type_name, lt, &frame.variants);
+
+    // Create a resolved frame for parse/serialize
+    let resolved_frame = CodecFrame {
+        frame_id: frame.frame_id.clone(),
+        name: frame.name.clone(),
+        tag: frame.tag.clone(),
+        variants: resolved_variants,
+    };
 
     // Impl block
     out.push_str(&format!("impl{lt} {type_name}{lt} {{\n"));
@@ -472,21 +750,21 @@ fn emit_frame(out: &mut String, frame: &CodecFrame) {
         "    pub fn parse(cur: &mut Cursor{}) -> Result<(Self, {tag_type})> {{\n",
         if needs_lt { "<'a>" } else { "<'_>" }
     ));
-    parse_emit::emit_frame_parse_body(out, frame, "        ");
+    parse_emit::emit_frame_parse_body(out, &resolved_frame, "        ");
     out.push_str("    }\n\n");
 
     // serialize method — tag is passed in
     out.push_str(&format!(
         "    pub fn serialize(&self, tag: {tag_type}, w: &mut Writer<'_>) -> Result<()> {{\n"
     ));
-    serialize_emit::emit_frame_serialize_body(out, frame, "        ");
+    serialize_emit::emit_frame_serialize_body(out, &resolved_frame, "        ");
     out.push_str("        Ok(())\n");
     out.push_str("    }\n\n");
 
     // serialized_len method
     out.push_str("    pub fn serialized_len(&self) -> usize {\n");
     out.push_str("        let mut len = 0usize;\n");
-    serialize_emit::emit_frame_serialized_len_body(out, frame, "        ");
+    serialize_emit::emit_frame_serialized_len_body(out, &resolved_frame, "        ");
     out.push_str("        len\n");
     out.push_str("    }\n");
 
@@ -495,21 +773,35 @@ fn emit_frame(out: &mut String, frame: &CodecFrame) {
 
 // ── Capsules ──
 
-fn emit_capsule(out: &mut String, capsule: &CodecCapsule) {
+fn emit_capsule(
+    out: &mut String,
+    capsule: &CodecCapsule,
+    enums: &[SemanticEnum],
+    named_types_needing_lifetime: &std::collections::HashSet<String>,
+) {
     let type_name = to_pascal_case(&capsule.name);
     let needs_lt = capsule_needs_lifetime(capsule);
     let lt = lifetime_suffix(needs_lt);
 
-    // Struct definition (header fields + payload enum)
+    // Resolve enum fields for parse/serialize
+    let resolved_header_fields = resolve_enum_fields(&capsule.header_fields, enums);
+    let resolved_variants = resolve_enum_variants(&capsule.variants, enums);
+
+    // Struct definition (header fields + payload enum) -- uses original fields
     out.push_str("#[derive(Debug, Clone, PartialEq)]\n");
     out.push_str(&format!("pub struct {type_name}{lt} {{\n"));
     // Header fields
-    emit_struct_fields(out, &capsule.header_fields, &capsule.header_items);
+    emit_struct_fields(
+        out,
+        &capsule.header_fields,
+        &capsule.header_items,
+        named_types_needing_lifetime,
+    );
     // Payload as an enum
     out.push_str(&format!("    pub payload: {type_name}Payload{lt},\n"));
     out.push_str("}\n\n");
 
-    // Payload enum
+    // Payload enum -- uses original fields
     out.push_str("#[derive(Debug, Clone, PartialEq)]\n");
     out.push_str(&format!("pub enum {type_name}Payload{lt} {{\n"));
     for variant in &capsule.variants {
@@ -518,11 +810,41 @@ fn emit_capsule(out: &mut String, capsule: &CodecCapsule) {
             out.push_str(&format!("    {variant_name},\n"));
         } else {
             out.push_str(&format!("    {variant_name} {{\n"));
-            emit_variant_struct_fields(out, variant);
+            emit_variant_struct_fields(out, variant, named_types_needing_lifetime);
             out.push_str("    },\n");
         }
     }
     out.push_str("}\n\n");
+
+    out.push_str(&format!("impl{lt} Default for {type_name}{lt} {{\n"));
+    out.push_str("    fn default() -> Self {\n");
+    out.push_str("        Self {\n");
+    emit_default_struct_items(
+        out,
+        &capsule.header_fields,
+        &capsule.header_items,
+        "            ",
+    );
+    out.push_str("            payload: Default::default(),\n");
+    out.push_str("        }\n");
+    out.push_str("    }\n");
+    out.push_str("}\n\n");
+
+    let payload_type_name = format!("{type_name}Payload");
+    emit_default_enum_impl(out, &payload_type_name, lt, &capsule.variants);
+
+    // Create resolved capsule for parse/serialize
+    let resolved_capsule = CodecCapsule {
+        capsule_id: capsule.capsule_id.clone(),
+        name: capsule.name.clone(),
+        tag: capsule.tag.clone(),
+        within_field: capsule.within_field.clone(),
+        tag_expr: capsule.tag_expr.clone(),
+        header_fields: resolved_header_fields.clone(),
+        header_items: capsule.header_items.clone(),
+        header_checksum_plan: capsule.header_checksum_plan.clone(),
+        variants: resolved_variants,
+    };
 
     // Impl block
     out.push_str(&format!("impl{lt} {type_name}{lt} {{\n"));
@@ -532,18 +854,20 @@ fn emit_capsule(out: &mut String, capsule: &CodecCapsule) {
         "    pub fn parse(cur: &mut Cursor{}) -> Result<Self> {{\n",
         if needs_lt { "<'a>" } else { "<'_>" }
     ));
-    parse_emit::emit_capsule_parse_body(out, capsule, "        ");
+    parse_emit::emit_capsule_parse_body(out, &resolved_capsule, "        ");
     out.push_str("    }\n\n");
 
     // serialize method
     out.push_str("    pub fn serialize(&self, w: &mut Writer<'_>) -> Result<()> {\n");
     serialize_emit::emit_serialize_items(
         out,
-        &capsule.header_fields,
+        &resolved_header_fields,
         &capsule.header_items,
         "        ",
         "self.",
     );
+    // Serialize payload variants
+    serialize_emit::emit_capsule_serialize_body(out, &resolved_capsule, "        ");
     out.push_str("        Ok(())\n");
     out.push_str("    }\n\n");
 
@@ -552,11 +876,13 @@ fn emit_capsule(out: &mut String, capsule: &CodecCapsule) {
     out.push_str("        let mut len = 0usize;\n");
     serialize_emit::emit_serialized_len_items(
         out,
-        &capsule.header_fields,
+        &resolved_header_fields,
         &capsule.header_items,
         "        ",
         "self.",
     );
+    // Payload variant lengths
+    serialize_emit::emit_capsule_serialized_len_body(out, &resolved_capsule, "        ");
     out.push_str("        len\n");
     out.push_str("    }\n");
 
@@ -566,75 +892,93 @@ fn emit_capsule(out: &mut String, capsule: &CodecCapsule) {
 // ── Shared helpers ──
 
 /// Emit struct fields for packets and capsule headers.
-fn emit_struct_fields(out: &mut String, fields: &[CodecField], items: &[CodecItem]) {
+fn emit_struct_fields(
+    out: &mut String,
+    fields: &[CodecField],
+    items: &[CodecItem],
+    named_types_needing_lifetime: &std::collections::HashSet<String>,
+) {
     for item in items {
         match item {
             CodecItem::Field { field_id } => {
                 if let Some(f) = fields.iter().find(|f| &f.field_id == field_id) {
-                    emit_single_struct_field(out, f);
+                    emit_single_struct_field(out, f, named_types_needing_lifetime);
                 }
             }
             CodecItem::Derived(d) => {
                 let ty = wire_type_to_rust(&d.wire_type);
-                out.push_str(&format!("    pub {}: {ty},\n", d.name));
+                out.push_str(&format!("    pub {}: {ty},\n", rust_ident(&d.name)));
             }
             CodecItem::Require(_) => {}
         }
     }
 }
 
-fn emit_single_struct_field(out: &mut String, f: &CodecField) {
+fn emit_single_struct_field(
+    out: &mut String,
+    f: &CodecField,
+    named_types_needing_lifetime: &std::collections::HashSet<String>,
+) {
+    let field_name = rust_ident(&f.name);
     match f.strategy {
         FieldStrategy::BitGroup => {
             let ty = wire_type_to_rust(&f.wire_type);
-            out.push_str(&format!("    pub {}: {ty},\n", f.name));
+            out.push_str(&format!("    pub {field_name}: {ty},\n"));
         }
         FieldStrategy::Conditional => {
             let inner_wt = f.inner_wire_type.as_ref().unwrap_or(&f.wire_type);
-            let inner_ty = rust_field_type(inner_wt);
-            out.push_str(&format!("    pub {}: Option<{inner_ty}>,\n", f.name));
+            let inner_ty = rust_field_type(inner_wt, named_types_needing_lifetime);
+            out.push_str(&format!("    pub {field_name}: Option<{inner_ty}>,\n"));
         }
         FieldStrategy::Array => {
             if let Some(ref arr) = f.array_spec {
-                let elem_ty = rust_field_type(&arr.element_wire_type);
+                let elem_ty = rust_field_type(&arr.element_wire_type, named_types_needing_lifetime);
                 let max_elems = f.max_elements.unwrap_or(MAX_ARRAY_ELEMENTS);
-                out.push_str(&format!("    pub {}: [{elem_ty}; {max_elems}],\n", f.name));
-                out.push_str(&format!("    pub {}_count: usize,\n", f.name));
+                out.push_str(&format!(
+                    "    pub {field_name}: [{elem_ty}; {max_elems}],\n"
+                ));
+                out.push_str(&format!("    pub {}: usize,\n", rust_count_ident(&f.name)));
             }
         }
         FieldStrategy::BytesFixed
         | FieldStrategy::BytesLength
         | FieldStrategy::BytesRemaining
         | FieldStrategy::BytesLor => {
-            out.push_str(&format!("    pub {}: &'a [u8],\n", f.name));
-        }
-        FieldStrategy::Struct => {
-            if let Some(ref ref_name) = f.ref_type_name {
-                let type_name = to_pascal_case(ref_name);
-                // TODO: track whether the inner struct needs lifetime
-                out.push_str(&format!("    pub {}: {type_name},\n", f.name));
+            if let Some(ref hint) = f.asn1_hint {
+                out.push_str(&format!("    pub {field_name}: {},\n", hint.type_name));
             } else {
-                let ty = wire_type_to_rust(&f.wire_type);
-                out.push_str(&format!("    pub {}: {ty},\n", f.name));
+                out.push_str(&format!("    pub {field_name}: &'a [u8],\n"));
             }
         }
+        FieldStrategy::Struct => {
+            let ty = rust_field_type(&f.wire_type, named_types_needing_lifetime);
+            out.push_str(&format!("    pub {field_name}: {ty},\n"));
+        }
         FieldStrategy::VarInt | FieldStrategy::ContVarInt => {
-            out.push_str(&format!("    pub {}: u64,\n", f.name));
+            out.push_str(&format!("    pub {field_name}: u64,\n"));
         }
         _ => {
             // Primitive / Checksum
             let ty = wire_type_to_rust(&f.wire_type);
-            out.push_str(&format!("    pub {}: {ty},\n", f.name));
+            out.push_str(&format!("    pub {field_name}: {ty},\n"));
         }
     }
 }
 
 /// Get the Rust field type string for a wire type.
-fn rust_field_type(wt: &WireType) -> String {
+fn rust_field_type(
+    wt: &WireType,
+    named_types_needing_lifetime: &std::collections::HashSet<String>,
+) -> String {
     match wt {
         WireType::Bytes => "&'a [u8]".into(),
         WireType::Struct(name) | WireType::Frame(name) | WireType::Capsule(name) => {
-            to_pascal_case(name)
+            let type_name = to_pascal_case(name);
+            if named_types_needing_lifetime.contains(name) {
+                format!("{type_name}<'a>")
+            } else {
+                type_name
+            }
         }
         WireType::Enum(name) => {
             // Enums are represented as their underlying type in Rust (pub const pattern)
@@ -656,14 +1000,14 @@ fn emit_struct_init_fields(
         match item {
             CodecItem::Field { field_id } => {
                 if let Some(f) = fields.iter().find(|f| &f.field_id == field_id) {
-                    out.push_str(&format!("{indent}{},\n", f.name));
+                    out.push_str(&format!("{indent}{},\n", rust_ident(&f.name)));
                     if f.strategy == FieldStrategy::Array {
-                        out.push_str(&format!("{indent}{}_count,\n", f.name));
+                        out.push_str(&format!("{indent}{},\n", rust_count_ident(&f.name)));
                     }
                 }
             }
             CodecItem::Derived(d) => {
-                out.push_str(&format!("{indent}{},\n", d.name));
+                out.push_str(&format!("{indent}{},\n", rust_ident(&d.name)));
             }
             CodecItem::Require(_) => {}
         }
@@ -671,60 +1015,151 @@ fn emit_struct_init_fields(
 }
 
 /// Emit struct fields for frame/capsule variant inner fields.
-fn emit_variant_struct_fields(out: &mut String, variant: &CodecVariantScope) {
+fn emit_variant_struct_fields(
+    out: &mut String,
+    variant: &CodecVariantScope,
+    named_types_needing_lifetime: &std::collections::HashSet<String>,
+) {
     for item in &variant.items {
         match item {
             CodecItem::Field { field_id } => {
                 if let Some(f) = variant.fields.iter().find(|f| &f.field_id == field_id) {
-                    emit_variant_single_field(out, f);
+                    emit_variant_single_field(out, f, named_types_needing_lifetime);
                 }
             }
             CodecItem::Derived(d) => {
                 let ty = wire_type_to_rust(&d.wire_type);
-                out.push_str(&format!("        {}: {ty},\n", d.name));
+                out.push_str(&format!("        {}: {ty},\n", rust_ident(&d.name)));
             }
             CodecItem::Require(_) => {}
         }
     }
 }
 
-fn emit_variant_single_field(out: &mut String, f: &CodecField) {
+fn emit_variant_single_field(
+    out: &mut String,
+    f: &CodecField,
+    named_types_needing_lifetime: &std::collections::HashSet<String>,
+) {
+    let field_name = rust_ident(&f.name);
     match f.strategy {
         FieldStrategy::Conditional => {
             let inner_wt = f.inner_wire_type.as_ref().unwrap_or(&f.wire_type);
-            let inner_ty = rust_field_type(inner_wt);
-            out.push_str(&format!("        {}: Option<{inner_ty}>,\n", f.name));
+            let inner_ty = rust_field_type(inner_wt, named_types_needing_lifetime);
+            out.push_str(&format!("        {field_name}: Option<{inner_ty}>,\n"));
         }
         FieldStrategy::Array => {
             if let Some(ref arr) = f.array_spec {
-                let elem_ty = rust_field_type(&arr.element_wire_type);
+                let elem_ty = rust_field_type(&arr.element_wire_type, named_types_needing_lifetime);
                 let max_elems = f.max_elements.unwrap_or(MAX_ARRAY_ELEMENTS);
-                out.push_str(&format!("        {}: [{elem_ty}; {max_elems}],\n", f.name));
-                out.push_str(&format!("        {}_count: usize,\n", f.name));
+                out.push_str(&format!(
+                    "        {field_name}: [{elem_ty}; {max_elems}],\n"
+                ));
+                out.push_str(&format!("        {}: usize,\n", rust_count_ident(&f.name)));
             }
         }
         FieldStrategy::BytesFixed
         | FieldStrategy::BytesLength
         | FieldStrategy::BytesRemaining
         | FieldStrategy::BytesLor => {
-            out.push_str(&format!("        {}: &'a [u8],\n", f.name));
-        }
-        FieldStrategy::Struct => {
-            if let Some(ref ref_name) = f.ref_type_name {
-                let type_name = to_pascal_case(ref_name);
-                out.push_str(&format!("        {}: {type_name},\n", f.name));
+            if let Some(ref hint) = f.asn1_hint {
+                out.push_str(&format!("        {field_name}: {},\n", hint.type_name));
             } else {
-                let ty = wire_type_to_rust(&f.wire_type);
-                out.push_str(&format!("        {}: {ty},\n", f.name));
+                out.push_str(&format!("        {field_name}: &'a [u8],\n"));
             }
         }
+        FieldStrategy::Struct => {
+            let ty = rust_field_type(&f.wire_type, named_types_needing_lifetime);
+            out.push_str(&format!("        {field_name}: {ty},\n"));
+        }
         FieldStrategy::VarInt | FieldStrategy::ContVarInt => {
-            out.push_str(&format!("        {}: u64,\n", f.name));
+            out.push_str(&format!("        {field_name}: u64,\n"));
         }
         _ => {
             let ty = wire_type_to_rust(&f.wire_type);
-            out.push_str(&format!("        {}: {ty},\n", f.name));
+            out.push_str(&format!("        {field_name}: {ty},\n"));
         }
+    }
+}
+
+fn default_value_expr_for_field(f: &CodecField) -> String {
+    if let FieldStrategy::Array = f.strategy {
+        return "std::array::from_fn(|_| Default::default())".into();
+    }
+
+    if f.asn1_hint.is_some() {
+        "panic!(\"Default padding is unavailable for ASN.1-backed fields\")".into()
+    } else {
+        "Default::default()".into()
+    }
+}
+
+fn emit_default_struct_items(
+    out: &mut String,
+    fields: &[CodecField],
+    items: &[CodecItem],
+    indent: &str,
+) {
+    for item in items {
+        match item {
+            CodecItem::Field { field_id } => {
+                if let Some(f) = fields.iter().find(|f| &f.field_id == field_id) {
+                    out.push_str(&format!(
+                        "{indent}{}: {},\n",
+                        rust_ident(&f.name),
+                        default_value_expr_for_field(f)
+                    ));
+                    if f.strategy == FieldStrategy::Array {
+                        out.push_str(&format!(
+                            "{indent}{}: Default::default(),\n",
+                            rust_count_ident(&f.name)
+                        ));
+                    }
+                }
+            }
+            CodecItem::Derived(d) => {
+                out.push_str(&format!(
+                    "{indent}{}: Default::default(),\n",
+                    rust_ident(&d.name)
+                ));
+            }
+            CodecItem::Require(_) => {}
+        }
+    }
+}
+
+fn variant_is_unit(variant: &CodecVariantScope) -> bool {
+    variant.fields.is_empty()
+        && !variant
+            .items
+            .iter()
+            .any(|i| matches!(i, CodecItem::Derived(_)))
+}
+
+fn emit_default_enum_impl(
+    out: &mut String,
+    enum_name: &str,
+    lt: &str,
+    variants: &[CodecVariantScope],
+) {
+    if let Some(first_variant) = variants.first() {
+        let first_name = to_pascal_case(&first_variant.name);
+        out.push_str(&format!("impl{lt} Default for {enum_name}{lt} {{\n"));
+        out.push_str("    fn default() -> Self {\n");
+        if variant_is_unit(first_variant) {
+            out.push_str(&format!("        Self::{first_name}\n"));
+        } else {
+            out.push_str(&format!("        Self::{first_name} {{\n"));
+            emit_default_struct_items(
+                out,
+                &first_variant.fields,
+                &first_variant.items,
+                "            ",
+            );
+            out.push_str("        }\n");
+        }
+        out.push_str("    }\n");
+        out.push_str("}\n\n");
     }
 }
 
@@ -936,8 +1371,16 @@ fn emit_varint_continuation_bit(out: &mut String, vi: &SemanticVarInt, snake: &s
 
 // ── State Machines ──
 
-fn emit_state_machine(out: &mut String, sm: &SemanticStateMachine) {
+fn emit_state_machine(
+    out: &mut String,
+    sm: &SemanticStateMachine,
+    all_sms: &[SemanticStateMachine],
+) {
     let sm_name = to_pascal_case(&sm.name);
+    let all_states: Vec<_> = all_sms
+        .iter()
+        .flat_map(|state_machine| state_machine.states.iter().cloned())
+        .collect();
 
     // ── State enum ──
     out.push_str("#[derive(Debug, Clone, PartialEq)]\n");
@@ -949,8 +1392,8 @@ fn emit_state_machine(out: &mut String, sm: &SemanticStateMachine) {
         } else {
             out.push_str(&format!("    {state_name} {{\n"));
             for field in &state.fields {
-                let ty = semantic_type_to_rust(&field.ty);
-                out.push_str(&format!("        {}: {ty},\n", field.name));
+                let ty = sm_field_type_to_rust(field);
+                out.push_str(&format!("        {}: {ty},\n", rust_ident(&field.name)));
             }
             out.push_str("    },\n");
         }
@@ -970,7 +1413,7 @@ fn emit_state_machine(out: &mut String, sm: &SemanticStateMachine) {
                 out.push_str(&format!("    {event_name} {{\n"));
                 for param in &event.params {
                     let ty = semantic_type_to_rust(&param.ty);
-                    out.push_str(&format!("        {}: {ty},\n", param.name));
+                    out.push_str(&format!("        {}: {ty},\n", rust_ident(&param.name)));
                 }
                 out.push_str("    },\n");
             }
@@ -993,11 +1436,23 @@ fn emit_state_machine(out: &mut String, sm: &SemanticStateMachine) {
             for field in &initial_state.fields {
                 let default_val = if let Some(ref lit) = field.default_value {
                     semantic_literal_to_rust(lit)
+                } else if let Some(ref child_sm) = field.child_sm_name {
+                    // Child SM field: use the child's constructor
+                    let child_pascal = to_pascal_case(child_sm);
+                    match &field.ty {
+                        wirespec_sema::types::SemanticType::Array { .. } => {
+                            "Vec::new()".to_string()
+                        }
+                        _ => format!("{child_pascal}::new()"),
+                    }
                 } else {
                     // Use Default::default() for the type
                     "0".into()
                 };
-                out.push_str(&format!("            {}: {default_val},\n", field.name));
+                out.push_str(&format!(
+                    "            {}: {default_val},\n",
+                    rust_ident(&field.name)
+                ));
             }
             out.push_str("        }\n");
         }
@@ -1027,7 +1482,7 @@ fn emit_state_machine(out: &mut String, sm: &SemanticStateMachine) {
                     format!("Self::{src_state_name}")
                 } else {
                     let field_bindings: Vec<String> =
-                        src.fields.iter().map(|f| f.name.clone()).collect();
+                        src.fields.iter().map(|f| rust_ident(&f.name)).collect();
                     format!("Self::{src_state_name} {{ {} }}", field_bindings.join(", "))
                 }
             } else {
@@ -1040,7 +1495,7 @@ fn emit_state_machine(out: &mut String, sm: &SemanticStateMachine) {
                     format!("{sm_name}Event::{event_name}")
                 } else {
                     let param_bindings: Vec<String> =
-                        ev.params.iter().map(|p| p.name.clone()).collect();
+                        ev.params.iter().map(|p| rust_ident(&p.name)).collect();
                     format!(
                         "{sm_name}Event::{event_name} {{ {} }}",
                         param_bindings.join(", ")
@@ -1056,7 +1511,7 @@ fn emit_state_machine(out: &mut String, sm: &SemanticStateMachine) {
 
             // Guard check
             if let Some(ref guard) = trans.guard {
-                let guard_str = sm_expr_to_rust_ctx(guard, &sm.states);
+                let guard_str = sm_expr_to_rust_ctx(guard, &all_states);
                 out.push_str(&format!(
                     "                if !({guard_str}) {{ return Err(Error::InvalidState); }}\n"
                 ));
@@ -1078,42 +1533,145 @@ fn emit_state_machine(out: &mut String, sm: &SemanticStateMachine) {
                 out.push_str("                // delegate: auto-copy + forward to child SM\n");
                 out.push_str("                let mut new_state = self.clone();\n");
 
-                if let (Some(field_name), Some(child_sm)) = (&child_field, &child_sm_name) {
-                    let child_sm_pascal = to_pascal_case(child_sm);
-                    // Extract the event argument name from delegate event
-                    let event_param_name = extract_delegate_event_param(&delegate.target);
-                    out.push_str(&format!(
-                        "                if let Self::{src_state_name} {{ ref mut {field_name}, .. }} = new_state {{\n"
-                    ));
-                    out.push_str(&format!(
-                        "                    let _old = std::mem::discriminant(&*{field_name});\n"
-                    ));
-                    // We'd need to map the event parameter to the child's event type.
-                    // Since that mapping is complex, emit a dispatch call with a comment.
-                    if let Some(ref ep) = event_param_name {
-                        out.push_str(&format!(
-                            "                    // TODO: map *{ep} to {child_sm_pascal}Event variant\n"
-                        ));
-                        out.push_str(&format!(
-                            "                    // {field_name}.dispatch(&{child_sm_pascal}Event::...)?;\n"
-                        ));
+                if let (Some(field_name), Some(child_sm_str)) = (&child_field, &child_sm_name) {
+                    // The delegate's event_name is the event parameter to forward
+                    let delegate_event_param = rust_ident(&delegate.event_name);
+                    // Check if the delegate target is an indexed access (e.g., src.paths[idx])
+                    let is_indexed = matches!(delegate.target, SemanticExpr::Subscript { .. });
+
+                    // Look up the child SM to generate ordinal-to-event mapping
+                    let child_sm_def = all_sms.iter().find(|s| s.name == *child_sm_str);
+                    let child_pascal = to_pascal_case(child_sm_str);
+                    let delegate_param_def = event_def
+                        .and_then(|ev| ev.params.iter().find(|p| p.name == *delegate_event_param));
+                    let delegate_param_is_integer_like = delegate_param_def
+                        .map(|p| p.ty.is_integer_like())
+                        .unwrap_or(false);
+                    let delegate_event_param_names: std::collections::HashSet<&str> = event_def
+                        .map(|ev| ev.params.iter().map(|p| p.name.as_str()).collect())
+                        .unwrap_or_default();
+                    let child_field_name = rust_ident(field_name);
+
+                    // Generate the event conversion match from u8 ordinal to child event enum
+                    let event_conversion = if delegate_param_is_integer_like {
+                        if let Some(child_def) = child_sm_def {
+                            if child_def.events.iter().all(|ev| ev.params.is_empty()) {
+                                let mut match_arms = String::new();
+                                for (ordinal, ev) in child_def.events.iter().enumerate() {
+                                    let ev_pascal = to_pascal_case(&ev.name);
+                                    match_arms.push_str(&format!(
+                                        "                        {ordinal} => {child_pascal}Event::{ev_pascal},\n"
+                                    ));
+                                }
+                                Some(match_arms)
+                            } else {
+                                Some(String::new())
+                            }
+                        } else {
+                            None
+                        }
                     } else {
+                        None
+                    };
+                    let delegate_requires_runtime_error = delegate_param_is_integer_like
+                        && event_conversion
+                            .as_ref()
+                            .is_some_and(|arms| arms.is_empty());
+
+                    if is_indexed {
+                        // Indexed delegate: src.field[index] <- ev
+                        // Extract the index expression
+                        let index_expr =
+                            if let SemanticExpr::Subscript { index, .. } = &delegate.target {
+                                match index.as_ref() {
+                                    SemanticExpr::ValueRef { reference }
+                                        if delegate_event_param_names
+                                            .contains(reference.value_id.as_str()) =>
+                                    {
+                                        format!("{}.clone()", rust_ident(&reference.value_id))
+                                    }
+                                    _ => sm_expr_to_rust_ctx(index, &all_states),
+                                }
+                            } else {
+                                "0".to_string()
+                            };
                         out.push_str(&format!(
-                            "                    // TODO: dispatch to {field_name}: {child_sm_pascal}\n"
+                            "                if let Self::{src_state_name} {{ ref mut {child_field_name}, .. }} = new_state {{\n"
                         ));
+                        out.push_str(&format!(
+                            "                    let _idx = ({index_expr}) as usize;\n"
+                        ));
+                        out.push_str(&format!(
+                            "                    let _old = std::mem::discriminant(&{child_field_name}[_idx]);\n"
+                        ));
+                        if delegate_requires_runtime_error {
+                            out.push_str("                    return Err(Error::InvalidState);\n");
+                        } else if let Some(ref arms) = event_conversion {
+                            out.push_str(&format!(
+                                "                    let _child_event = match {delegate_event_param}.clone() {{\n"
+                            ));
+                            out.push_str(arms);
+                            out.push_str(
+                                "                        _ => return Err(Error::InvalidState),\n",
+                            );
+                            out.push_str("                    };\n");
+                            out.push_str(&format!(
+                                "                    {child_field_name}[_idx].dispatch(&_child_event)?;\n"
+                            ));
+                        } else {
+                            out.push_str(&format!(
+                                "                    {child_field_name}[_idx].dispatch({delegate_event_param})?;\n"
+                            ));
+                        }
+                    } else {
+                        // Simple delegate: src.field <- ev
+                        out.push_str(&format!(
+                            "                if let Self::{src_state_name} {{ ref mut {child_field_name}, .. }} = new_state {{\n"
+                        ));
+                        out.push_str(&format!(
+                            "                    let _old = std::mem::discriminant(&*{child_field_name});\n"
+                        ));
+                        if delegate_requires_runtime_error {
+                            out.push_str("                    return Err(Error::InvalidState);\n");
+                        } else if let Some(ref arms) = event_conversion {
+                            out.push_str(&format!(
+                                "                    let _child_event = match {delegate_event_param}.clone() {{\n"
+                            ));
+                            out.push_str(arms);
+                            out.push_str(
+                                "                        _ => return Err(Error::InvalidState),\n",
+                            );
+                            out.push_str("                    };\n");
+                            out.push_str(&format!(
+                                "                    {child_field_name}.dispatch(&_child_event)?;\n"
+                            ));
+                        } else {
+                            out.push_str(&format!(
+                                "                    {child_field_name}.dispatch({delegate_event_param})?;\n"
+                            ));
+                        }
                     }
                     if sm.has_child_state_changed {
+                        let discriminant_ref = if is_indexed {
+                            format!("&{child_field_name}[_idx]")
+                        } else {
+                            format!("&*{child_field_name}")
+                        };
                         out.push_str(&format!(
-                            "                    if std::mem::discriminant(&*{field_name}) != _old {{\n"
+                            "                    if std::mem::discriminant({discriminant_ref}) != _old {{\n"
                         ));
                         out.push_str(&format!(
-                            "                        let _ = self.dispatch(&{sm_name}Event::ChildStateChanged);\n"
+                            "                        let _ = new_state.dispatch(&{sm_name}Event::ChildStateChanged);\n"
                         ));
                         out.push_str("                    }\n");
                     }
                     out.push_str("                }\n");
                 } else {
-                    out.push_str("                // TODO: dispatch to child SM field\n");
+                    // Fallback: we couldn't resolve the child field
+                    let delegate_event_param = &delegate.event_name;
+                    out.push_str(&format!(
+                        "                // delegate: could not resolve child field for {delegate_event_param}\n"
+                    ));
                 }
 
                 out.push_str("                *self = new_state;\n");
@@ -1123,21 +1681,21 @@ fn emit_state_machine(out: &mut String, sm: &SemanticStateMachine) {
                 if let Some(dst) = dst_state {
                     if dst.fields.is_empty() {
                         out.push_str(&format!(
-                            "                *self = Self::{dst_state_name};\n"
+                            "                let mut new_state = Self::{dst_state_name};\n"
                         ));
                     } else {
                         out.push_str(&format!(
-                            "                *self = Self::{dst_state_name} {{\n"
+                            "                let mut new_state = Self::{dst_state_name} {{\n"
                         ));
 
                         // For each destination field, check if there's an action that assigns it
                         for dst_field in &dst.fields {
+                            let dst_field_name = rust_ident(&dst_field.name);
                             let assigned_value =
-                                find_action_for_field(&trans.actions, &dst_field.name, &sm.states);
+                                find_action_for_field(&trans.actions, &dst_field.name, &all_states);
                             if let Some(expr_str) = assigned_value {
                                 out.push_str(&format!(
-                                    "                    {}: {expr_str},\n",
-                                    dst_field.name
+                                    "                    {dst_field_name}: {expr_str},\n"
                                 ));
                             } else {
                                 // Try to copy from source state if same field name exists
@@ -1145,20 +1703,22 @@ fn emit_state_machine(out: &mut String, sm: &SemanticStateMachine) {
                                     .map(|s| s.fields.iter().any(|f| f.name == dst_field.name))
                                     .unwrap_or(false);
                                 if src_has_field {
+                                    let copy_expr = if is_sm_field_copy_type(dst_field) {
+                                        format!("*{}", dst_field_name)
+                                    } else {
+                                        format!("{}.clone()", dst_field_name)
+                                    };
                                     out.push_str(&format!(
-                                        "                    {}: *{},\n",
-                                        dst_field.name, dst_field.name
+                                        "                    {dst_field_name}: {copy_expr},\n"
                                     ));
                                 } else if let Some(ref lit) = dst_field.default_value {
                                     let val = semantic_literal_to_rust(lit);
                                     out.push_str(&format!(
-                                        "                    {}: {val},\n",
-                                        dst_field.name
+                                        "                    {dst_field_name}: {val},\n"
                                     ));
                                 } else {
                                     out.push_str(&format!(
-                                        "                    {}: 0,\n",
-                                        dst_field.name
+                                        "                    {dst_field_name}: 0,\n"
                                     ));
                                 }
                             }
@@ -1168,10 +1728,17 @@ fn emit_state_machine(out: &mut String, sm: &SemanticStateMachine) {
                     }
                 } else {
                     out.push_str(&format!(
-                        "                *self = Self::{dst_state_name};\n"
+                        "                let mut new_state = Self::{dst_state_name};\n"
                     ));
                 }
 
+                emit_post_construction_actions(
+                    out,
+                    &trans.actions,
+                    dst_state_name.as_str(),
+                    &all_states,
+                );
+                out.push_str("                *self = new_state;\n");
                 out.push_str("                Ok(())\n");
             }
             out.push_str("            }\n");
@@ -1194,6 +1761,20 @@ fn sm_expr_to_rust(expr: &SemanticExpr) -> String {
 
 /// Convert a SemanticExpr with access to SM state definitions for InState/All lookups.
 fn sm_expr_to_rust_ctx(expr: &SemanticExpr, sm_states: &[SemanticState]) -> String {
+    sm_expr_to_rust_mode(expr, sm_states, SmExprMode::Value)
+}
+
+#[derive(Clone, Copy)]
+enum SmExprMode {
+    Value,
+    Borrow,
+}
+
+fn sm_expr_to_rust_mode(
+    expr: &SemanticExpr,
+    sm_states: &[SemanticState],
+    mode: SmExprMode,
+) -> String {
     match expr {
         SemanticExpr::Literal { value } => match value {
             SemanticLiteral::Int(n) => {
@@ -1214,18 +1795,24 @@ fn sm_expr_to_rust_ctx(expr: &SemanticExpr, sm_states: &[SemanticState]) -> Stri
             if reference.path.is_empty() {
                 "()".into()
             } else {
-                let field_name = &reference.path[reference.path.len() - 1];
+                let field_name = rust_ident(&reference.path[reference.path.len() - 1]);
                 match reference.peer {
-                    TransitionPeerKind::Src => format!("*{field_name}"),
-                    TransitionPeerKind::Dst => field_name.clone(),
-                    TransitionPeerKind::EventParam => format!("*{field_name}"),
+                    TransitionPeerKind::Src => match mode {
+                        SmExprMode::Value => format!("{field_name}.clone()"),
+                        SmExprMode::Borrow => field_name,
+                    },
+                    TransitionPeerKind::Dst => field_name,
+                    TransitionPeerKind::EventParam => match mode {
+                        SmExprMode::Value => format!("{field_name}.clone()"),
+                        SmExprMode::Borrow => field_name,
+                    },
                 }
             }
         }
-        SemanticExpr::ValueRef { reference } => reference.value_id.clone(),
+        SemanticExpr::ValueRef { reference } => rust_ident(&reference.value_id),
         SemanticExpr::Binary { op, left, right } => {
-            let l = sm_expr_to_rust_ctx(left, sm_states);
-            let r = sm_expr_to_rust_ctx(right, sm_states);
+            let l = sm_expr_to_rust_mode(left, sm_states, SmExprMode::Value);
+            let r = sm_expr_to_rust_mode(right, sm_states, SmExprMode::Value);
             let rust_op = match op.as_str() {
                 "and" => "&&",
                 "or" => "||",
@@ -1234,17 +1821,21 @@ fn sm_expr_to_rust_ctx(expr: &SemanticExpr, sm_states: &[SemanticState]) -> Stri
             format!("({l} {rust_op} {r})")
         }
         SemanticExpr::Unary { op, operand } => {
-            let o = sm_expr_to_rust_ctx(operand, sm_states);
+            let o = sm_expr_to_rust_mode(operand, sm_states, SmExprMode::Value);
             format!("({op}{o})")
         }
         SemanticExpr::Subscript { base, index } => {
-            let b = sm_expr_to_rust_ctx(base, sm_states);
-            let i = sm_expr_to_rust_ctx(index, sm_states);
-            format!("{b}[{i}]")
+            let b = sm_expr_to_rust_mode(base, sm_states, SmExprMode::Borrow);
+            let i = sm_expr_to_rust_mode(index, sm_states, SmExprMode::Value);
+            let access = format!("{b}[({i}) as usize]");
+            match mode {
+                SmExprMode::Value => format!("({access}).clone()"),
+                SmExprMode::Borrow => format!("&({access})"),
+            }
         }
         SemanticExpr::Coalesce { expr, default } => {
-            let e = sm_expr_to_rust_ctx(expr, sm_states);
-            let d = sm_expr_to_rust_ctx(default, sm_states);
+            let e = sm_expr_to_rust_mode(expr, sm_states, SmExprMode::Value);
+            let d = sm_expr_to_rust_mode(default, sm_states, SmExprMode::Value);
             // Rust doesn't have ??, use unwrap_or pattern
             format!("{e}.unwrap_or({d})")
         }
@@ -1255,15 +1846,13 @@ fn sm_expr_to_rust_ctx(expr: &SemanticExpr, sm_states: &[SemanticState]) -> Stri
             state_name,
             ..
         } => {
-            let expr_rs = sm_expr_to_rust_ctx(expr, sm_states);
+            let expr_rs = sm_expr_to_rust_mode(expr, sm_states, SmExprMode::Borrow);
             let sm_pascal = to_pascal_case(sm_name);
             let state_pascal = to_pascal_case(state_name);
-            // Look up whether this state has fields to emit correct match pattern
-            let has_fields = sm_states
-                .iter()
-                .find(|s| s.state_id == *state_id)
+            // Look up whether this state has fields to emit correct match pattern.
+            let has_fields = find_state_definition(sm_states, sm_name, state_id, state_name)
                 .map(|s| !s.fields.is_empty())
-                .unwrap_or(true); // default to true (use { .. }) if state not found
+                .unwrap_or(false); // default to false (unit variant) if not found
             if has_fields {
                 format!("matches!({expr_rs}, {sm_pascal}::{state_pascal} {{ .. }})")
             } else {
@@ -1282,15 +1871,13 @@ fn sm_expr_to_rust_ctx(expr: &SemanticExpr, sm_states: &[SemanticState]) -> Stri
             if args.is_empty() {
                 format!("{sm_pascal}::{state_pascal}")
             } else {
-                // Try to look up field names from state definitions
-                let field_names: Option<Vec<String>> = sm_states
-                    .iter()
-                    .find(|s| s.state_id == *state_id)
-                    .map(|s| s.fields.iter().map(|f| f.name.clone()).collect());
+                let field_names: Option<Vec<String>> =
+                    find_state_definition(sm_states, sm_name, state_id, state_name)
+                        .map(|s| s.fields.iter().map(|f| rust_ident(&f.name)).collect());
 
                 let arg_strs: Vec<String> = args
                     .iter()
-                    .map(|a| sm_expr_to_rust_ctx(a, sm_states))
+                    .map(|a| sm_expr_to_rust_mode(a, sm_states, SmExprMode::Value))
                     .collect();
 
                 if let Some(names) = field_names {
@@ -1311,17 +1898,20 @@ fn sm_expr_to_rust_ctx(expr: &SemanticExpr, sm_states: &[SemanticState]) -> Stri
             }
         }
         SemanticExpr::Fill { value, count } => {
-            let val_rs = sm_expr_to_rust_ctx(value, sm_states);
-            let cnt_rs = sm_expr_to_rust_ctx(count, sm_states);
-            // In Rust, array initialization with a repeated value: [val; count]
-            // This works when count is a const and val is Copy.
-            format!("[{val_rs}; {cnt_rs}]")
+            let val_rs = sm_expr_to_rust_mode(value, sm_states, SmExprMode::Value);
+            let cnt_rs = sm_expr_to_rust_mode(count, sm_states, SmExprMode::Value);
+            // Use vec![] for SM array fields (Vec<T>), since T may not be Copy.
+            format!("vec![{val_rs}; {cnt_rs}]")
         }
         SemanticExpr::Slice { base, start, end } => {
-            let b = sm_expr_to_rust_ctx(base, sm_states);
-            let s = sm_expr_to_rust_ctx(start, sm_states);
-            let e = sm_expr_to_rust_ctx(end, sm_states);
-            format!("{b}[{s}..{e}]")
+            let b = sm_expr_to_rust_mode(base, sm_states, SmExprMode::Borrow);
+            let s = sm_expr_to_rust_mode(start, sm_states, SmExprMode::Value);
+            let e = sm_expr_to_rust_mode(end, sm_states, SmExprMode::Value);
+            let slice = format!("{b}[({s}) as usize..({e}) as usize]");
+            match mode {
+                SmExprMode::Value => format!("({slice}).to_vec()"),
+                SmExprMode::Borrow => format!("&({slice})"),
+            }
         }
         SemanticExpr::All {
             collection,
@@ -1332,30 +1922,16 @@ fn sm_expr_to_rust_ctx(expr: &SemanticExpr, sm_states: &[SemanticState]) -> Stri
         } => {
             let sm_pascal = to_pascal_case(sm_name);
             let state_pascal = to_pascal_case(state_name);
-            // Check whether the target state has fields for correct match pattern
-            let has_fields = sm_states
-                .iter()
-                .find(|s| s.state_id == *state_id)
+            let has_fields = find_state_definition(sm_states, sm_name, state_id, state_name)
                 .map(|s| !s.fields.is_empty())
-                .unwrap_or(true);
+                .unwrap_or(false);
             let pattern = if has_fields {
                 format!("{sm_pascal}::{state_pascal} {{ .. }}")
             } else {
                 format!("{sm_pascal}::{state_pascal}")
             };
-            // collection is typically a Slice { base, start, end }
-            match collection.as_ref() {
-                SemanticExpr::Slice { base, start, end } => {
-                    let base_rs = sm_expr_to_rust_ctx(base, sm_states);
-                    let start_rs = sm_expr_to_rust_ctx(start, sm_states);
-                    let end_rs = sm_expr_to_rust_ctx(end, sm_states);
-                    format!("({start_rs}..{end_rs}).all(|_ai| matches!({base_rs}[_ai], {pattern}))")
-                }
-                _ => {
-                    let coll_rs = sm_expr_to_rust_ctx(collection, sm_states);
-                    format!("{coll_rs}.iter().all(|_ai| matches!(_ai, {pattern}))")
-                }
-            }
+            let coll_rs = sm_expr_to_rust_mode(collection, sm_states, SmExprMode::Borrow);
+            format!("({coll_rs}).iter().all(|_ai| matches!(_ai, {pattern}))")
         }
     }
 }
@@ -1375,17 +1951,88 @@ fn find_action_for_field(
             && reference.path[reference.path.len() - 1] == field_name
         {
             let value_str = sm_expr_to_rust_ctx(&action.value, sm_states);
+            let field_ident = rust_ident(field_name);
             return match action.op.as_str() {
                 "=" => Some(value_str),
-                "+=" => Some(format!("(*{field_name} + {value_str})")),
-                "-=" => Some(format!("(*{field_name} - {value_str})")),
-                "*=" => Some(format!("(*{field_name} * {value_str})")),
-                "/=" => Some(format!("(*{field_name} / {value_str})")),
+                "+=" => Some(format!("(*{field_ident} + {value_str})")),
+                "-=" => Some(format!("(*{field_ident} - {value_str})")),
+                "*=" => Some(format!("(*{field_ident} * {value_str})")),
+                "/=" => Some(format!("(*{field_ident} / {value_str})")),
                 _ => Some(value_str),
             };
         }
     }
     None
+}
+
+fn emit_post_construction_actions(
+    out: &mut String,
+    actions: &[SemanticAction],
+    dst_state_name: &str,
+    sm_states: &[SemanticState],
+) {
+    for action in actions {
+        let SemanticExpr::Subscript { base, index } = &action.target else {
+            continue;
+        };
+        let SemanticExpr::TransitionPeerRef { reference } = base.as_ref() else {
+            continue;
+        };
+        if reference.peer != TransitionPeerKind::Dst || reference.path.is_empty() {
+            continue;
+        }
+
+        let field_name = rust_ident(&reference.path[reference.path.len() - 1]);
+        let index_expr = sm_expr_to_rust_ctx(index, sm_states);
+        let value_expr = sm_expr_to_rust_ctx(&action.value, sm_states);
+        let assigned_expr = match action.op.as_str() {
+            "=" => value_expr,
+            "+=" => format!("{field_name}[_idx].clone() + {value_expr}"),
+            "-=" => format!("{field_name}[_idx].clone() - {value_expr}"),
+            "*=" => format!("{field_name}[_idx].clone() * {value_expr}"),
+            "/=" => format!("{field_name}[_idx].clone() / {value_expr}"),
+            _ => value_expr,
+        };
+
+        out.push_str(&format!(
+            "                if let Self::{dst_state_name} {{ ref mut {field_name}, .. }} = new_state {{\n"
+        ));
+        out.push_str(&format!(
+            "                    let _idx = ({index_expr}) as usize;\n"
+        ));
+        out.push_str(&format!(
+            "                    {field_name}[_idx] = {assigned_expr};\n"
+        ));
+        out.push_str("                }\n");
+    }
+}
+
+fn find_state_definition<'a>(
+    sm_states: &'a [SemanticState],
+    sm_name: &str,
+    state_id: &str,
+    state_name: &str,
+) -> Option<&'a SemanticState> {
+    let expected_state_id = format!("sm:{sm_name}/state:{state_name}");
+    sm_states
+        .iter()
+        .find(|s| !state_id.is_empty() && s.state_id == state_id)
+        .or_else(|| sm_states.iter().find(|s| s.state_id == expected_state_id))
+        .or_else(|| sm_states.iter().find(|s| s.name == state_name))
+}
+
+/// Check if a state machine field has a Copy type (primitive/bits).
+/// Non-Copy types (Vec, child SM enums) need `.clone()` instead of `*field`.
+fn is_sm_field_copy_type(field: &SemanticStateField) -> bool {
+    use wirespec_sema::types::SemanticType;
+    // If it's a child SM field or an array, it's not Copy
+    if field.child_sm_name.is_some() {
+        return false;
+    }
+    matches!(
+        &field.ty,
+        SemanticType::Primitive { .. } | SemanticType::Bits { .. }
+    )
 }
 
 /// Extract the child field name from a delegate target expression.
@@ -1401,23 +2048,6 @@ fn extract_delegate_child_field(target: &SemanticExpr) -> Option<String> {
             }
         }
         SemanticExpr::Subscript { base, .. } => extract_delegate_child_field(base),
-        _ => None,
-    }
-}
-
-/// Extract the event parameter name from a delegate target expression's context.
-/// The delegate's event_name tells us which event is being forwarded.
-fn extract_delegate_event_param(target: &SemanticExpr) -> Option<String> {
-    // Walk down through Subscript to find the innermost TransitionPeerRef
-    match target {
-        SemanticExpr::TransitionPeerRef { reference } => {
-            if reference.peer == TransitionPeerKind::Src && reference.path.len() > 1 {
-                Some(reference.path.last().unwrap().clone())
-            } else {
-                None
-            }
-        }
-        SemanticExpr::Subscript { base, .. } => extract_delegate_event_param(base),
         _ => None,
     }
 }

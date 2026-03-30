@@ -76,3 +76,79 @@ pub fn rust_const_name(prefix: &str, name: &str) -> String {
         )
     }
 }
+
+fn is_rust_keyword(name: &str) -> bool {
+    matches!(
+        name,
+        "Self"
+            | "abstract"
+            | "as"
+            | "async"
+            | "await"
+            | "become"
+            | "box"
+            | "break"
+            | "const"
+            | "continue"
+            | "crate"
+            | "do"
+            | "dyn"
+            | "else"
+            | "enum"
+            | "extern"
+            | "false"
+            | "final"
+            | "fn"
+            | "for"
+            | "if"
+            | "impl"
+            | "in"
+            | "let"
+            | "loop"
+            | "macro"
+            | "match"
+            | "mod"
+            | "move"
+            | "mut"
+            | "override"
+            | "priv"
+            | "pub"
+            | "ref"
+            | "return"
+            | "self"
+            | "static"
+            | "struct"
+            | "super"
+            | "trait"
+            | "true"
+            | "try"
+            | "type"
+            | "typeof"
+            | "union"
+            | "unsafe"
+            | "unsized"
+            | "use"
+            | "virtual"
+            | "where"
+            | "while"
+            | "yield"
+    )
+}
+
+pub fn rust_ident(name: &str) -> String {
+    if name.starts_with("r#") {
+        name.to_string()
+    } else if is_rust_keyword(name) {
+        format!("r#{name}")
+    } else {
+        name.to_string()
+    }
+}
+
+pub fn rust_count_ident(name: &str) -> String {
+    rust_ident(&format!("{name}_count"))
+}
+
+pub fn rust_temp_ident(prefix: &str, name: &str, suffix: &str) -> String {
+    rust_ident(&format!("{prefix}{name}{suffix}"))
+}

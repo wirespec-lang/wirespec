@@ -429,6 +429,14 @@ impl Parser {
                 self.parse_state_machine(annotations, exported)?,
             ))),
             _ => {
+                // Check for "extern asn1"
+                if let TokenKind::Name(ref n) = self.peek().clone()
+                    && n == "extern"
+                {
+                    let item = self.parse_extern_asn1(annotations)?;
+                    return Ok(Some(item));
+                }
+
                 if exported {
                     Err(self.error("expected definition after 'export'".into()))
                 } else if !annotations.is_empty() {
@@ -1169,12 +1177,57 @@ impl Parser {
             _ => {
                 let span = self.span();
                 let name = self.parse_type_ref_name()?;
+                // Check for asn1(...) function-call syntax
+                if name == "asn1" && self.at(&TokenKind::LParen) {
+                    return self.parse_asn1_type_expr(span);
+                }
                 Ok(AstTypeExpr::Named {
                     name,
                     span: Some(span),
                 })
             }
         }
+    }
+
+    fn parse_asn1_type_expr(&mut self, start: Span) -> Result<AstTypeExpr> {
+        self.expect(&TokenKind::LParen)?;
+
+        // Type name
+        let (type_name, _) = self.expect_name()?;
+        self.expect(&TokenKind::Comma)?;
+
+        // encoding: <name>
+        let (enc_kw, _) = self.expect_name()?;
+        if enc_kw != "encoding" {
+            return Err(self.error(format!("expected 'encoding', found '{enc_kw}'")));
+        }
+        self.expect(&TokenKind::Colon)?;
+        let (encoding, _) = self.expect_name()?;
+        self.expect(&TokenKind::Comma)?;
+
+        // length: <expr> OR remaining
+        let length = if self.eat(&TokenKind::Remaining) {
+            Asn1Length::Remaining
+        } else {
+            let (len_kw, _) = self.expect_name()?;
+            if len_kw != "length" {
+                return Err(self.error(format!(
+                    "expected 'length' or 'remaining', found '{len_kw}'"
+                )));
+            }
+            self.expect(&TokenKind::Colon)?;
+            let expr = self.parse_expr()?;
+            Asn1Length::Expr(Box::new(expr))
+        };
+
+        self.expect(&TokenKind::RParen)?;
+
+        Ok(AstTypeExpr::Asn1 {
+            type_name,
+            encoding,
+            length,
+            span: Some(start),
+        })
     }
 
     fn parse_match_type_expr(&mut self) -> Result<AstTypeExpr> {
@@ -1799,6 +1852,65 @@ impl Parser {
             }
             _ => Err(self.error(format!("expected literal, found {:?}", self.peek()))),
         }
+    }
+
+    // ── Extern ASN.1 ──
+
+    fn parse_extern_asn1(&mut self, _annotations: Vec<AstAnnotation>) -> Result<AstTopItem> {
+        let start = self.span();
+        self.advance(); // skip "extern"
+
+        // Expect "asn1" as a name token
+        let (kw, _) = self.expect_name()?;
+        if kw != "asn1" {
+            return Err(self.error(format!("expected 'asn1' after 'extern', found '{kw}'")));
+        }
+
+        // Expect string literal for path
+        let path = match self.peek().clone() {
+            TokenKind::StringLit(s) => {
+                self.advance();
+                s
+            }
+            _ => return Err(self.error("expected string literal for ASN.1 file path".into())),
+        };
+
+        // Optional: use <module_path>
+        let rust_module = if let Some(name) = self.token_as_name() {
+            if name == "use" {
+                self.advance(); // skip "use"
+                let (first, _) = self.expect_name()?;
+                let mut mod_path = first;
+                while self.eat(&TokenKind::ColonColon) {
+                    let (part, _) = self.expect_name()?;
+                    mod_path = format!("{mod_path}::{part}");
+                }
+                Some(mod_path)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Expect { TypeA, TypeB, ... }
+        self.expect(&TokenKind::LBrace)?;
+        let mut type_names = Vec::new();
+        while !self.at(&TokenKind::RBrace) {
+            let (name, _) = self.expect_name()?;
+            type_names.push(name);
+            if !self.eat(&TokenKind::Comma) {
+                break;
+            }
+        }
+        self.expect(&TokenKind::RBrace)?;
+
+        Ok(AstTopItem::ExternAsn1(AstExternAsn1 {
+            path,
+            rust_module,
+            type_names,
+            span: Some(start),
+        }))
     }
 }
 

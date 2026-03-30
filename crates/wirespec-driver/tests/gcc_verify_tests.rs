@@ -226,6 +226,33 @@ fn test_cases() -> Vec<TestCase> {
                 }
             "#,
         },
+        TestCase {
+            name: "sm_delegate_hierarchical",
+            prefix: "test21",
+            source: r#"
+                state machine ChildSM {
+                    state Ready { value: u8 }
+                    state Done [terminal]
+                    initial Ready
+                    transition Ready -> Done { on finish }
+                    transition * -> Done { on force_close }
+                }
+                state machine ParentSM {
+                    state Running { child: ChildSM, counter: u8 = 0 }
+                    state Complete [terminal]
+                    initial Running
+                    transition Running -> Running {
+                        on forward_to_child(child_ev_tag: u8)
+                        delegate src.child <- child_ev_tag
+                    }
+                    transition Running -> Complete {
+                        on child_state_changed
+                        guard src.child in_state(Done)
+                    }
+                    transition * -> Complete { on shutdown }
+                }
+            "#,
+        },
     ]
 }
 

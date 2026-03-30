@@ -1,0 +1,17 @@
+// 3GPP LPP (LTE Positioning Protocol) transport framing.
+// TLV capsule structure with UPER-encoded LPP message payload.
+//
+// LPP messages carry positioning measurements between UE and location server.
+
+extern asn1 "lpp.asn1" { LppMessage }
+
+capsule LppTransportPdu {
+    transaction_id: u8,
+    msg_type: u8,
+    length: u16,
+    payload: match msg_type within length {
+        1 => RequestLocation { body: asn1(LppMessage, encoding: uper, remaining) },
+        2 => ProvideLocation { body: asn1(LppMessage, encoding: uper, remaining) },
+        _ => Unknown { data: bytes[remaining] },
+    },
+}

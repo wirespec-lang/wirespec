@@ -162,11 +162,15 @@ fn cmd_compile(args: &[String]) {
     };
     let backend = factory.create();
 
+    // Pre-process ASN.1 declarations (when asn1 feature is enabled)
+    let asn1_modules = preprocess_asn1(&input, &include_paths, &output);
+
     // Compile via the driver
     let result = wirespec_driver::compile(&wirespec_driver::CompileRequest {
         entry: input.clone(),
         include_paths,
         profile: wirespec_sema::ComplianceProfile::default(),
+        asn1_modules,
     });
 
     match result {
@@ -270,6 +274,117 @@ fn emit_module(
     }
 }
 
+fn preprocess_asn1(
+    input: &std::path::Path,
+    include_paths: &[PathBuf],
+    output_dir: &std::path::Path,
+) -> wirespec_driver::Asn1ModuleMap {
+    #[cfg(not(feature = "asn1"))]
+    {
+        let _ = (input, include_paths, output_dir);
+        wirespec_driver::Asn1ModuleMap::default()
+    }
+
+    #[cfg(feature = "asn1")]
+    {
+        use wirespec_driver::asn1_compile;
+        use wirespec_driver::pipeline::{Asn1ModuleInfo, Asn1ModuleMap};
+
+        // Read and parse the .wspec source to find extern asn1 declarations
+        let source = match std::fs::read_to_string(input) {
+            Ok(s) => s,
+            Err(_) => return Asn1ModuleMap::default(), // will fail later in compile()
+        };
+        let ast = match wirespec_syntax::parse(&source) {
+            Ok(a) => a,
+            Err(_) => return Asn1ModuleMap::default(), // will fail later in compile()
+        };
+
+        let wspec_dir = input.parent().unwrap_or(std::path::Path::new("."));
+        let mut map = Asn1ModuleMap::default();
+
+        for item in &ast.items {
+            if let wirespec_syntax::ast::AstTopItem::ExternAsn1(ext) = item {
+                // Skip if user already provided use clause
+                if ext.rust_module.is_some() {
+                    continue;
+                }
+
+                // Resolve .asn1 path
+                let asn1_path = resolve_asn1_path(&ext.path, wspec_dir, include_paths);
+                let asn1_path = match asn1_path {
+                    Some(p) => p,
+                    None => {
+                        eprintln!("error: ASN.1 file '{}' not found", ext.path);
+                        process::exit(1);
+                    }
+                };
+
+                // Compile with rasn-compiler
+                let result = match asn1_compile::compile_asn1(&asn1_path) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        eprintln!("error: {}", e);
+                        process::exit(1);
+                    }
+                };
+
+                // Validate declared types
+                if let Err(e) =
+                    asn1_compile::validate_types(&ext.type_names, &result.type_names, &ext.path)
+                {
+                    eprintln!("error: {}", e);
+                    process::exit(1);
+                }
+
+                // Write generated ASN.1 Rust file to output directory
+                if let Err(e) = std::fs::create_dir_all(output_dir) {
+                    eprintln!("error: cannot create output directory: {e}");
+                    process::exit(1);
+                }
+                let out_file = output_dir.join(format!("{}.rs", result.module_name));
+                if let Err(e) = std::fs::write(&out_file, &result.source) {
+                    eprintln!("error: cannot write {}: {e}", out_file.display());
+                    process::exit(1);
+                }
+                eprintln!("  wrote {}", out_file.display());
+
+                // Store in map for pipeline injection
+                map.modules.insert(
+                    ext.path.clone(),
+                    Asn1ModuleInfo {
+                        module_name: result.module_name.clone(),
+                        source: result.source,
+                    },
+                );
+            }
+        }
+
+        map
+    }
+}
+
+#[cfg(feature = "asn1")]
+fn resolve_asn1_path(
+    asn1_path: &str,
+    wspec_dir: &std::path::Path,
+    include_paths: &[PathBuf],
+) -> Option<PathBuf> {
+    // Try relative to .wspec file first
+    let candidate = wspec_dir.join(asn1_path);
+    if candidate.exists() {
+        return Some(candidate);
+    }
+    // Try include paths
+    for inc in include_paths {
+        let candidate = inc.join(asn1_path);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
 fn cmd_check(args: &[String]) {
     let mut input = None;
     let mut i = 0;
@@ -306,6 +421,7 @@ fn cmd_check(args: &[String]) {
     match wirespec_driver::compile_module(
         &source,
         wirespec_sema::ComplianceProfile::default(),
+        &Default::default(),
         &Default::default(),
     ) {
         Ok(_) => {

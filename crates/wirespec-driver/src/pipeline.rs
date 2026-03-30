@@ -9,6 +9,20 @@ use std::collections::HashMap;
 use wirespec_codec::CodecModule;
 use wirespec_sema::ComplianceProfile;
 
+/// Pre-compiled ASN.1 module info for injecting rust_module paths.
+#[derive(Debug, Clone, Default)]
+pub struct Asn1ModuleMap {
+    /// Map from ASN.1 file path (as written in extern asn1 "path") to module info.
+    pub modules: HashMap<String, Asn1ModuleInfo>,
+}
+
+/// Info about a pre-compiled ASN.1 module.
+#[derive(Debug, Clone)]
+pub struct Asn1ModuleInfo {
+    pub module_name: String,
+    pub source: String,
+}
+
 /// Error during pipeline processing.
 #[derive(Debug)]
 pub struct PipelineError {
@@ -74,11 +88,22 @@ pub fn compile_module(
     source: &str,
     profile: ComplianceProfile,
     external_types: &ExternalTypes,
+    asn1_modules: &Asn1ModuleMap,
 ) -> Result<CodecModule, PipelineError> {
     // Parse
-    let ast = wirespec_syntax::parse(source).map_err(|e| PipelineError {
+    let mut ast = wirespec_syntax::parse(source).map_err(|e| PipelineError {
         msg: format!("parse error: {e}"),
     })?;
+
+    // Inject ASN.1 module paths from pre-compiled map
+    for item in &mut ast.items {
+        if let wirespec_syntax::ast::AstTopItem::ExternAsn1(ext) = item
+            && ext.rust_module.is_none()
+            && let Some(info) = asn1_modules.modules.get(&ext.path)
+        {
+            ext.rust_module = Some(format!("crate::{}", info.module_name));
+        }
+    }
 
     // Convert ExternalTypes to sema's expected format
     let ext_map: HashMap<String, wirespec_sema::resolve::DeclKind> = external_types

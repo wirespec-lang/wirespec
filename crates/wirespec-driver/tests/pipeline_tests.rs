@@ -7,6 +7,7 @@ fn pipeline_simple_packet() {
         "packet P { x: u8, y: u16 }",
         ComplianceProfile::default(),
         &Default::default(),
+        &Default::default(),
     )
     .unwrap();
     assert_eq!(codec.packets.len(), 1);
@@ -25,7 +26,13 @@ fn pipeline_with_varint_and_packet() {
         }
         packet P { x: VarInt }
     "#;
-    let codec = compile_module(src, ComplianceProfile::default(), &Default::default()).unwrap();
+    let codec = compile_module(
+        src,
+        ComplianceProfile::default(),
+        &Default::default(),
+        &Default::default(),
+    )
+    .unwrap();
     assert_eq!(codec.varints.len(), 1);
     assert_eq!(codec.packets.len(), 1);
 }
@@ -38,7 +45,13 @@ fn pipeline_frame() {
             _ => B { data: bytes[remaining] },
         }
     "#;
-    let codec = compile_module(src, ComplianceProfile::default(), &Default::default()).unwrap();
+    let codec = compile_module(
+        src,
+        ComplianceProfile::default(),
+        &Default::default(),
+        &Default::default(),
+    )
+    .unwrap();
     assert_eq!(codec.frames.len(), 1);
 }
 
@@ -54,7 +67,13 @@ fn pipeline_capsule() {
             },
         }
     "#;
-    let codec = compile_module(src, ComplianceProfile::default(), &Default::default()).unwrap();
+    let codec = compile_module(
+        src,
+        ComplianceProfile::default(),
+        &Default::default(),
+        &Default::default(),
+    )
+    .unwrap();
     assert_eq!(codec.capsules.len(), 1);
 }
 
@@ -68,7 +87,13 @@ fn pipeline_state_machine() {
             transition A -> B { on done }
         }
     "#;
-    let codec = compile_module(src, ComplianceProfile::default(), &Default::default()).unwrap();
+    let codec = compile_module(
+        src,
+        ComplianceProfile::default(),
+        &Default::default(),
+        &Default::default(),
+    )
+    .unwrap();
     assert_eq!(codec.state_machines.len(), 1);
 }
 
@@ -77,6 +102,7 @@ fn pipeline_parse_error() {
     let result = compile_module(
         "packet { bad }",
         ComplianceProfile::default(),
+        &Default::default(),
         &Default::default(),
     );
     assert!(result.is_err());
@@ -87,6 +113,7 @@ fn pipeline_sema_error() {
     let result = compile_module(
         "packet P { x: NonExistent }",
         ComplianceProfile::default(),
+        &Default::default(),
         &Default::default(),
     );
     assert!(result.is_err());
@@ -106,7 +133,12 @@ fn pipeline_with_external_types() {
         },
     );
     // VarInt is registered as an external type, so sema should resolve it.
-    let codec =
-        compile_module("packet P { x: VarInt }", ComplianceProfile::default(), &ext).unwrap();
+    let codec = compile_module(
+        "packet P { x: VarInt }",
+        ComplianceProfile::default(),
+        &ext,
+        &Default::default(),
+    )
+    .unwrap();
     assert_eq!(codec.packets.len(), 1);
 }

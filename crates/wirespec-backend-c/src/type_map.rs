@@ -59,7 +59,7 @@ pub fn cursor_read_fn(wt: &WireType, endianness: Option<Endianness>) -> &'static
         (WireType::I32, _) => "wirespec_cursor_read_u32be",
         (WireType::I64, Some(Endianness::Little)) => "wirespec_cursor_read_u64le",
         (WireType::I64, _) => "wirespec_cursor_read_u64be",
-        _ => "/* unsupported read */",
+        _ => unreachable!("unexpected wire type for cursor_read_fn: {:?}", wt),
     }
 }
 
@@ -82,7 +82,7 @@ pub fn write_fn(wt: &WireType, endianness: Option<Endianness>) -> &'static str {
         (WireType::I32, _) => "wirespec_write_u32be",
         (WireType::I64, Some(Endianness::Little)) => "wirespec_write_u64le",
         (WireType::I64, _) => "wirespec_write_u64be",
-        _ => "/* unsupported write */",
+        _ => unreachable!("unexpected wire type for write_fn: {:?}", wt),
     }
 }
 
@@ -94,7 +94,7 @@ pub fn bitgroup_read_fn(total_bits: u16, endianness: Endianness) -> &'static str
         (9..=16, Endianness::Big) => "wirespec_cursor_read_u16be",
         (17..=32, Endianness::Little) => "wirespec_cursor_read_u32le",
         (17..=32, Endianness::Big) => "wirespec_cursor_read_u32be",
-        _ => "/* unsupported bitgroup read */",
+        _ => unreachable!("unexpected bitgroup size for read: {}", total_bits),
     }
 }
 
@@ -106,7 +106,7 @@ pub fn bitgroup_write_fn(total_bits: u16, endianness: Endianness) -> &'static st
         (9..=16, Endianness::Big) => "wirespec_write_u16be",
         (17..=32, Endianness::Little) => "wirespec_write_u32le",
         (17..=32, Endianness::Big) => "wirespec_write_u32be",
-        _ => "/* unsupported bitgroup write */",
+        _ => unreachable!("unexpected bitgroup size for write: {}", total_bits),
     }
 }
 

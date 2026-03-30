@@ -20,6 +20,7 @@ fn driver_single_module() {
         entry,
         include_paths: vec![],
         profile: ComplianceProfile::default(),
+        asn1_modules: Default::default(),
     })
     .unwrap();
     assert_eq!(result.modules.len(), 1);
@@ -36,6 +37,7 @@ fn driver_circular_import_error() {
         entry,
         include_paths: vec![dir.path().to_path_buf()],
         profile: ComplianceProfile::default(),
+        asn1_modules: Default::default(),
     });
     assert!(result.is_err());
 }
@@ -49,6 +51,7 @@ fn driver_module_not_found_error() {
         entry,
         include_paths: vec![dir.path().to_path_buf()],
         profile: ComplianceProfile::default(),
+        asn1_modules: Default::default(),
     });
     assert!(result.is_err());
 }
@@ -69,6 +72,7 @@ fn driver_transitive_deps_compiled_once() {
         entry,
         include_paths: vec![dir.path().to_path_buf()],
         profile: ComplianceProfile::default(),
+        asn1_modules: Default::default(),
     })
     .unwrap();
     // Cross-module type resolution is now wired: external types from
@@ -98,6 +102,7 @@ fn driver_multi_module_self_contained() {
         entry,
         include_paths: vec![dir.path().to_path_buf()],
         profile: ComplianceProfile::default(),
+        asn1_modules: Default::default(),
     })
     .unwrap();
     assert_eq!(result.modules.len(), 2);
@@ -150,6 +155,7 @@ frame QuicFrame = match frame_type: VarInt {
         entry,
         include_paths: vec![dir.path().to_path_buf()],
         profile: ComplianceProfile::default(),
+        asn1_modules: Default::default(),
     })
     .unwrap();
     // Should compile two modules: varint first, then frames

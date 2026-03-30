@@ -36,14 +36,23 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      - name: Clippy (asn1 feature)
+        run: cargo clippy --workspace --all-targets --features asn1 -- -D warnings
+
       - name: Build
         run: cargo build --workspace
 
       - name: Test
         run: cargo test --workspace
 
+      - name: Test (asn1 feature)
+        run: cargo test --workspace --features asn1
+
       - name: Build release
         run: cargo build --release
+
+      - name: Rustc example verification
+        run: cargo test -p wirespec-driver --test rustc_verify_tests -- --nocapture
 
       - name: GCC example verification
         run: |

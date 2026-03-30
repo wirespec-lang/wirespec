@@ -38,6 +38,10 @@ struct Analyzer {
     errors: Vec<SemaError>,
     /// External type names and kinds from previously-compiled modules.
     external_types: std::collections::HashMap<String, DeclKind>,
+    /// ASN.1 extern declarations collected during Pass 1.
+    asn1_externs: Vec<Asn1ExternDecl>,
+    /// Pending ASN.1 hint from the most recent `resolve_type_expr` call.
+    pending_asn1_hint: Option<Asn1Hint>,
 }
 
 impl Analyzer {
@@ -48,6 +52,8 @@ impl Analyzer {
             profile,
             errors: Vec::new(),
             external_types: std::collections::HashMap::new(),
+            asn1_externs: Vec::new(),
+            pending_asn1_hint: None,
         }
     }
 
@@ -168,6 +174,9 @@ impl Analyzer {
                     });
                     item_order.push(id);
                 }
+                AstTopItem::ExternAsn1(_) => {
+                    // Already registered in Pass 1
+                }
             }
         }
 
@@ -187,6 +196,7 @@ impl Analyzer {
             capsules,
             state_machines,
             static_asserts,
+            asn1_externs: self.asn1_externs.clone(),
             item_order,
         })
     }
@@ -307,6 +317,14 @@ impl Analyzer {
                 AstTopItem::StaticAssert(_) => {
                     // Nothing to register
                 }
+                AstTopItem::ExternAsn1(e) => {
+                    self.asn1_externs.push(Asn1ExternDecl {
+                        path: e.path.clone(),
+                        rust_module: e.rust_module.clone(),
+                        type_names: e.type_names.clone(),
+                        span: e.span,
+                    });
+                }
             }
         }
         Ok(())
@@ -334,6 +352,46 @@ impl Analyzer {
     fn lower_enum_decl(&mut self, e: &AstEnumDecl, is_flags: bool) -> SemaResult<SemanticEnum> {
         let underlying_type = self.resolve_named_type(&e.underlying_type, e.span)?;
         let enum_id = format!("enum:{}", e.name);
+        // Check for duplicate member names
+        let mut seen_names = std::collections::HashSet::new();
+        for m in &e.members {
+            if !seen_names.insert(&m.name) {
+                return Err(SemaError::new(
+                    ErrorKind::DuplicateDefinition,
+                    format!("duplicate member '{}' in enum '{}'", m.name, e.name),
+                )
+                .with_span(m.span));
+            }
+        }
+        // Check member values fit underlying type
+        use crate::types::PrimitiveWireType;
+        let max_value = match &underlying_type {
+            SemanticType::Primitive { wire, .. } => match wire {
+                PrimitiveWireType::U8 => Some(u8::MAX as i128),
+                PrimitiveWireType::U16 => Some(u16::MAX as i128),
+                PrimitiveWireType::U32 => Some(u32::MAX as i128),
+                PrimitiveWireType::U64 => Some(u64::MAX as i128),
+                PrimitiveWireType::I8 => Some(i8::MAX as i128),
+                PrimitiveWireType::I16 => Some(i16::MAX as i128),
+                PrimitiveWireType::I32 => Some(i32::MAX as i128),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(max) = max_value {
+            for m in &e.members {
+                if (m.value as i128) < 0 || (m.value as i128) > max {
+                    return Err(SemaError::new(
+                        ErrorKind::TypeMismatch,
+                        format!(
+                            "member '{}' value {} does not fit underlying type in '{}'",
+                            m.name, m.value, e.name
+                        ),
+                    )
+                    .with_span(m.span));
+                }
+            }
+        }
         let members = e
             .members
             .iter()
@@ -358,6 +416,46 @@ impl Analyzer {
     fn lower_flags_decl(&mut self, f: &AstFlagsDecl) -> SemaResult<SemanticEnum> {
         let underlying_type = self.resolve_named_type(&f.underlying_type, f.span)?;
         let enum_id = format!("enum:{}", f.name);
+        // Check for duplicate member names
+        let mut seen_names = std::collections::HashSet::new();
+        for m in &f.members {
+            if !seen_names.insert(&m.name) {
+                return Err(SemaError::new(
+                    ErrorKind::DuplicateDefinition,
+                    format!("duplicate member '{}' in flags '{}'", m.name, f.name),
+                )
+                .with_span(m.span));
+            }
+        }
+        // Check member values fit underlying type
+        use crate::types::PrimitiveWireType;
+        let max_value = match &underlying_type {
+            SemanticType::Primitive { wire, .. } => match wire {
+                PrimitiveWireType::U8 => Some(u8::MAX as i128),
+                PrimitiveWireType::U16 => Some(u16::MAX as i128),
+                PrimitiveWireType::U32 => Some(u32::MAX as i128),
+                PrimitiveWireType::U64 => Some(u64::MAX as i128),
+                PrimitiveWireType::I8 => Some(i8::MAX as i128),
+                PrimitiveWireType::I16 => Some(i16::MAX as i128),
+                PrimitiveWireType::I32 => Some(i32::MAX as i128),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(max) = max_value {
+            for m in &f.members {
+                if (m.value as i128) < 0 || (m.value as i128) > max {
+                    return Err(SemaError::new(
+                        ErrorKind::TypeMismatch,
+                        format!(
+                            "member '{}' value {} does not fit underlying type in '{}'",
+                            m.name, m.value, f.name
+                        ),
+                    )
+                    .with_span(m.span));
+                }
+            }
+        }
         let members = f
             .members
             .iter()
@@ -929,8 +1027,14 @@ impl Analyzer {
     ) -> SemaResult<SemanticField> {
         let field_id = format!("{}.field[{}]", scope_id, index);
 
+        // Clear any pending hint before resolving
+        self.pending_asn1_hint = None;
+
         // Resolve type expression
         let (ty, presence) = self.resolve_type_expr(&field.type_expr)?;
+
+        // Take the pending ASN.1 hint (set by resolve_type_expr for asn1() types)
+        let asn1_hint = self.pending_asn1_hint.take();
 
         // bool is a semantic type, not a wire type — reject in wire field context
         if let SemanticType::Primitive {
@@ -1003,6 +1107,7 @@ impl Analyzer {
             presence,
             max_elements,
             checksum_algorithm,
+            asn1_hint,
             span: field.span,
         })
     }
@@ -1264,6 +1369,69 @@ impl Analyzer {
                         "empty match type expression",
                     ))
                 }
+            }
+            AstTypeExpr::Asn1 {
+                type_name,
+                encoding,
+                length,
+                ..
+            } => {
+                // Validate type name exists in extern declarations
+                let extern_decl = self
+                    .asn1_externs
+                    .iter()
+                    .find(|e| e.type_names.contains(type_name))
+                    .ok_or_else(|| {
+                        SemaError::new(
+                            ErrorKind::UndefinedAsn1Type,
+                            format!(
+                                "ASN.1 type '{}' not declared in any 'extern asn1' block",
+                                type_name
+                            ),
+                        )
+                    })?;
+                let extern_path = extern_decl.path.clone();
+                let rust_module = extern_decl.rust_module.clone();
+
+                // Validate encoding
+                const SUPPORTED_ENCODINGS: &[&str] = &["uper", "ber", "der", "aper", "oer", "coer"];
+                if !SUPPORTED_ENCODINGS.contains(&encoding.as_str()) {
+                    return Err(SemaError::new(
+                        ErrorKind::UnsupportedAsn1Encoding,
+                        format!(
+                            "unsupported ASN.1 encoding '{}'; supported: {}",
+                            encoding,
+                            SUPPORTED_ENCODINGS.join(", ")
+                        ),
+                    ));
+                }
+
+                // Lower to bytes type
+                use wirespec_syntax::ast::Asn1Length;
+                let (bytes_kind, size_expr) = match length {
+                    Asn1Length::Remaining => (SemanticBytesKind::Remaining, None),
+                    Asn1Length::Expr(expr) => {
+                        let sem_expr = self.lower_expr(expr, &[], &[]);
+                        (SemanticBytesKind::Length, Some(Box::new(sem_expr)))
+                    }
+                };
+
+                // Store hint for pending attachment
+                self.pending_asn1_hint = Some(Asn1Hint {
+                    type_name: type_name.clone(),
+                    encoding: encoding.clone(),
+                    extern_path,
+                    rust_module,
+                });
+
+                Ok((
+                    SemanticType::Bytes {
+                        bytes_kind,
+                        fixed_size: None,
+                        size_expr,
+                    },
+                    FieldPresence::Always,
+                ))
             }
         }
     }
@@ -1594,7 +1762,17 @@ impl Analyzer {
                 }
             }
         }
-        let events: Vec<SemanticEvent> = event_map.values().cloned().collect();
+        let mut seen_events: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut events: Vec<SemanticEvent> = Vec::new();
+        for t in &sm.transitions {
+            for ev in &t.events {
+                if seen_events.insert(ev.name.clone())
+                    && let Some(event) = event_map.get(&ev.name)
+                {
+                    events.push(event.clone());
+                }
+            }
+        }
 
         // Lower transitions
         let mut transitions = Vec::new();
@@ -1720,8 +1898,10 @@ impl Analyzer {
                     .get(&d.event_name)
                     .map(|e| e.event_id.clone())
                     .unwrap_or_default();
+                let mut target = self.lower_expr(&d.target, &[], &[]);
+                resolve_event_params(&mut target, &event_param_names);
                 SemanticDelegate {
-                    target: self.lower_expr(&d.target, &[], &[]),
+                    target,
                     event_id,
                     event_name: d.event_name.clone(),
                     span: d.span,
@@ -2130,6 +2310,7 @@ fn type_expr_name(texpr: &AstTypeExpr) -> String {
         }
         AstTypeExpr::Optional { inner_type, .. } => type_expr_name(inner_type),
         AstTypeExpr::Match { .. } => "match".to_string(),
+        AstTypeExpr::Asn1 { type_name, .. } => format!("asn1({})", type_name),
     }
 }
 
@@ -2182,6 +2363,11 @@ fn collect_type_expr_refs(texpr: &AstTypeExpr, out: &mut Vec<String>) {
         AstTypeExpr::Match { branches, .. } => {
             for b in branches {
                 collect_type_expr_refs(&b.result_type, out);
+            }
+        }
+        AstTypeExpr::Asn1 { length, .. } => {
+            if let Asn1Length::Expr(expr) = length {
+                collect_expr_refs(expr, out);
             }
         }
     }

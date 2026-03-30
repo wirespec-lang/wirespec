@@ -5,7 +5,7 @@
 use wirespec_codec::ir::*;
 use wirespec_sema::types::Endianness;
 
-use crate::names::to_pascal_case;
+use crate::names::{to_pascal_case, to_snake_case};
 
 /// Map Codec WireType to Rust type string for struct field declaration.
 /// `needs_lifetime` is set to true if the type requires `<'a>`.
@@ -52,6 +52,11 @@ pub fn wire_type_to_rust_named(wt: &WireType) -> Option<String> {
     }
 }
 
+/// Get a Rust value type for a primitive or named wire type.
+pub fn wire_value_type_to_rust(wt: &WireType) -> String {
+    wire_type_to_rust_named(wt).unwrap_or_else(|| wire_type_to_rust(wt).to_string())
+}
+
 /// Whether a wire type needs a lifetime parameter.
 pub fn wire_type_needs_lifetime(wt: &WireType) -> bool {
     matches!(wt, WireType::Bytes)
@@ -70,24 +75,50 @@ pub fn wire_type_is_named(wt: &WireType) -> bool {
 /// Returns the method name on the Cursor type (e.g., "read_u16be").
 pub fn cursor_read_method(wt: &WireType, endianness: Option<Endianness>) -> &'static str {
     match (wt, endianness) {
-        (WireType::U8, _) | (WireType::Bool, _) | (WireType::Bit, _) | (WireType::I8, _) => {
-            "read_u8"
-        }
-        (WireType::U16, Some(Endianness::Little)) | (WireType::I16, Some(Endianness::Little)) => {
-            "read_u16le"
-        }
-        (WireType::U16, _) | (WireType::I16, _) => "read_u16be",
+        (WireType::U8, _) | (WireType::Bool, _) | (WireType::Bit, _) => "read_u8",
+        (WireType::I8, _) => "read_i8",
+        (WireType::U16, Some(Endianness::Little)) => "read_u16le",
+        (WireType::I16, Some(Endianness::Little)) => "read_i16le",
+        (WireType::U16, _) => "read_u16be",
+        (WireType::I16, _) => "read_i16be",
         (WireType::U24, Some(Endianness::Little)) => "read_u24le",
         (WireType::U24, _) => "read_u24be",
-        (WireType::U32, Some(Endianness::Little)) | (WireType::I32, Some(Endianness::Little)) => {
-            "read_u32le"
+        (WireType::U32, Some(Endianness::Little)) => "read_u32le",
+        (WireType::I32, Some(Endianness::Little)) => "read_i32le",
+        (WireType::U32, _) => "read_u32be",
+        (WireType::I32, _) => "read_i32be",
+        (WireType::U64, Some(Endianness::Little)) => "read_u64le",
+        (WireType::I64, Some(Endianness::Little)) => "read_i64le",
+        (WireType::U64, _) => "read_u64be",
+        (WireType::I64, _) => "read_i64be",
+        _ => unreachable!("unexpected wire type for cursor_read_method: {:?}", wt),
+    }
+}
+
+/// Generate a Rust expression that reads a non-array value from a cursor.
+pub fn rust_read_expr(
+    cursor: &str,
+    wt: &WireType,
+    ref_type_name: Option<&str>,
+    endianness: Option<Endianness>,
+) -> String {
+    match wt {
+        WireType::Struct(name) | WireType::Frame(name) | WireType::Capsule(name) => {
+            let type_name = to_pascal_case(name);
+            format!("{type_name}::parse({cursor})?")
         }
-        (WireType::U32, _) | (WireType::I32, _) => "read_u32be",
-        (WireType::U64, Some(Endianness::Little)) | (WireType::I64, Some(Endianness::Little)) => {
-            "read_u64le"
+        WireType::VarInt | WireType::ContVarInt => {
+            if let Some(ref_name) = ref_type_name {
+                let parse_fn = format!("{}_parse", to_snake_case(ref_name));
+                format!("{parse_fn}({cursor})?")
+            } else {
+                format!("{cursor}.read_u64be()?")
+            }
         }
-        (WireType::U64, _) | (WireType::I64, _) => "read_u64be",
-        _ => "/* unsupported read */",
+        _ => {
+            let read_method = cursor_read_method(wt, endianness);
+            format!("{cursor}.{read_method}()?")
+        }
     }
 }
 
@@ -95,24 +126,50 @@ pub fn cursor_read_method(wt: &WireType, endianness: Option<Endianness>) -> &'st
 /// Returns the method name on the Writer type (e.g., "write_u16be").
 pub fn writer_write_method(wt: &WireType, endianness: Option<Endianness>) -> &'static str {
     match (wt, endianness) {
-        (WireType::U8, _) | (WireType::Bool, _) | (WireType::Bit, _) | (WireType::I8, _) => {
-            "write_u8"
-        }
-        (WireType::U16, Some(Endianness::Little)) | (WireType::I16, Some(Endianness::Little)) => {
-            "write_u16le"
-        }
-        (WireType::U16, _) | (WireType::I16, _) => "write_u16be",
+        (WireType::U8, _) | (WireType::Bool, _) | (WireType::Bit, _) => "write_u8",
+        (WireType::I8, _) => "write_i8",
+        (WireType::U16, Some(Endianness::Little)) => "write_u16le",
+        (WireType::I16, Some(Endianness::Little)) => "write_i16le",
+        (WireType::U16, _) => "write_u16be",
+        (WireType::I16, _) => "write_i16be",
         (WireType::U24, Some(Endianness::Little)) => "write_u24le",
         (WireType::U24, _) => "write_u24be",
-        (WireType::U32, Some(Endianness::Little)) | (WireType::I32, Some(Endianness::Little)) => {
-            "write_u32le"
+        (WireType::U32, Some(Endianness::Little)) => "write_u32le",
+        (WireType::I32, Some(Endianness::Little)) => "write_i32le",
+        (WireType::U32, _) => "write_u32be",
+        (WireType::I32, _) => "write_i32be",
+        (WireType::U64, Some(Endianness::Little)) => "write_u64le",
+        (WireType::I64, Some(Endianness::Little)) => "write_i64le",
+        (WireType::U64, _) => "write_u64be",
+        (WireType::I64, _) => "write_i64be",
+        _ => unreachable!("unexpected wire type for writer_write_method: {:?}", wt),
+    }
+}
+
+/// Generate a Rust expression that writes a non-array value with a writer.
+pub fn rust_write_expr(
+    writer: &str,
+    wt: &WireType,
+    ref_type_name: Option<&str>,
+    endianness: Option<Endianness>,
+    value_expr: &str,
+) -> String {
+    match wt {
+        WireType::Struct(_) | WireType::Frame(_) | WireType::Capsule(_) => {
+            format!("{value_expr}.serialize({writer})?")
         }
-        (WireType::U32, _) | (WireType::I32, _) => "write_u32be",
-        (WireType::U64, Some(Endianness::Little)) | (WireType::I64, Some(Endianness::Little)) => {
-            "write_u64le"
+        WireType::VarInt | WireType::ContVarInt => {
+            if let Some(ref_name) = ref_type_name {
+                let serialize_fn = format!("{}_serialize", to_snake_case(ref_name));
+                format!("{serialize_fn}({value_expr}, {writer})?")
+            } else {
+                format!("{writer}.write_u64be({value_expr})?")
+            }
         }
-        (WireType::U64, _) | (WireType::I64, _) => "write_u64be",
-        _ => "/* unsupported write */",
+        _ => {
+            let write_method = writer_write_method(wt, endianness);
+            format!("{writer}.{write_method}({value_expr})?")
+        }
     }
 }
 
@@ -124,7 +181,7 @@ pub fn bitgroup_read_method(total_bits: u16, endianness: Endianness) -> &'static
         (9..=16, Endianness::Big) => "read_u16be",
         (17..=32, Endianness::Little) => "read_u32le",
         (17..=32, Endianness::Big) => "read_u32be",
-        _ => "/* unsupported bitgroup read */",
+        _ => unreachable!("unexpected bitgroup size for read: {}", total_bits),
     }
 }
 
@@ -136,7 +193,7 @@ pub fn bitgroup_write_method(total_bits: u16, endianness: Endianness) -> &'stati
         (9..=16, Endianness::Big) => "write_u16be",
         (17..=32, Endianness::Little) => "write_u32le",
         (17..=32, Endianness::Big) => "write_u32be",
-        _ => "/* unsupported bitgroup write */",
+        _ => unreachable!("unexpected bitgroup size for write: {}", total_bits),
     }
 }
 

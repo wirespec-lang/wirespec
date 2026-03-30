@@ -12,6 +12,7 @@ fn compile_example(rel_path: &str) -> wirespec_driver::CompileResult {
         entry: entry.clone(),
         include_paths: vec![examples_dir()],
         profile: ComplianceProfile::Phase2ExtendedCurrent,
+        asn1_modules: Default::default(),
     })
     .unwrap_or_else(|e| panic!("Failed to compile {rel_path}: {e}"))
 }
