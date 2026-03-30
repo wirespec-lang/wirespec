@@ -524,3 +524,141 @@ fn codegen_capsule_serialized_len_includes_payload() {
         rs
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Bug fixes: SM child type mapping, delegate dispatch, in_state matching
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn codegen_sm_child_sm_field_type() {
+    let src = r#"
+        state machine ChildSm {
+            state Active {}
+            state Done [terminal]
+            initial Active
+            transition Active -> Done { on finish }
+        }
+        state machine ParentSm {
+            state Running { child: ChildSm }
+            state Stopped [terminal]
+            initial Running
+            transition Running -> Stopped { on stop }
+        }
+    "#;
+    let rs = generate_rust(src);
+    // child field should be ChildSm type, NOT u64
+    assert!(
+        rs.contains("child: ChildSm"),
+        "SM field should use child SM type, not u64. Got:\n{}",
+        rs
+    );
+    assert!(
+        !rs.contains("child: u64"),
+        "SM field should NOT be u64. Got:\n{}",
+        rs
+    );
+}
+
+#[test]
+fn codegen_sm_array_of_child_sm_field_type() {
+    let src = r#"
+        state machine PathState {
+            state Active { path_id: u8 }
+            state Closed [terminal]
+            initial Active
+            transition Active -> Closed { on close_path }
+        }
+        state machine Conn {
+            state Connected { paths: [PathState; 4], count: u8 = 1 }
+            state Done [terminal]
+            initial Connected
+            transition Connected -> Done { on stop }
+        }
+    "#;
+    let rs = generate_rust(src);
+    // paths field should be Vec<PathState>, not Vec<u64> or u64
+    assert!(
+        rs.contains("Vec<PathState>"),
+        "Array-of-SM field should use Vec<ChildSm>. Got:\n{}",
+        rs
+    );
+    assert!(
+        !rs.contains("paths: u64"),
+        "Array-of-SM field should NOT be u64. Got:\n{}",
+        rs
+    );
+}
+
+#[test]
+fn codegen_sm_delegate_generates_dispatch_call() {
+    let src = r#"
+        state machine Child {
+            state A
+            state B [terminal]
+            initial A
+            transition A -> B { on finish }
+        }
+        state machine Parent {
+            state Active { child: Child }
+            state Done [terminal]
+            initial Active
+            transition Active -> Active {
+                on child_ev(ev: u8)
+                delegate src.child <- ev
+            }
+            transition Active -> Done { on finish }
+        }
+    "#;
+    let rs = generate_rust(src);
+    // Should contain actual dispatch call, not TODO comments
+    assert!(
+        !rs.contains("// TODO: map"),
+        "Delegate should not contain TODO map comment. Got:\n{}",
+        rs
+    );
+    assert!(
+        !rs.contains("// TODO: dispatch to"),
+        "Delegate should not contain TODO dispatch comment. Got:\n{}",
+        rs
+    );
+    assert!(
+        rs.contains(".dispatch("),
+        "Delegate should generate dispatch call. Got:\n{}",
+        rs
+    );
+}
+
+#[test]
+fn codegen_sm_in_state_unit_variant_no_braces() {
+    let src = r#"
+        state machine ChildSm {
+            state Active {}
+            state Done [terminal]
+            initial Active
+            transition Active -> Done { on finish }
+        }
+        state machine ParentSm {
+            state Running { child: ChildSm }
+            state Complete [terminal]
+            initial Running
+            transition Running -> Complete {
+                on child_done
+                guard src.child in_state(Done)
+            }
+            transition * -> Complete { on shutdown }
+        }
+    "#;
+    let rs = generate_rust(src);
+    // Done is terminal (no fields), should NOT have { .. }
+    assert!(
+        !rs.contains("ChildSm::Done { .. }"),
+        "Terminal state should not have {{ .. }}. Got:\n{}",
+        rs
+    );
+    // Should have just ChildSm::Done without braces
+    assert!(
+        rs.contains("ChildSm::Done)"),
+        "Terminal state should be ChildSm::Done without braces. Got:\n{}",
+        rs
+    );
+}

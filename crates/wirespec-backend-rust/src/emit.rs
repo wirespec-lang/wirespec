@@ -295,7 +295,7 @@ pub fn emit_source(module: &CodecModule, _prefix: &str) -> String {
 
     // State Machines
     for sm in &module.state_machines {
-        emit_state_machine(&mut out, sm);
+        emit_state_machine(&mut out, sm, &module.state_machines);
     }
 
     out
@@ -310,9 +310,10 @@ fn emit_const(out: &mut String, c: &wirespec_sema::ir::SemanticConst) {
     out.push_str(&format!("pub const {name}: {ty} = {val};\n"));
 }
 
-fn semantic_type_to_rust(ty: &wirespec_sema::types::SemanticType) -> &'static str {
+fn semantic_type_to_rust(ty: &wirespec_sema::types::SemanticType) -> String {
+    use wirespec_sema::types::SemanticType;
     match ty {
-        wirespec_sema::types::SemanticType::Primitive { wire, .. } => match wire {
+        SemanticType::Primitive { wire, .. } => match wire {
             wirespec_sema::types::PrimitiveWireType::U8 => "u8",
             wirespec_sema::types::PrimitiveWireType::U16 => "u16",
             wirespec_sema::types::PrimitiveWireType::U24 => "u32",
@@ -324,19 +325,46 @@ fn semantic_type_to_rust(ty: &wirespec_sema::types::SemanticType) -> &'static st
             wirespec_sema::types::PrimitiveWireType::I64 => "i64",
             wirespec_sema::types::PrimitiveWireType::Bool => "bool",
             wirespec_sema::types::PrimitiveWireType::Bit => "u8",
-        },
-        wirespec_sema::types::SemanticType::Bits { width_bits } => {
-            if *width_bits <= 8 {
-                "u8"
-            } else if *width_bits <= 16 {
-                "u16"
-            } else if *width_bits <= 32 {
-                "u32"
+        }
+        .to_string(),
+        SemanticType::Bits { width_bits } => if *width_bits <= 8 {
+            "u8"
+        } else if *width_bits <= 16 {
+            "u16"
+        } else if *width_bits <= 32 {
+            "u32"
+        } else {
+            "u64"
+        }
+        .to_string(),
+        SemanticType::PacketRef { name, .. } => to_pascal_case(name),
+        SemanticType::FrameRef { name, .. } => to_pascal_case(name),
+        SemanticType::CapsuleRef { name, .. } => to_pascal_case(name),
+        SemanticType::EnumRef { name, .. } => to_pascal_case(name),
+        SemanticType::VarIntRef { .. } => "u64".to_string(),
+        SemanticType::Array { element_type, .. } => {
+            let elem = semantic_type_to_rust(element_type);
+            format!("Vec<{elem}>")
+        }
+        SemanticType::Bytes { .. } => "Vec<u8>".to_string(),
+    }
+}
+
+/// Map a SM state field to its Rust type, using `child_sm_name` for
+/// child-SM references and handling arrays of child SMs.
+fn sm_field_type_to_rust(field: &wirespec_sema::ir::SemanticStateField) -> String {
+    use wirespec_sema::types::SemanticType;
+    match &field.ty {
+        SemanticType::Array { element_type, .. } => {
+            if let Some(ref child_sm) = field.child_sm_name {
+                format!("Vec<{}>", to_pascal_case(child_sm))
             } else {
-                "u64"
+                let elem_ty = semantic_type_to_rust(element_type);
+                format!("Vec<{elem_ty}>")
             }
         }
-        _ => "u64",
+        _ if field.child_sm_name.is_some() => to_pascal_case(field.child_sm_name.as_ref().unwrap()),
+        _ => semantic_type_to_rust(&field.ty),
     }
 }
 
@@ -1152,7 +1180,11 @@ fn emit_varint_continuation_bit(out: &mut String, vi: &SemanticVarInt, snake: &s
 
 // ── State Machines ──
 
-fn emit_state_machine(out: &mut String, sm: &SemanticStateMachine) {
+fn emit_state_machine(
+    out: &mut String,
+    sm: &SemanticStateMachine,
+    all_sms: &[SemanticStateMachine],
+) {
     let sm_name = to_pascal_case(&sm.name);
 
     // ── State enum ──
@@ -1165,7 +1197,7 @@ fn emit_state_machine(out: &mut String, sm: &SemanticStateMachine) {
         } else {
             out.push_str(&format!("    {state_name} {{\n"));
             for field in &state.fields {
-                let ty = semantic_type_to_rust(&field.ty);
+                let ty = sm_field_type_to_rust(field);
                 out.push_str(&format!("        {}: {ty},\n", field.name));
             }
             out.push_str("    },\n");
@@ -1209,6 +1241,15 @@ fn emit_state_machine(out: &mut String, sm: &SemanticStateMachine) {
             for field in &initial_state.fields {
                 let default_val = if let Some(ref lit) = field.default_value {
                     semantic_literal_to_rust(lit)
+                } else if let Some(ref child_sm) = field.child_sm_name {
+                    // Child SM field: use the child's constructor
+                    let child_pascal = to_pascal_case(child_sm);
+                    match &field.ty {
+                        wirespec_sema::types::SemanticType::Array { .. } => {
+                            "Vec::new()".to_string()
+                        }
+                        _ => format!("{child_pascal}::new()"),
+                    }
                 } else {
                     // Use Default::default() for the type
                     "0".into()
@@ -1272,7 +1313,12 @@ fn emit_state_machine(out: &mut String, sm: &SemanticStateMachine) {
 
             // Guard check
             if let Some(ref guard) = trans.guard {
-                let guard_str = sm_expr_to_rust_ctx(guard, &sm.states);
+                // Collect states from all SMs so cross-SM in_state lookups work
+                let all_states: Vec<_> = all_sms
+                    .iter()
+                    .flat_map(|s| s.states.iter().cloned())
+                    .collect();
+                let guard_str = sm_expr_to_rust_ctx(guard, &all_states);
                 out.push_str(&format!(
                     "                if !({guard_str}) {{ return Err(Error::InvalidState); }}\n"
                 ));
@@ -1294,33 +1340,53 @@ fn emit_state_machine(out: &mut String, sm: &SemanticStateMachine) {
                 out.push_str("                // delegate: auto-copy + forward to child SM\n");
                 out.push_str("                let mut new_state = self.clone();\n");
 
-                if let (Some(field_name), Some(child_sm)) = (&child_field, &child_sm_name) {
-                    let child_sm_pascal = to_pascal_case(child_sm);
-                    // Extract the event argument name from delegate event
-                    let event_param_name = extract_delegate_event_param(&delegate.target);
-                    out.push_str(&format!(
-                        "                if let Self::{src_state_name} {{ ref mut {field_name}, .. }} = new_state {{\n"
-                    ));
-                    out.push_str(&format!(
-                        "                    let _old = std::mem::discriminant(&*{field_name});\n"
-                    ));
-                    // We'd need to map the event parameter to the child's event type.
-                    // Since that mapping is complex, emit a dispatch call with a comment.
-                    if let Some(ref ep) = event_param_name {
+                if let (Some(field_name), Some(_child_sm)) = (&child_field, &child_sm_name) {
+                    // The delegate's event_name is the event parameter to forward
+                    let delegate_event_param = &delegate.event_name;
+                    // Check if the delegate target is an indexed access (e.g., src.paths[idx])
+                    let is_indexed = matches!(delegate.target, SemanticExpr::Subscript { .. });
+
+                    if is_indexed {
+                        // Indexed delegate: src.field[index] <- ev
+                        // Extract the index expression
+                        let index_expr =
+                            if let SemanticExpr::Subscript { index, .. } = &delegate.target {
+                                sm_expr_to_rust_ctx(index, &sm.states)
+                            } else {
+                                "0".to_string()
+                            };
                         out.push_str(&format!(
-                            "                    // TODO: map *{ep} to {child_sm_pascal}Event variant\n"
+                            "                if let Self::{src_state_name} {{ ref mut {field_name}, .. }} = new_state {{\n"
                         ));
                         out.push_str(&format!(
-                            "                    // {field_name}.dispatch(&{child_sm_pascal}Event::...)?;\n"
+                            "                    let _idx = {index_expr} as usize;\n"
+                        ));
+                        out.push_str(&format!(
+                            "                    let _old = std::mem::discriminant(&{field_name}[_idx]);\n"
+                        ));
+                        out.push_str(&format!(
+                            "                    {field_name}[_idx].dispatch({delegate_event_param})?;\n"
                         ));
                     } else {
+                        // Simple delegate: src.field <- ev
                         out.push_str(&format!(
-                            "                    // TODO: dispatch to {field_name}: {child_sm_pascal}\n"
+                            "                if let Self::{src_state_name} {{ ref mut {field_name}, .. }} = new_state {{\n"
+                        ));
+                        out.push_str(&format!(
+                            "                    let _old = std::mem::discriminant(&*{field_name});\n"
+                        ));
+                        out.push_str(&format!(
+                            "                    {field_name}.dispatch({delegate_event_param})?;\n"
                         ));
                     }
                     if sm.has_child_state_changed {
+                        let discriminant_ref = if is_indexed {
+                            format!("&{field_name}[_idx]")
+                        } else {
+                            format!("&*{field_name}")
+                        };
                         out.push_str(&format!(
-                            "                    if std::mem::discriminant(&*{field_name}) != _old {{\n"
+                            "                    if std::mem::discriminant({discriminant_ref}) != _old {{\n"
                         ));
                         out.push_str(&format!(
                             "                        let _ = self.dispatch(&{sm_name}Event::ChildStateChanged);\n"
@@ -1329,7 +1395,11 @@ fn emit_state_machine(out: &mut String, sm: &SemanticStateMachine) {
                     }
                     out.push_str("                }\n");
                 } else {
-                    out.push_str("                // TODO: dispatch to child SM field\n");
+                    // Fallback: we couldn't resolve the child field
+                    let delegate_event_param = &delegate.event_name;
+                    out.push_str(&format!(
+                        "                // delegate: could not resolve child field for {delegate_event_param}\n"
+                    ));
                 }
 
                 out.push_str("                *self = new_state;\n");
@@ -1474,12 +1544,19 @@ fn sm_expr_to_rust_ctx(expr: &SemanticExpr, sm_states: &[SemanticState]) -> Stri
             let expr_rs = sm_expr_to_rust_ctx(expr, sm_states);
             let sm_pascal = to_pascal_case(sm_name);
             let state_pascal = to_pascal_case(state_name);
-            // Look up whether this state has fields to emit correct match pattern
+            // Look up whether this state has fields to emit correct match pattern.
+            // When state_id is empty (cross-SM reference), fall back to matching by name.
             let has_fields = sm_states
                 .iter()
-                .find(|s| s.state_id == *state_id)
+                .find(|s| {
+                    if !state_id.is_empty() {
+                        s.state_id == *state_id
+                    } else {
+                        s.name == *state_name
+                    }
+                })
                 .map(|s| !s.fields.is_empty())
-                .unwrap_or(true); // default to true (use { .. }) if state not found
+                .unwrap_or(false); // default to false (unit variant) if not found
             if has_fields {
                 format!("matches!({expr_rs}, {sm_pascal}::{state_pascal} {{ .. }})")
             } else {
@@ -1498,10 +1575,17 @@ fn sm_expr_to_rust_ctx(expr: &SemanticExpr, sm_states: &[SemanticState]) -> Stri
             if args.is_empty() {
                 format!("{sm_pascal}::{state_pascal}")
             } else {
-                // Try to look up field names from state definitions
+                // Try to look up field names from state definitions.
+                // When state_id is empty (cross-SM reference), fall back to matching by name.
                 let field_names: Option<Vec<String>> = sm_states
                     .iter()
-                    .find(|s| s.state_id == *state_id)
+                    .find(|s| {
+                        if !state_id.is_empty() {
+                            s.state_id == *state_id
+                        } else {
+                            s.name == *state_name
+                        }
+                    })
                     .map(|s| s.fields.iter().map(|f| f.name.clone()).collect());
 
                 let arg_strs: Vec<String> = args
@@ -1548,12 +1632,19 @@ fn sm_expr_to_rust_ctx(expr: &SemanticExpr, sm_states: &[SemanticState]) -> Stri
         } => {
             let sm_pascal = to_pascal_case(sm_name);
             let state_pascal = to_pascal_case(state_name);
-            // Check whether the target state has fields for correct match pattern
+            // Check whether the target state has fields for correct match pattern.
+            // When state_id is empty (cross-SM reference), fall back to matching by name.
             let has_fields = sm_states
                 .iter()
-                .find(|s| s.state_id == *state_id)
+                .find(|s| {
+                    if !state_id.is_empty() {
+                        s.state_id == *state_id
+                    } else {
+                        s.name == *state_name
+                    }
+                })
                 .map(|s| !s.fields.is_empty())
-                .unwrap_or(true);
+                .unwrap_or(false);
             let pattern = if has_fields {
                 format!("{sm_pascal}::{state_pascal} {{ .. }}")
             } else {
@@ -1617,23 +1708,6 @@ fn extract_delegate_child_field(target: &SemanticExpr) -> Option<String> {
             }
         }
         SemanticExpr::Subscript { base, .. } => extract_delegate_child_field(base),
-        _ => None,
-    }
-}
-
-/// Extract the event parameter name from a delegate target expression's context.
-/// The delegate's event_name tells us which event is being forwarded.
-fn extract_delegate_event_param(target: &SemanticExpr) -> Option<String> {
-    // Walk down through Subscript to find the innermost TransitionPeerRef
-    match target {
-        SemanticExpr::TransitionPeerRef { reference } => {
-            if reference.peer == TransitionPeerKind::Src && reference.path.len() > 1 {
-                Some(reference.path.last().unwrap().clone())
-            } else {
-                None
-            }
-        }
-        SemanticExpr::Subscript { base, .. } => extract_delegate_event_param(base),
         _ => None,
     }
 }
