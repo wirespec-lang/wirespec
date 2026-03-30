@@ -1,0 +1,135 @@
+-- RFC 5765 / ETSI TS 102 894-2: ITS Common Data Dictionary (simplified)
+-- Cooperative Awareness Message (CAM) core structures
+
+ETSI-ITS-CDD DEFINITIONS AUTOMATIC TAGS ::= BEGIN
+
+-- Station identification
+StationID ::= INTEGER (0..4294967295)
+
+-- Geographic position
+ReferencePosition ::= SEQUENCE {
+    latitude   Latitude,
+    longitude  Longitude,
+    altitude   Altitude
+}
+
+Latitude  ::= INTEGER (-900000000..900000001)
+Longitude ::= INTEGER (-1800000000..1800000001)
+
+Altitude ::= SEQUENCE {
+    altitudeValue      AltitudeValue,
+    altitudeConfidence AltitudeConfidence
+}
+
+AltitudeValue ::= INTEGER (-100000..800001)
+
+AltitudeConfidence ::= ENUMERATED {
+    alt-000-01  (1),
+    alt-000-02  (2),
+    alt-000-05  (3),
+    alt-000-10  (4),
+    alt-000-20  (5),
+    alt-001-00  (6),
+    alt-002-00  (7),
+    alt-005-00  (8),
+    alt-010-00  (9),
+    alt-020-00  (10),
+    alt-050-00  (11),
+    alt-100-00  (12),
+    alt-200-00  (13),
+    unavailable (15)
+}
+
+-- Vehicle speed
+Speed ::= SEQUENCE {
+    speedValue      SpeedValue,
+    speedConfidence SpeedConfidence
+}
+
+SpeedValue      ::= INTEGER (0..16383)
+SpeedConfidence ::= INTEGER (1..126)
+
+-- Vehicle heading
+Heading ::= SEQUENCE {
+    headingValue      HeadingValue,
+    headingConfidence HeadingConfidence
+}
+
+HeadingValue      ::= INTEGER (0..3601)
+HeadingConfidence ::= INTEGER (1..126)
+
+-- Basic Vehicle Container (part of CAM)
+BasicVehicleContainerHighFrequency ::= SEQUENCE {
+    heading           Heading,
+    speed             Speed,
+    driveDirection    DriveDirection,
+    vehicleLength     VehicleLength,
+    vehicleWidth      VehicleWidth,
+    curvature         Curvature,
+    yawRate           YawRate
+}
+
+DriveDirection ::= ENUMERATED { forward (0), backward (1), unavailable (2) }
+
+VehicleLength ::= SEQUENCE {
+    vehicleLengthValue      VehicleLengthValue,
+    vehicleLengthConfidence VehicleLengthConfidenceIndication
+}
+
+VehicleLengthValue ::= INTEGER (1..1023)
+
+VehicleLengthConfidenceIndication ::= ENUMERATED {
+    noTrailerPresent                (0),
+    trailerPresentWithKnownLength   (1),
+    trailerPresentWithUnknownLength (2),
+    trailerPresenceIsUnknown        (3),
+    unavailable                     (4)
+}
+
+VehicleWidth ::= INTEGER (1..62)
+
+Curvature ::= SEQUENCE {
+    curvatureValue      CurvatureValue,
+    curvatureConfidence CurvatureConfidence
+}
+
+CurvatureValue ::= INTEGER (-1023..1023)
+
+CurvatureConfidence ::= ENUMERATED {
+    onePerMeter-0-00002  (0),
+    onePerMeter-0-0001   (1),
+    onePerMeter-0-0005   (2),
+    onePerMeter-0-002    (3),
+    onePerMeter-0-01     (4),
+    onePerMeter-0-1      (5),
+    outOfRange           (6),
+    unavailable          (7)
+}
+
+YawRate ::= SEQUENCE {
+    yawRateValue      YawRateValue,
+    yawRateConfidence YawRateConfidence
+}
+
+YawRateValue ::= INTEGER (-32766..32767)
+
+YawRateConfidence ::= ENUMERATED {
+    degSec-000-01 (0),
+    degSec-000-05 (1),
+    degSec-000-10 (2),
+    degSec-001-00 (3),
+    degSec-005-00 (4),
+    degSec-010-00 (5),
+    degSec-100-00 (6),
+    outOfRange    (7),
+    unavailable   (8)
+}
+
+-- Simplified CAM message
+CAM ::= SEQUENCE {
+    stationID          StationID,
+    referencePosition  ReferencePosition,
+    highFrequencyContainer BasicVehicleContainerHighFrequency
+}
+
+END

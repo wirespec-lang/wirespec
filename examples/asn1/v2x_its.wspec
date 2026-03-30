@@ -1,11 +1,11 @@
 // ETSI ITS (Intelligent Transport Systems) V2X message framing.
-// Binary header dispatches to UPER-encoded CAM/DENM payloads.
+// Binary header dispatches to UPER-encoded CAM payload.
 //
-// CAM  = Cooperative Awareness Message (vehicle position/speed)
-// DENM = Decentralized Environmental Notification Message (hazard alerts)
+// ASN.1 types from ETSI TS 102 894-2 (ITS Common Data Dictionary).
+// With asn1 feature: wirespec auto-compiles etsi_its_cdd.asn1 via rasn-compiler.
+// Without: use clause provides the import path manually.
 
-extern asn1 "etsi/cam.asn1" use crate::cam { Cam }
-extern asn1 "etsi/denm.asn1" use crate::denm { Denm }
+extern asn1 "etsi_its_cdd.asn1" { CAM }
 
 packet ItsPduHeader {
     protocol_version: u8,
@@ -13,8 +13,10 @@ packet ItsPduHeader {
     station_id: u32,
 }
 
-frame ItsPayload = match message_id: u8 {
-    2 => CamMessage { payload: asn1(Cam, encoding: uper, remaining) },
-    1 => DenmMessage { payload: asn1(Denm, encoding: uper, remaining) },
-    _ => Unknown { data: bytes[remaining] },
+packet ItsCamPacket {
+    protocol_version: u8,
+    message_id: u8,
+    station_id: u32,
+    length: u16,
+    cam: asn1(CAM, encoding: uper, length: length),
 }
