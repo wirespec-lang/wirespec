@@ -5,7 +5,7 @@
 use wirespec_codec::ir::*;
 use wirespec_sema::types::Endianness;
 
-use crate::names::to_pascal_case;
+use crate::names::{to_pascal_case, to_snake_case};
 
 /// Map Codec WireType to Rust type string for struct field declaration.
 /// `needs_lifetime` is set to true if the type requires `<'a>`.
@@ -52,6 +52,11 @@ pub fn wire_type_to_rust_named(wt: &WireType) -> Option<String> {
     }
 }
 
+/// Get a Rust value type for a primitive or named wire type.
+pub fn wire_value_type_to_rust(wt: &WireType) -> String {
+    wire_type_to_rust_named(wt).unwrap_or_else(|| wire_type_to_rust(wt).to_string())
+}
+
 /// Whether a wire type needs a lifetime parameter.
 pub fn wire_type_needs_lifetime(wt: &WireType) -> bool {
     matches!(wt, WireType::Bytes)
@@ -90,6 +95,33 @@ pub fn cursor_read_method(wt: &WireType, endianness: Option<Endianness>) -> &'st
     }
 }
 
+/// Generate a Rust expression that reads a non-array value from a cursor.
+pub fn rust_read_expr(
+    cursor: &str,
+    wt: &WireType,
+    ref_type_name: Option<&str>,
+    endianness: Option<Endianness>,
+) -> String {
+    match wt {
+        WireType::Struct(name) | WireType::Frame(name) | WireType::Capsule(name) => {
+            let type_name = to_pascal_case(name);
+            format!("{type_name}::parse({cursor})?")
+        }
+        WireType::VarInt | WireType::ContVarInt => {
+            if let Some(ref_name) = ref_type_name {
+                let parse_fn = format!("{}_parse", to_snake_case(ref_name));
+                format!("{parse_fn}({cursor})?")
+            } else {
+                format!("{cursor}.read_u64be()?")
+            }
+        }
+        _ => {
+            let read_method = cursor_read_method(wt, endianness);
+            format!("{cursor}.{read_method}()?")
+        }
+    }
+}
+
 /// Writer write method call for a primitive/endian combo.
 /// Returns the method name on the Writer type (e.g., "write_u16be").
 pub fn writer_write_method(wt: &WireType, endianness: Option<Endianness>) -> &'static str {
@@ -111,6 +143,33 @@ pub fn writer_write_method(wt: &WireType, endianness: Option<Endianness>) -> &'s
         (WireType::U64, _) => "write_u64be",
         (WireType::I64, _) => "write_i64be",
         _ => unreachable!("unexpected wire type for writer_write_method: {:?}", wt),
+    }
+}
+
+/// Generate a Rust expression that writes a non-array value with a writer.
+pub fn rust_write_expr(
+    writer: &str,
+    wt: &WireType,
+    ref_type_name: Option<&str>,
+    endianness: Option<Endianness>,
+    value_expr: &str,
+) -> String {
+    match wt {
+        WireType::Struct(_) | WireType::Frame(_) | WireType::Capsule(_) => {
+            format!("{value_expr}.serialize({writer})?")
+        }
+        WireType::VarInt | WireType::ContVarInt => {
+            if let Some(ref_name) = ref_type_name {
+                let serialize_fn = format!("{}_serialize", to_snake_case(ref_name));
+                format!("{serialize_fn}({value_expr}, {writer})?")
+            } else {
+                format!("{writer}.write_u64be({value_expr})?")
+            }
+        }
+        _ => {
+            let write_method = writer_write_method(wt, endianness);
+            format!("{writer}.{write_method}({value_expr})?")
+        }
     }
 }
 

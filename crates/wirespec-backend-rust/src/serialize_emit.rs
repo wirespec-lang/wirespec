@@ -4,8 +4,51 @@
 
 use wirespec_codec::ir::*;
 
-use crate::names::to_pascal_case;
+use crate::names::{rust_count_ident, rust_ident, rust_temp_ident, to_pascal_case};
 use crate::type_map::*;
+
+fn prefixed_field(val_prefix: &str, name: &str) -> String {
+    format!("{val_prefix}{}", rust_ident(name))
+}
+
+fn prefixed_count_field(val_prefix: &str, name: &str) -> String {
+    format!("{val_prefix}{}", rust_count_ident(name))
+}
+
+fn borrowed_value_expr(wt: &WireType, value_expr: &str) -> String {
+    match wt {
+        WireType::Bytes | WireType::Struct(_) | WireType::Frame(_) | WireType::Capsule(_) => {
+            value_expr.to_string()
+        }
+        _ => format!("*{value_expr}"),
+    }
+}
+
+fn variant_tag_len_stmt(
+    variant: &CodecVariantScope,
+    tag_wire_type: &WireType,
+    tag_ref_type_name: Option<&str>,
+    indent: &str,
+) -> String {
+    if let Some(w) = wire_type_byte_width(tag_wire_type) {
+        return format!("{indent}len += {w};\n");
+    }
+
+    if matches!(tag_wire_type, WireType::VarInt | WireType::ContVarInt) {
+        if let Some(ref_name) = tag_ref_type_name {
+            let wire_size_fn = format!("{}_wire_size", crate::names::to_snake_case(ref_name));
+            let representative = match &variant.pattern {
+                VariantPattern::Exact { value } => value.to_string(),
+                VariantPattern::RangeInclusive { start, .. } => start.to_string(),
+                VariantPattern::Wildcard => "0".into(),
+            };
+            return format!("{indent}len += {wire_size_fn}({representative});\n");
+        }
+        return format!("{indent}len += 8; /* varint */\n");
+    }
+
+    String::new()
+}
 
 /// Emit serialize body for a list of items.
 /// `val_prefix` is typically "self." for packet fields or variant-specific for frames.
@@ -72,13 +115,18 @@ fn emit_field_serialize(
     val_prefix: &str,
     emitted_bitgroups: &mut Vec<u32>,
 ) {
+    let field_ref = prefixed_field(val_prefix, &f.name);
+
     match f.strategy {
         FieldStrategy::Primitive | FieldStrategy::Checksum => {
-            let write_method = writer_write_method(&f.wire_type, f.endianness);
-            out.push_str(&format!(
-                "{indent}w.{write_method}({val_prefix}{})?;\n",
-                f.name
-            ));
+            let write_expr = rust_write_expr(
+                "w",
+                &f.wire_type,
+                f.ref_type_name.as_deref(),
+                f.endianness,
+                &field_ref,
+            );
+            out.push_str(&format!("{indent}{write_expr};\n"));
         }
         FieldStrategy::BitGroup => {
             if let Some(ref bg) = f.bitgroup_member
@@ -95,8 +143,9 @@ fn emit_field_serialize(
             if let Some(ref hint) = f.asn1_hint {
                 // Encode payload first
                 out.push_str(&format!(
-                    "{indent}let _{}_encoded = {}::encode(&{val_prefix}{}).map_err(|_| Error::Asn1Encode)?;\n",
-                    f.name, hint.encoding, f.name
+                    "{indent}let {} = {}::encode(&{field_ref}).map_err(|_| Error::Asn1Encode)?;\n",
+                    rust_temp_ident("_", &f.name, "_encoded"),
+                    hint.encoding
                 ));
                 // For length-prefixed ASN.1 fields, write the recomputed length before the payload
                 if let Some(BytesSpec::Length {
@@ -106,41 +155,42 @@ fn emit_field_serialize(
                     let len_field = crate::expr::extract_field_name(&reference.value_id);
                     if let Some(lf) = all_fields.iter().find(|af| af.name == len_field) {
                         let write_method = writer_write_method(&lf.wire_type, lf.endianness);
+                        let encoded_name = rust_temp_ident("_", &f.name, "_encoded");
                         out.push_str(&format!(
-                            "{indent}w.{write_method}(_{}_encoded.len() as {})?;\n",
-                            f.name,
+                            "{indent}w.{write_method}({encoded_name}.len() as {})?;\n",
                             wire_type_to_rust(&lf.wire_type)
                         ));
                     }
                 }
-                out.push_str(&format!("{indent}w.write_bytes(&_{}_encoded)?;\n", f.name));
-            } else {
                 out.push_str(&format!(
-                    "{indent}w.write_bytes({val_prefix}{})?;\n",
-                    f.name
+                    "{indent}w.write_bytes(&{})?;\n",
+                    rust_temp_ident("_", &f.name, "_encoded")
                 ));
+            } else {
+                out.push_str(&format!("{indent}w.write_bytes({field_ref})?;\n"));
             }
         }
         FieldStrategy::Conditional => {
             let inner_wt = f.inner_wire_type.as_ref().unwrap_or(&f.wire_type);
+            let option_ref = prefixed_field(val_prefix, &f.name);
             match inner_wt {
                 WireType::Bytes => {
                     out.push_str(&format!(
-                        "{indent}if let Some(ref val) = {val_prefix}{} {{ w.write_bytes(val)?; }}\n",
-                        f.name
+                        "{indent}if let Some(ref val) = {option_ref} {{ w.write_bytes(val)?; }}\n"
                     ));
                 }
-                WireType::Struct(_) => {
-                    out.push_str(&format!(
-                        "{indent}if let Some(ref val) = {val_prefix}{} {{ val.serialize(w)?; }}\n",
-                        f.name
-                    ));
-                }
+                WireType::Array => unreachable!("unexpected conditional array field"),
                 _ => {
-                    let write_method = writer_write_method(inner_wt, f.endianness);
+                    let value_expr = borrowed_value_expr(inner_wt, "val");
+                    let write_expr = rust_write_expr(
+                        "w",
+                        inner_wt,
+                        f.ref_type_name.as_deref(),
+                        f.endianness,
+                        &value_expr,
+                    );
                     out.push_str(&format!(
-                        "{indent}if let Some(ref val) = {val_prefix}{} {{ w.{write_method}(*val)?; }}\n",
-                        f.name
+                        "{indent}if let Some(ref val) = {option_ref} {{ {write_expr}; }}\n"
                     ));
                 }
             }
@@ -151,21 +201,24 @@ fn emit_field_serialize(
             }
         }
         FieldStrategy::Struct => {
-            out.push_str(&format!("{indent}{val_prefix}{}.serialize(w)?;\n", f.name));
+            let write_expr = rust_write_expr(
+                "w",
+                &f.wire_type,
+                f.ref_type_name.as_deref(),
+                f.endianness,
+                &field_ref,
+            );
+            out.push_str(&format!("{indent}{write_expr};\n"));
         }
         FieldStrategy::VarInt | FieldStrategy::ContVarInt => {
-            if let Some(ref ref_name) = f.ref_type_name {
-                let serialize_fn = format!("{}_serialize", crate::names::to_snake_case(ref_name));
-                out.push_str(&format!(
-                    "{indent}{serialize_fn}({val_prefix}{}, w)?;\n",
-                    f.name
-                ));
-            } else {
-                out.push_str(&format!(
-                    "{indent}w.write_u64be({val_prefix}{})?;\n",
-                    f.name
-                ));
-            }
+            let write_expr = rust_write_expr(
+                "w",
+                &f.wire_type,
+                f.ref_type_name.as_deref(),
+                f.endianness,
+                &field_ref,
+            );
+            out.push_str(&format!("{indent}{write_expr};\n"));
         }
     }
 }
@@ -193,9 +246,9 @@ fn emit_bitgroup_serialize(
         {
             let mask = (1u64 << mbg.member_width_bits) - 1;
             let shift = mbg.member_offset_bits;
+            let field_ref = prefixed_field(val_prefix, &f.name);
             out.push_str(&format!(
-                    "{indent}{var_name} |= (({val_prefix}{} as {container_type}) & 0x{mask:x}) << {shift};\n",
-                    f.name
+                    "{indent}{var_name} |= (({field_ref} as {container_type}) & 0x{mask:x}) << {shift};\n"
                 ));
         }
     }
@@ -210,33 +263,40 @@ fn emit_array_serialize(
     indent: &str,
     val_prefix: &str,
 ) {
-    out.push_str(&format!(
-        "{indent}for _i in 0..{val_prefix}{}_count {{\n",
-        f.name
-    ));
+    let count_ref = prefixed_count_field(val_prefix, &f.name);
+    let field_ref = prefixed_field(val_prefix, &f.name);
+    out.push_str(&format!("{indent}for _i in 0..{count_ref} {{\n"));
 
     match arr.element_strategy {
         FieldStrategy::Primitive => {
-            let write_method = writer_write_method(&arr.element_wire_type, None);
-            out.push_str(&format!(
-                "{indent}    w.{write_method}({val_prefix}{}[_i])?;\n",
-                f.name
-            ));
+            let write_expr = rust_write_expr(
+                "w",
+                &arr.element_wire_type,
+                arr.element_ref_type_name.as_deref(),
+                None,
+                &format!("{field_ref}[_i]"),
+            );
+            out.push_str(&format!("{indent}    {write_expr};\n"));
         }
         FieldStrategy::Struct => {
-            out.push_str(&format!(
-                "{indent}    {val_prefix}{}[_i].serialize(w)?;\n",
-                f.name
-            ));
+            let write_expr = rust_write_expr(
+                "w",
+                &arr.element_wire_type,
+                arr.element_ref_type_name.as_deref(),
+                None,
+                &format!("{field_ref}[_i]"),
+            );
+            out.push_str(&format!("{indent}    {write_expr};\n"));
         }
         FieldStrategy::VarInt | FieldStrategy::ContVarInt => {
-            if let Some(ref ref_name) = arr.element_ref_type_name {
-                let serialize_fn = format!("{}_serialize", crate::names::to_snake_case(ref_name));
-                out.push_str(&format!(
-                    "{indent}    {serialize_fn}({val_prefix}{}[_i], w)?;\n",
-                    f.name
-                ));
-            }
+            let write_expr = rust_write_expr(
+                "w",
+                &arr.element_wire_type,
+                arr.element_ref_type_name.as_deref(),
+                None,
+                &format!("{field_ref}[_i]"),
+            );
+            out.push_str(&format!("{indent}    {write_expr};\n"));
         }
         _ => unreachable!(
             "unexpected array element strategy: {:?}",
@@ -276,6 +336,7 @@ fn emit_field_serialized_len(
     val_prefix: &str,
     emitted_bitgroups: &mut Vec<u32>,
 ) {
+    let field_ref = prefixed_field(val_prefix, &f.name);
     match f.strategy {
         FieldStrategy::Primitive | FieldStrategy::Checksum => {
             if let Some(w) = wire_type_byte_width(&f.wire_type) {
@@ -299,33 +360,44 @@ fn emit_field_serialized_len(
         FieldStrategy::BytesLength | FieldStrategy::BytesRemaining | FieldStrategy::BytesLor => {
             if let Some(ref hint) = f.asn1_hint {
                 out.push_str(&format!(
-                    "{indent}len += {}::encode(&{val_prefix}{}).map(|b| b.len()).unwrap_or(0);\n",
-                    hint.encoding, f.name
+                    "{indent}len += {}::encode(&{field_ref}).map(|b| b.len()).unwrap_or(0);\n",
+                    hint.encoding
                 ));
             } else {
-                out.push_str(&format!("{indent}len += {val_prefix}{}.len();\n", f.name));
+                out.push_str(&format!("{indent}len += {field_ref}.len();\n"));
             }
         }
         FieldStrategy::Conditional => {
             let inner_wt = f.inner_wire_type.as_ref().unwrap_or(&f.wire_type);
+            let option_ref = prefixed_field(val_prefix, &f.name);
             match inner_wt {
                 WireType::Bytes => {
                     out.push_str(&format!(
-                        "{indent}if let Some(ref b) = {val_prefix}{} {{ len += b.len(); }}\n",
-                        f.name
+                        "{indent}if let Some(ref b) = {option_ref} {{ len += b.len(); }}\n"
                     ));
                 }
-                WireType::Struct(_) => {
+                WireType::Struct(_) | WireType::Frame(_) | WireType::Capsule(_) => {
                     out.push_str(&format!(
-                        "{indent}if let Some(ref v) = {val_prefix}{} {{ len += v.serialized_len(); }}\n",
-                        f.name
+                        "{indent}if let Some(ref v) = {option_ref} {{ len += v.serialized_len(); }}\n"
                     ));
+                }
+                WireType::VarInt | WireType::ContVarInt => {
+                    if let Some(ref ref_name) = f.ref_type_name {
+                        let wire_size_fn =
+                            format!("{}_wire_size", crate::names::to_snake_case(ref_name));
+                        out.push_str(&format!(
+                            "{indent}if let Some(ref v) = {option_ref} {{ len += {wire_size_fn}(*v); }}\n"
+                        ));
+                    } else {
+                        out.push_str(&format!(
+                            "{indent}if {option_ref}.is_some() {{ len += 8; }}\n"
+                        ));
+                    }
                 }
                 _ => {
                     if let Some(w) = wire_type_byte_width(inner_wt) {
                         out.push_str(&format!(
-                            "{indent}if {val_prefix}{}.is_some() {{ len += {w}; }}\n",
-                            f.name
+                            "{indent}if {option_ref}.is_some() {{ len += {w}; }}\n"
                         ));
                     }
                 }
@@ -333,38 +405,27 @@ fn emit_field_serialized_len(
         }
         FieldStrategy::Array => {
             if let Some(ref arr) = f.array_spec {
+                let count_ref = prefixed_count_field(val_prefix, &f.name);
+                let field_ref = prefixed_field(val_prefix, &f.name);
                 if let Some(w) = wire_type_byte_width(&arr.element_wire_type) {
-                    out.push_str(&format!(
-                        "{indent}len += {val_prefix}{}_count * {w};\n",
-                        f.name
-                    ));
+                    out.push_str(&format!("{indent}len += {count_ref} * {w};\n"));
                 } else {
                     // Variable-size elements
+                    out.push_str(&format!("{indent}for _i in 0..{count_ref} {{\n"));
                     out.push_str(&format!(
-                        "{indent}for _i in 0..{val_prefix}{}_count {{\n",
-                        f.name
-                    ));
-                    out.push_str(&format!(
-                        "{indent}    len += {val_prefix}{}[_i].serialized_len();\n",
-                        f.name
+                        "{indent}    len += {field_ref}[_i].serialized_len();\n"
                     ));
                     out.push_str(&format!("{indent}}}\n"));
                 }
             }
         }
         FieldStrategy::Struct => {
-            out.push_str(&format!(
-                "{indent}len += {val_prefix}{}.serialized_len();\n",
-                f.name
-            ));
+            out.push_str(&format!("{indent}len += {field_ref}.serialized_len();\n"));
         }
         FieldStrategy::VarInt | FieldStrategy::ContVarInt => {
             if let Some(ref ref_name) = f.ref_type_name {
                 let wire_size_fn = format!("{}_wire_size", crate::names::to_snake_case(ref_name));
-                out.push_str(&format!(
-                    "{indent}len += {wire_size_fn}({val_prefix}{});\n",
-                    f.name
-                ));
+                out.push_str(&format!("{indent}len += {wire_size_fn}({field_ref});\n"));
             } else {
                 out.push_str(&format!("{indent}len += 8; /* varint */\n"));
             }
@@ -375,8 +436,14 @@ fn emit_field_serialized_len(
 /// Emit serialize body for frame variants (Rust enum match).
 pub fn emit_frame_serialize_body(out: &mut String, frame: &CodecFrame, indent: &str) {
     // Write the tag first
-    let tag_write_method = writer_write_method(&frame.tag.wire_type, frame.tag.endianness);
-    out.push_str(&format!("{indent}w.{tag_write_method}(tag)?;\n"));
+    let tag_write_expr = rust_write_expr(
+        "w",
+        &frame.tag.wire_type,
+        frame.tag.ref_type_name.as_deref(),
+        frame.tag.endianness,
+        "tag",
+    );
+    out.push_str(&format!("{indent}{tag_write_expr};\n"));
 
     // Match on self for variant-specific serialization
     out.push_str(&format!("{indent}match self {{\n"));
@@ -406,26 +473,34 @@ pub fn emit_frame_serialize_body(out: &mut String, frame: &CodecFrame, indent: &
 
 /// Emit serialized_len body for frame variants.
 pub fn emit_frame_serialized_len_body(out: &mut String, frame: &CodecFrame, indent: &str) {
-    // Tag length
-    if let Some(w) = wire_type_byte_width(&frame.tag.wire_type) {
-        out.push_str(&format!("{indent}len += {w};\n"));
-    }
-
     // Match on self for variant-specific lengths
     out.push_str(&format!("{indent}match self {{\n"));
 
     for variant in &frame.variants {
         let variant_name = to_pascal_case(&variant.name);
+        let inner_indent = format!("{indent}        ");
 
         if variant.fields.is_empty() {
-            out.push_str(&format!("{indent}    Self::{variant_name} => {{}}\n"));
+            out.push_str(&format!("{indent}    Self::{variant_name} => {{\n"));
+            out.push_str(&variant_tag_len_stmt(
+                variant,
+                &frame.tag.wire_type,
+                frame.tag.ref_type_name.as_deref(),
+                &inner_indent,
+            ));
+            out.push_str(&format!("{indent}    }}\n"));
         } else {
             out.push_str(&format!("{indent}    Self::{variant_name} {{ "));
             let field_names: Vec<String> = collect_variant_field_names(variant);
             out.push_str(&field_names.join(", "));
             out.push_str(" } => {\n");
 
-            let inner_indent = format!("{indent}        ");
+            out.push_str(&variant_tag_len_stmt(
+                variant,
+                &frame.tag.wire_type,
+                frame.tag.ref_type_name.as_deref(),
+                &inner_indent,
+            ));
             emit_variant_serialized_len_fields(out, variant, &inner_indent);
 
             out.push_str(&format!("{indent}    }}\n"));
@@ -500,14 +575,14 @@ fn collect_variant_field_names(variant: &CodecVariantScope) -> Vec<String> {
         match item {
             CodecItem::Field { field_id } => {
                 if let Some(f) = variant.fields.iter().find(|f| &f.field_id == field_id) {
-                    names.push(f.name.clone());
+                    names.push(rust_ident(&f.name));
                     if f.strategy == FieldStrategy::Array {
-                        names.push(format!("{}_count", f.name));
+                        names.push(rust_count_ident(&f.name));
                     }
                 }
             }
             CodecItem::Derived(d) => {
-                names.push(d.name.clone());
+                names.push(rust_ident(&d.name));
             }
             CodecItem::Require(_) => {}
         }
@@ -544,10 +619,21 @@ fn emit_variant_field_serialize(
     emitted_bitgroups: &mut Vec<u32>,
 ) {
     // For frame variants, field refs are direct (destructured) not self.field
+    let field_name = rust_ident(&f.name);
+    let count_name = rust_count_ident(&f.name);
+
     match f.strategy {
         FieldStrategy::Primitive | FieldStrategy::Checksum => {
-            let write_method = writer_write_method(&f.wire_type, f.endianness);
-            out.push_str(&format!("{indent}w.{write_method}(*{})?;\n", f.name));
+            let write_expr = rust_write_expr(
+                "w",
+                &f.wire_type,
+                f.ref_type_name.as_deref(),
+                f.endianness,
+                "*val",
+            );
+            out.push_str(&format!(
+                "{indent}{{ let val = {field_name}; {write_expr}; }}\n"
+            ));
         }
         FieldStrategy::BitGroup => {
             if let Some(ref bg) = f.bitgroup_member
@@ -568,9 +654,9 @@ fn emit_variant_field_serialize(
                     {
                         let mask = (1u64 << mbg.member_width_bits) - 1;
                         let shift = mbg.member_offset_bits;
+                        let member_name = rust_ident(&af.name);
                         out.push_str(&format!(
-                                    "{indent}{var_name} |= ((*{} as {container_type}) & 0x{mask:x}) << {shift};\n",
-                                    af.name
+                                    "{indent}{var_name} |= ((*{member_name} as {container_type}) & 0x{mask:x}) << {shift};\n"
                                 ));
                     }
                 }
@@ -583,33 +669,73 @@ fn emit_variant_field_serialize(
         | FieldStrategy::BytesRemaining
         | FieldStrategy::BytesLor => {
             if let Some(ref hint) = f.asn1_hint {
+                let encoded_name = rust_temp_ident("_", &f.name, "_encoded");
                 out.push_str(&format!(
-                    "{indent}let _{}_encoded = {}::encode(&{}).map_err(|_| Error::Asn1Encode)?;\n",
-                    f.name, hint.encoding, f.name
+                    "{indent}let {encoded_name} = {}::encode({field_name}).map_err(|_| Error::Asn1Encode)?;\n",
+                    hint.encoding
                 ));
-                out.push_str(&format!("{indent}w.write_bytes(&_{}_encoded)?;\n", f.name));
+                out.push_str(&format!("{indent}w.write_bytes(&{encoded_name})?;\n"));
             } else {
-                out.push_str(&format!("{indent}w.write_bytes({})?\n;", f.name));
+                out.push_str(&format!("{indent}w.write_bytes({field_name})?;\n"));
             }
         }
         FieldStrategy::Conditional => {
             let inner_wt = f.inner_wire_type.as_ref().unwrap_or(&f.wire_type);
-            let write_method = writer_write_method(inner_wt, f.endianness);
-            out.push_str(&format!(
-                "{indent}if let Some(ref val) = {} {{ w.{write_method}(*val)?; }}\n",
-                f.name
-            ));
+            match inner_wt {
+                WireType::Bytes => {
+                    out.push_str(&format!(
+                        "{indent}if let Some(val) = {field_name} {{ w.write_bytes(val)?; }}\n"
+                    ));
+                }
+                WireType::Array => unreachable!("unexpected conditional array field"),
+                _ => {
+                    let value_expr = borrowed_value_expr(inner_wt, "val");
+                    let write_expr = rust_write_expr(
+                        "w",
+                        inner_wt,
+                        f.ref_type_name.as_deref(),
+                        f.endianness,
+                        &value_expr,
+                    );
+                    out.push_str(&format!(
+                        "{indent}if let Some(val) = {field_name} {{ {write_expr}; }}\n"
+                    ));
+                }
+            }
         }
         FieldStrategy::Array => {
             if let Some(ref arr) = f.array_spec {
-                out.push_str(&format!("{indent}for _i in 0..*{}_count {{\n", f.name));
+                out.push_str(&format!("{indent}for _i in 0..*{count_name} {{\n"));
                 match arr.element_strategy {
                     FieldStrategy::Primitive => {
-                        let write_method = writer_write_method(&arr.element_wire_type, None);
-                        out.push_str(&format!("{indent}    w.{write_method}({}[_i])?;\n", f.name));
+                        let write_expr = rust_write_expr(
+                            "w",
+                            &arr.element_wire_type,
+                            arr.element_ref_type_name.as_deref(),
+                            None,
+                            &format!("{field_name}[_i]"),
+                        );
+                        out.push_str(&format!("{indent}    {write_expr};\n"));
                     }
                     FieldStrategy::Struct => {
-                        out.push_str(&format!("{indent}    {}[_i].serialize(w)?;\n", f.name));
+                        let write_expr = rust_write_expr(
+                            "w",
+                            &arr.element_wire_type,
+                            arr.element_ref_type_name.as_deref(),
+                            None,
+                            &format!("{field_name}[_i]"),
+                        );
+                        out.push_str(&format!("{indent}    {write_expr};\n"));
+                    }
+                    FieldStrategy::VarInt | FieldStrategy::ContVarInt => {
+                        let write_expr = rust_write_expr(
+                            "w",
+                            &arr.element_wire_type,
+                            arr.element_ref_type_name.as_deref(),
+                            None,
+                            &format!("{field_name}[_i]"),
+                        );
+                        out.push_str(&format!("{indent}    {write_expr};\n"));
                     }
                     _ => {}
                 }
@@ -617,10 +743,24 @@ fn emit_variant_field_serialize(
             }
         }
         FieldStrategy::Struct => {
-            out.push_str(&format!("{indent}{}.serialize(w)?;\n", f.name));
+            let write_expr = rust_write_expr(
+                "w",
+                &f.wire_type,
+                f.ref_type_name.as_deref(),
+                f.endianness,
+                field_name.as_str(),
+            );
+            out.push_str(&format!("{indent}{write_expr};\n"));
         }
         FieldStrategy::VarInt | FieldStrategy::ContVarInt => {
-            out.push_str(&format!("{indent}w.write_u64be(*{})?;\n", f.name));
+            let write_expr = rust_write_expr(
+                "w",
+                &f.wire_type,
+                f.ref_type_name.as_deref(),
+                f.endianness,
+                &format!("*{field_name}"),
+            );
+            out.push_str(&format!("{indent}{write_expr};\n"));
         }
     }
 }
@@ -646,6 +786,9 @@ fn emit_variant_field_serialized_len(
     indent: &str,
     emitted_bitgroups: &mut Vec<u32>,
 ) {
+    let field_name = rust_ident(&f.name);
+    let count_name = rust_count_ident(&f.name);
+
     match f.strategy {
         FieldStrategy::Primitive | FieldStrategy::Checksum => {
             if let Some(w) = wire_type_byte_width(&f.wire_type) {
@@ -669,36 +812,68 @@ fn emit_variant_field_serialized_len(
         FieldStrategy::BytesLength | FieldStrategy::BytesRemaining | FieldStrategy::BytesLor => {
             if let Some(ref hint) = f.asn1_hint {
                 out.push_str(&format!(
-                    "{indent}len += {}::encode(&{}).map(|b| b.len()).unwrap_or(0);\n",
-                    hint.encoding, f.name
+                    "{indent}len += {}::encode({field_name}).map(|b| b.len()).unwrap_or(0);\n",
+                    hint.encoding
                 ));
             } else {
-                out.push_str(&format!("{indent}len += {}.len();\n", f.name));
+                out.push_str(&format!("{indent}len += {field_name}.len();\n"));
             }
         }
         FieldStrategy::Conditional => {
             let inner_wt = f.inner_wire_type.as_ref().unwrap_or(&f.wire_type);
-            if let Some(w) = wire_type_byte_width(inner_wt) {
-                out.push_str(&format!(
-                    "{indent}if {}.is_some() {{ len += {w}; }}\n",
-                    f.name
-                ));
+            match inner_wt {
+                WireType::Bytes => {
+                    out.push_str(&format!(
+                        "{indent}if let Some(v) = {field_name} {{ len += v.len(); }}\n"
+                    ));
+                }
+                WireType::Struct(_) | WireType::Frame(_) | WireType::Capsule(_) => {
+                    out.push_str(&format!(
+                        "{indent}if let Some(v) = {field_name} {{ len += v.serialized_len(); }}\n"
+                    ));
+                }
+                WireType::VarInt | WireType::ContVarInt => {
+                    if let Some(ref ref_name) = f.ref_type_name {
+                        let wire_size_fn =
+                            format!("{}_wire_size", crate::names::to_snake_case(ref_name));
+                        out.push_str(&format!(
+                            "{indent}if let Some(v) = {field_name} {{ len += {wire_size_fn}(*v); }}\n"
+                        ));
+                    } else {
+                        out.push_str(&format!(
+                            "{indent}if {field_name}.is_some() {{ len += 8; }}\n"
+                        ));
+                    }
+                }
+                _ => {
+                    if let Some(w) = wire_type_byte_width(inner_wt) {
+                        out.push_str(&format!(
+                            "{indent}if {field_name}.is_some() {{ len += {w}; }}\n"
+                        ));
+                    }
+                }
             }
         }
         FieldStrategy::Array => {
             if let Some(ref arr) = f.array_spec
                 && let Some(w) = wire_type_byte_width(&arr.element_wire_type)
             {
-                out.push_str(&format!("{indent}len += *{}_count * {w};\n", f.name));
+                out.push_str(&format!("{indent}len += *{count_name} * {w};\n"));
+            } else if f.array_spec.is_some() {
+                out.push_str(&format!("{indent}for _i in 0..*{count_name} {{\n"));
+                out.push_str(&format!(
+                    "{indent}    len += {field_name}[_i].serialized_len();\n"
+                ));
+                out.push_str(&format!("{indent}}}\n"));
             }
         }
         FieldStrategy::Struct => {
-            out.push_str(&format!("{indent}len += {}.serialized_len();\n", f.name));
+            out.push_str(&format!("{indent}len += {field_name}.serialized_len();\n"));
         }
         FieldStrategy::VarInt | FieldStrategy::ContVarInt => {
             if let Some(ref ref_name) = f.ref_type_name {
                 let wire_size_fn = format!("{}_wire_size", crate::names::to_snake_case(ref_name));
-                out.push_str(&format!("{indent}len += {wire_size_fn}(*{});\n", f.name));
+                out.push_str(&format!("{indent}len += {wire_size_fn}(*{field_name});\n"));
             } else {
                 out.push_str(&format!("{indent}len += 8; /* varint */\n"));
             }

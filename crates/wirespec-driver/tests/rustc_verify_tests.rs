@@ -264,6 +264,203 @@ fn test_cases() -> Vec<TestCase> {
             prefix: "rs_test24",
             source: "@endian little\npacket P { x: u16, y: u32 }",
         },
+        TestCase {
+            name: "sm_delegate_hierarchical",
+            prefix: "rs_test25",
+            source: r#"
+                state machine ChildSM {
+                    state Ready { value: u8 }
+                    state Done [terminal]
+                    initial Ready
+                    transition Ready -> Done { on finish }
+                    transition * -> Done { on force_close }
+                }
+                state machine ParentSM {
+                    state Running { child: ChildSM, counter: u8 = 0 }
+                    state Complete [terminal]
+                    initial Running
+                    transition Running -> Running {
+                        on forward_to_child(child_ev_tag: u8)
+                        delegate src.child <- child_ev_tag
+                    }
+                    transition Running -> Complete {
+                        on child_state_changed
+                        guard src.child in_state(Done)
+                    }
+                    transition * -> Complete { on shutdown }
+                }
+            "#,
+        },
+        TestCase {
+            name: "sm_delegate_array_full_connection",
+            prefix: "rs_test26",
+            source: r#"
+                state machine PathState {
+                    state Active { path_id: u8, rtt: u64 = 0 }
+                    state Closed [terminal]
+                    initial Active
+                    transition Active -> Closed { on close_path }
+                    transition * -> Closed { on force_close }
+                }
+                state machine FullConnection {
+                    state Idle
+                    state Connected { paths: [PathState; 4], path_count: u8 = 1 }
+                    state Done [terminal]
+
+                    initial Idle
+
+                    transition Idle -> Connected {
+                        on connect(pid: u8)
+                        action {
+                            dst.paths = fill(PathState::Closed, 4);
+                            dst.paths[0] = PathState::Active(pid, 0);
+                            dst.path_count = 1;
+                        }
+                    }
+
+                    transition Connected -> Connected {
+                        on add_path(pid: u8)
+                        guard src.path_count < 4
+                        action {
+                            dst.paths = src.paths;
+                            dst.paths[src.path_count] = PathState::Active(pid, 0);
+                            dst.path_count = src.path_count + 1;
+                        }
+                    }
+
+                    transition Connected -> Connected {
+                        on path_event(idx: u8, ev: u8)
+                        delegate src.paths[idx] <- ev
+                    }
+
+                    transition Connected -> Done {
+                        on child_state_changed
+                        guard all(src.paths[0..src.path_count], in_state(Closed))
+                    }
+
+                    transition * -> Done { on shutdown }
+                }
+            "#,
+        },
+        TestCase {
+            name: "sm_array_fill_container",
+            prefix: "rs_test27",
+            source: r#"
+                state machine ItemState {
+                    state Active { value: u8 }
+                    state Done [terminal]
+                    initial Active
+                    transition Active -> Done { on complete }
+                    transition * -> Done { on force_stop }
+                }
+                state machine ArrayContainer {
+                    state Running { items: [ItemState; 4], count: u8 = 0 }
+                    state Finished [terminal]
+
+                    initial Running
+
+                    transition Running -> Running {
+                        on add_item(val: u8)
+                        guard src.count < 4
+                        action {
+                            dst.items = src.items;
+                            dst.items[src.count] = ItemState::Active(val);
+                            dst.count = src.count + 1;
+                        }
+                    }
+
+                    transition Running -> Running {
+                        on reset_all
+                        action {
+                            dst.items = fill(ItemState::Done, 4);
+                            dst.count = 0;
+                        }
+                    }
+
+                    transition * -> Finished { on shutdown }
+                }
+            "#,
+        },
+        TestCase {
+            name: "keyword_capsule_identifiers",
+            prefix: "rs_test28",
+            source: r#"
+                type VarInt = { prefix: bits[2], value: match prefix {
+                    0b00 => bits[6], 0b01 => bits[14], 0b10 => bits[30], 0b11 => bits[62],
+                } }
+                capsule TlvContainer {
+                    type: VarInt,
+                    length: VarInt,
+                    payload: match type within length {
+                        1 => Data { value: u8 },
+                        _ => Unknown { data: bytes[remaining] },
+                    },
+                }
+            "#,
+        },
+        TestCase {
+            name: "named_lifetime_variant_fields",
+            prefix: "rs_test29",
+            source: r#"
+                packet MqttString {
+                    length: u16,
+                    data: bytes[length],
+                }
+                packet MqttBytes {
+                    length: u16,
+                    data: bytes[length],
+                }
+                capsule MqttPacket {
+                    type_and_flags: u8,
+                    remaining_length: u16,
+                    payload: match type_and_flags within remaining_length {
+                        1 => Connect {
+                            protocol_name: MqttString,
+                            will_topic: if type_and_flags & 1 { MqttString },
+                            will_message: if type_and_flags & 2 { MqttBytes },
+                        },
+                        _ => Unknown { data: bytes[remaining] },
+                    },
+                }
+            "#,
+        },
+        TestCase {
+            name: "frame_varint_optional_field",
+            prefix: "rs_test30",
+            source: r#"
+                type VarInt = { prefix: bits[2], value: match prefix {
+                    0b00 => bits[6], 0b01 => bits[14], 0b10 => bits[30], 0b11 => bits[62],
+                } }
+                frame QuicFrame = match frame_type: VarInt {
+                    0x1c..=0x1d => ConnectionClose {
+                        error_code: VarInt,
+                        offending_frame_type: if frame_type == 0x1c { VarInt },
+                    },
+                    _ => Unknown { data: bytes[remaining] },
+                }
+            "#,
+        },
+        TestCase {
+            name: "capsule_variant_named_fill_array",
+            prefix: "rs_test31",
+            source: r#"
+                packet Entry {
+                    size: u8,
+                    data: bytes[size],
+                }
+                capsule Container {
+                    tag: u8,
+                    length: u16,
+                    payload: match tag within length {
+                        0 => Batch {
+                            entries_length: u16,
+                            entries: [Entry; fill] within entries_length,
+                        },
+                        _ => Unknown { data: bytes[remaining] },
+                    },
+                }
+            "#,
+        },
     ]
 }
 

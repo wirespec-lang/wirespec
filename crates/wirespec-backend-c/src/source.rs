@@ -899,6 +899,7 @@ fn emit_delegate(
         out.push_str(&format!(
             "{indent}/* delegate: child dispatch to {child_sm} */\n"
         ));
+        out.push_str(&format!("{indent}dst = *sm;\n"));
         out.push_str(&format!(
             "{indent}{child_tag_type} _old_tag = dst.{src_state_snake}.{field_snake}.tag;\n"
         ));

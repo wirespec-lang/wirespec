@@ -1762,7 +1762,17 @@ impl Analyzer {
                 }
             }
         }
-        let events: Vec<SemanticEvent> = event_map.values().cloned().collect();
+        let mut seen_events: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut events: Vec<SemanticEvent> = Vec::new();
+        for t in &sm.transitions {
+            for ev in &t.events {
+                if seen_events.insert(ev.name.clone())
+                    && let Some(event) = event_map.get(&ev.name)
+                {
+                    events.push(event.clone());
+                }
+            }
+        }
 
         // Lower transitions
         let mut transitions = Vec::new();
@@ -1888,8 +1898,10 @@ impl Analyzer {
                     .get(&d.event_name)
                     .map(|e| e.event_id.clone())
                     .unwrap_or_default();
+                let mut target = self.lower_expr(&d.target, &[], &[]);
+                resolve_event_params(&mut target, &event_param_names);
                 SemanticDelegate {
-                    target: self.lower_expr(&d.target, &[], &[]),
+                    target,
                     event_id,
                     event_name: d.event_name.clone(),
                     span: d.span,

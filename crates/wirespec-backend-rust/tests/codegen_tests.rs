@@ -629,6 +629,44 @@ fn codegen_sm_delegate_generates_dispatch_call() {
 }
 
 #[test]
+fn codegen_sm_delegate_redispatches_child_state_changed_from_new_state() {
+    let src = r#"
+        state machine ChildSm {
+            state Ready { value: u8 }
+            state Done [terminal]
+            initial Ready
+            transition Ready -> Done { on finish }
+            transition * -> Done { on force_close }
+        }
+        state machine ParentSm {
+            state Running { child: ChildSm }
+            state Complete [terminal]
+            initial Running
+            transition Running -> Running {
+                on forward_to_child(child_ev_tag: u8)
+                delegate src.child <- child_ev_tag
+            }
+            transition Running -> Complete {
+                on child_state_changed
+                guard src.child in_state(Done)
+            }
+            transition * -> Complete { on shutdown }
+        }
+    "#;
+    let rs = generate_rust(src);
+    assert!(
+        rs.contains("let _ = new_state.dispatch(&ParentSmEvent::ChildStateChanged);"),
+        "delegate should redispatch child_state_changed from the updated parent state. Got:\n{}",
+        rs
+    );
+    assert!(
+        !rs.contains("let _ = self.dispatch(&ParentSmEvent::ChildStateChanged);"),
+        "delegate should not redispatch child_state_changed from the stale parent state. Got:\n{}",
+        rs
+    );
+}
+
+#[test]
 fn codegen_sm_in_state_unit_variant_no_braces() {
     let src = r#"
         state machine ChildSm {
@@ -660,5 +698,152 @@ fn codegen_sm_in_state_unit_variant_no_braces() {
         rs.contains("ChildSm::Done)"),
         "Terminal state should be ChildSm::Done without braces. Got:\n{}",
         rs
+    );
+}
+
+#[test]
+fn codegen_rust_escapes_keyword_identifiers() {
+    let src = r#"
+        type VarInt = {
+            prefix: bits[2],
+            value: match prefix {
+                0b00 => bits[6],
+                0b01 => bits[14],
+                0b10 => bits[30],
+                0b11 => bits[62],
+            },
+        }
+        capsule TlvContainer {
+            type: VarInt,
+            length: VarInt,
+            payload: match type within length {
+                1 => Data { value: u8 },
+                _ => Unknown { data: bytes[remaining] },
+            },
+        }
+    "#;
+    let rs = generate_rust(src);
+    assert!(
+        rs.contains("pub r#type: u64"),
+        "field name should be escaped. Got:\n{rs}"
+    );
+    assert!(
+        rs.contains("let r#type ="),
+        "local binding should be escaped. Got:\n{rs}"
+    );
+    assert!(
+        rs.contains("match r#type"),
+        "match expression should use escaped identifier. Got:\n{rs}"
+    );
+    assert!(
+        rs.contains("self.r#type"),
+        "field access should use escaped identifier. Got:\n{rs}"
+    );
+}
+
+#[test]
+fn codegen_rust_threads_named_lifetimes_into_variant_fields() {
+    let src = r#"
+        packet MqttString {
+            length: u16,
+            data: bytes[length],
+        }
+        capsule MqttPacket {
+            tag: u8,
+            length: u16,
+            payload: match tag within length {
+                1 => Connect {
+                    protocol_name: MqttString,
+                    username: if tag == 1 { MqttString },
+                },
+                _ => Unknown { data: bytes[remaining] },
+            },
+        }
+    "#;
+    let rs = generate_rust(src);
+    assert!(
+        rs.contains("protocol_name: MqttString<'a>"),
+        "named packet fields inside lifetime-carrying variants should keep the lifetime. Got:\n{rs}"
+    );
+    assert!(
+        rs.contains("username: Option<MqttString<'a>>"),
+        "optional named packet fields inside lifetime-carrying variants should keep the lifetime. Got:\n{rs}"
+    );
+}
+
+#[test]
+fn codegen_rust_uses_from_fn_for_fixed_arrays() {
+    let src = r#"
+        packet Entry { key: u8, val: u16 }
+        packet Container {
+            count: u8,
+            @max_len(128)
+            entries: [Entry; count],
+        }
+    "#;
+    let rs = generate_rust(src);
+    assert!(
+        rs.contains("std::array::from_fn(|_| Default::default())"),
+        "fixed arrays should initialize through from_fn so composite elements do not require Copy. Got:\n{rs}"
+    );
+}
+
+#[test]
+fn codegen_rust_frame_varint_aliases_tag_refs_in_parse_and_len() {
+    let src = r#"
+        type VarInt = {
+            prefix: bits[2],
+            value: match prefix {
+                0b00 => bits[6],
+                0b01 => bits[14],
+                0b10 => bits[30],
+                0b11 => bits[62],
+            },
+        }
+        frame QuicFrame = match frame_type: VarInt {
+            0x1c..=0x1d => ConnectionClose {
+                error_code: VarInt,
+                offending_frame_type: if frame_type == 0x1c { VarInt },
+            },
+            _ => Unknown { data: bytes[remaining] },
+        }
+    "#;
+    let rs = generate_rust(src);
+    assert!(
+        rs.contains("if (_tag_val == 28)"),
+        "frame parse should rewrite tag field references to _tag_val. Got:\n{rs}"
+    );
+    assert!(
+        rs.contains("len += var_int_wire_size(28);"),
+        "frame serialized_len should size the representative tag in the matching arm. Got:\n{rs}"
+    );
+}
+
+#[test]
+fn codegen_rust_capsule_expr_tag_keeps_within_and_match_separate() {
+    let src = r#"
+        type MqttLength = varint {
+            continuation_bit: msb,
+            value_bits: 7,
+            max_bytes: 4,
+            byte_order: little,
+        }
+        capsule MqttPacket {
+            type_and_flags: u8,
+            remaining_length: MqttLength,
+            payload: match (type_and_flags >> 4) within remaining_length {
+                1 => Connect { protocol_level: u8 },
+                _ => Unknown { data: bytes[remaining] },
+            },
+        }
+    "#;
+    let rs = generate_rust(src);
+    assert!(
+        rs.contains("let mut sub = cur.sub_cursor(remaining_length as usize)?;"),
+        "capsule parse should size the sub-cursor from the within field. Got:\n{rs}"
+    );
+    assert!(
+        rs.contains("let payload = match (type_and_flags >> 4) {"),
+        "capsule parse should dispatch payload variants with the tag expression. Got:\n{rs}"
     );
 }
