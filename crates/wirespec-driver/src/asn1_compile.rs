@@ -49,11 +49,10 @@ pub fn compile_asn1(path: &Path) -> Result<Asn1CompileResult, String> {
 fn extract_module_name(source: &str) -> Option<String> {
     for line in source.lines() {
         let trimmed = line.trim();
-        if trimmed.starts_with("pub mod ") {
-            let rest = &trimmed["pub mod ".len()..];
-            if let Some(name) = rest.split_whitespace().next() {
-                return Some(name.trim_end_matches('{').trim().to_string());
-            }
+        if let Some(rest) = trimmed.strip_prefix("pub mod ")
+            && let Some(name) = rest.split_whitespace().next()
+        {
+            return Some(name.trim_end_matches('{').trim().to_string());
         }
     }
     None
@@ -65,16 +64,13 @@ fn extract_type_names(source: &str) -> Vec<String> {
     for line in source.lines() {
         let trimmed = line.trim();
         for prefix in &["pub struct ", "pub enum "] {
-            if trimmed.starts_with(prefix) {
-                let rest = &trimmed[prefix.len()..];
-                if let Some(name) = rest
+            if let Some(rest) = trimmed.strip_prefix(prefix)
+                && let Some(name) = rest
                     .split(|c: char| !c.is_alphanumeric() && c != '_')
                     .next()
-                {
-                    if !name.is_empty() {
-                        names.push(name.to_string());
-                    }
-                }
+                    .filter(|n| !n.is_empty())
+            {
+                names.push(name.to_string());
             }
         }
     }
