@@ -168,6 +168,7 @@ fn lower_field(f: &SemanticField, module_endianness: Endianness) -> LayoutField 
         wire_width_bits,
         endianness,
         bitgroup_member: None, // Set by bitgroup detection
+        asn1_hint: f.asn1_hint.clone(),
         span: f.span,
     }
 }

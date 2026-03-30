@@ -133,6 +133,7 @@ fn mock_layout_field(name: &str, wire_width_bits: Option<u16>, _scope: &str) -> 
         wire_width_bits,
         endianness: None,
         bitgroup_member: None,
+        asn1_hint: None,
         span: None,
     }
 }
@@ -168,6 +169,7 @@ fn mock_layout_field_with_type(
         wire_width_bits,
         endianness: None,
         bitgroup_member: None,
+        asn1_hint: None,
         span: None,
     }
 }

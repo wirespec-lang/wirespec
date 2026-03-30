@@ -266,6 +266,7 @@ pub struct CodecField {
     pub bitgroup_member: Option<BitgroupMember>,
     pub max_elements: Option<u32>,
     pub checksum_algorithm: Option<String>,
+    pub asn1_hint: Option<wirespec_sema::types::Asn1Hint>,
     pub span: Option<Span>,
 }
 
