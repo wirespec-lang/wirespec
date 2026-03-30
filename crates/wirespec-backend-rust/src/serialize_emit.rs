@@ -67,10 +67,18 @@ fn emit_field_serialize(
         | FieldStrategy::BytesLength
         | FieldStrategy::BytesRemaining
         | FieldStrategy::BytesLor => {
-            out.push_str(&format!(
-                "{indent}w.write_bytes({val_prefix}{})?;\n",
-                f.name
-            ));
+            if let Some(ref _hint) = f.asn1_hint {
+                out.push_str(&format!(
+                    "{indent}let _{}_encoded = uper::encode(&{val_prefix}{}).map_err(|_| Error::Asn1Encode)?;\n",
+                    f.name, f.name
+                ));
+                out.push_str(&format!("{indent}w.write_bytes(&_{}_encoded)?;\n", f.name));
+            } else {
+                out.push_str(&format!(
+                    "{indent}w.write_bytes({val_prefix}{})?;\n",
+                    f.name
+                ));
+            }
         }
         FieldStrategy::Conditional => {
             let inner_wt = f.inner_wire_type.as_ref().unwrap_or(&f.wire_type);
@@ -248,7 +256,14 @@ fn emit_field_serialized_len(
             }
         }
         FieldStrategy::BytesLength | FieldStrategy::BytesRemaining | FieldStrategy::BytesLor => {
-            out.push_str(&format!("{indent}len += {val_prefix}{}.len();\n", f.name));
+            if let Some(ref _hint) = f.asn1_hint {
+                out.push_str(&format!(
+                    "{indent}len += uper::encode(&{val_prefix}{}).map(|b| b.len()).unwrap_or(0);\n",
+                    f.name
+                ));
+            } else {
+                out.push_str(&format!("{indent}len += {val_prefix}{}.len();\n", f.name));
+            }
         }
         FieldStrategy::Conditional => {
             let inner_wt = f.inner_wire_type.as_ref().unwrap_or(&f.wire_type);
@@ -468,7 +483,15 @@ fn emit_variant_field_serialize(
         | FieldStrategy::BytesLength
         | FieldStrategy::BytesRemaining
         | FieldStrategy::BytesLor => {
-            out.push_str(&format!("{indent}w.write_bytes({})?\n;", f.name));
+            if let Some(ref _hint) = f.asn1_hint {
+                out.push_str(&format!(
+                    "{indent}let _{}_encoded = uper::encode(&{}).map_err(|_| Error::Asn1Encode)?;\n",
+                    f.name, f.name
+                ));
+                out.push_str(&format!("{indent}w.write_bytes(&_{}_encoded)?;\n", f.name));
+            } else {
+                out.push_str(&format!("{indent}w.write_bytes({})?\n;", f.name));
+            }
         }
         FieldStrategy::Conditional => {
             let inner_wt = f.inner_wire_type.as_ref().unwrap_or(&f.wire_type);
@@ -545,7 +568,14 @@ fn emit_variant_field_serialized_len(
             }
         }
         FieldStrategy::BytesLength | FieldStrategy::BytesRemaining | FieldStrategy::BytesLor => {
-            out.push_str(&format!("{indent}len += {}.len();\n", f.name));
+            if let Some(ref _hint) = f.asn1_hint {
+                out.push_str(&format!(
+                    "{indent}len += uper::encode(&{}).map(|b| b.len()).unwrap_or(0);\n",
+                    f.name
+                ));
+            } else {
+                out.push_str(&format!("{indent}len += {}.len();\n", f.name));
+            }
         }
         FieldStrategy::Conditional => {
             let inner_wt = f.inner_wire_type.as_ref().unwrap_or(&f.wire_type);

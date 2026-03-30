@@ -70,14 +70,36 @@ fn emit_field_parse(
         FieldStrategy::BytesLength => {
             if let Some(BytesSpec::Length { ref expr }) = f.bytes_spec {
                 let len_expr = expr_to_rust(expr, &ExprContext::Parse);
-                out.push_str(&format!(
-                    "{indent}let {} = cur.read_bytes({len_expr} as usize)?;\n",
-                    f.name
-                ));
+                if let Some(ref hint) = f.asn1_hint {
+                    out.push_str(&format!(
+                        "{indent}let _{}_bytes = cur.read_bytes({len_expr} as usize)?;\n",
+                        f.name
+                    ));
+                    out.push_str(&format!(
+                        "{indent}let {} = uper::decode::<{}>(_{}_bytes).map_err(|_| Error::Asn1Decode)?;\n",
+                        f.name, hint.type_name, f.name
+                    ));
+                } else {
+                    out.push_str(&format!(
+                        "{indent}let {} = cur.read_bytes({len_expr} as usize)?;\n",
+                        f.name
+                    ));
+                }
             }
         }
         FieldStrategy::BytesRemaining => {
-            out.push_str(&format!("{indent}let {} = cur.read_remaining();\n", f.name));
+            if let Some(ref hint) = f.asn1_hint {
+                out.push_str(&format!(
+                    "{indent}let _{}_bytes = cur.read_remaining();\n",
+                    f.name
+                ));
+                out.push_str(&format!(
+                    "{indent}let {} = uper::decode::<{}>(_{}_bytes).map_err(|_| Error::Asn1Decode)?;\n",
+                    f.name, hint.type_name, f.name
+                ));
+            } else {
+                out.push_str(&format!("{indent}let {} = cur.read_remaining();\n", f.name));
+            }
         }
         FieldStrategy::BytesLor => {
             if let Some(BytesSpec::LengthOrRemaining { ref expr }) = f.bytes_spec {
@@ -528,7 +550,18 @@ fn emit_capsule_field_parse(
             out.push_str(&format!("{indent}let {} = sub.{read_method}()?;\n", f.name));
         }
         FieldStrategy::BytesRemaining => {
-            out.push_str(&format!("{indent}let {} = sub.read_remaining();\n", f.name));
+            if let Some(ref hint) = f.asn1_hint {
+                out.push_str(&format!(
+                    "{indent}let _{}_bytes = sub.read_remaining();\n",
+                    f.name
+                ));
+                out.push_str(&format!(
+                    "{indent}let {} = uper::decode::<{}>(_{}_bytes).map_err(|_| Error::Asn1Decode)?;\n",
+                    f.name, hint.type_name, f.name
+                ));
+            } else {
+                out.push_str(&format!("{indent}let {} = sub.read_remaining();\n", f.name));
+            }
         }
         FieldStrategy::BytesFixed => {
             if let Some(BytesSpec::Fixed { size }) = &f.bytes_spec {
@@ -541,10 +574,21 @@ fn emit_capsule_field_parse(
         FieldStrategy::BytesLength => {
             if let Some(BytesSpec::Length { ref expr }) = f.bytes_spec {
                 let len_expr = expr_to_rust(expr, &ExprContext::Parse);
-                out.push_str(&format!(
-                    "{indent}let {} = sub.read_bytes({len_expr} as usize)?;\n",
-                    f.name
-                ));
+                if let Some(ref hint) = f.asn1_hint {
+                    out.push_str(&format!(
+                        "{indent}let _{}_bytes = sub.read_bytes({len_expr} as usize)?;\n",
+                        f.name
+                    ));
+                    out.push_str(&format!(
+                        "{indent}let {} = uper::decode::<{}>(_{}_bytes).map_err(|_| Error::Asn1Decode)?;\n",
+                        f.name, hint.type_name, f.name
+                    ));
+                } else {
+                    out.push_str(&format!(
+                        "{indent}let {} = sub.read_bytes({len_expr} as usize)?;\n",
+                        f.name
+                    ));
+                }
             }
         }
         _ => {
