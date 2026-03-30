@@ -429,6 +429,14 @@ impl Parser {
                 self.parse_state_machine(annotations, exported)?,
             ))),
             _ => {
+                // Check for "extern asn1"
+                if let TokenKind::Name(ref n) = self.peek().clone()
+                    && n == "extern"
+                {
+                    let item = self.parse_extern_asn1(annotations)?;
+                    return Ok(Some(item));
+                }
+
                 if exported {
                     Err(self.error("expected definition after 'export'".into()))
                 } else if !annotations.is_empty() {
@@ -1799,6 +1807,46 @@ impl Parser {
             }
             _ => Err(self.error(format!("expected literal, found {:?}", self.peek()))),
         }
+    }
+
+    // ── Extern ASN.1 ──
+
+    fn parse_extern_asn1(&mut self, _annotations: Vec<AstAnnotation>) -> Result<AstTopItem> {
+        let start = self.span();
+        self.advance(); // skip "extern"
+
+        // Expect "asn1" as a name token
+        let (kw, _) = self.expect_name()?;
+        if kw != "asn1" {
+            return Err(self.error(format!("expected 'asn1' after 'extern', found '{kw}'")));
+        }
+
+        // Expect string literal for path
+        let path = match self.peek().clone() {
+            TokenKind::StringLit(s) => {
+                self.advance();
+                s
+            }
+            _ => return Err(self.error("expected string literal for ASN.1 file path".into())),
+        };
+
+        // Expect { TypeA, TypeB, ... }
+        self.expect(&TokenKind::LBrace)?;
+        let mut type_names = Vec::new();
+        while !self.at(&TokenKind::RBrace) {
+            let (name, _) = self.expect_name()?;
+            type_names.push(name);
+            if !self.eat(&TokenKind::Comma) {
+                break;
+            }
+        }
+        self.expect(&TokenKind::RBrace)?;
+
+        Ok(AstTopItem::ExternAsn1(AstExternAsn1 {
+            path,
+            type_names,
+            span: Some(start),
+        }))
     }
 }
 

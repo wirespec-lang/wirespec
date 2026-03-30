@@ -94,7 +94,7 @@ fn get_exportable_names(ast: &AstModule) -> HashSet<String> {
             AstTopItem::Capsule(c) => (c.name.clone(), c.exported),
             AstTopItem::ContinuationVarInt(v) => (v.name.clone(), v.exported),
             AstTopItem::StateMachine(s) => (s.name.clone(), s.exported),
-            AstTopItem::StaticAssert(_) => continue,
+            AstTopItem::StaticAssert(_) | AstTopItem::ExternAsn1(_) => continue,
         };
         all_names.push(name.clone());
         if exported {

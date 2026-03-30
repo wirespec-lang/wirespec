@@ -277,6 +277,16 @@ pub enum AstTopItem {
     Capsule(AstCapsuleDecl),
     ContinuationVarInt(AstContinuationVarIntDecl),
     StateMachine(AstStateMachineDecl),
+    ExternAsn1(AstExternAsn1),
+}
+
+// ── Extern ASN.1 ──
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AstExternAsn1 {
+    pub path: String,
+    pub type_names: Vec<String>,
+    pub span: Option<Span>,
 }
 
 // ── Const / Enum / Flags ──

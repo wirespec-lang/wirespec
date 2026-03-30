@@ -168,6 +168,9 @@ impl Analyzer {
                     });
                     item_order.push(id);
                 }
+                AstTopItem::ExternAsn1(_) => {
+                    // Handled in a later phase
+                }
             }
         }
 
@@ -306,6 +309,9 @@ impl Analyzer {
                 }
                 AstTopItem::StaticAssert(_) => {
                     // Nothing to register
+                }
+                AstTopItem::ExternAsn1(_) => {
+                    // Handled in a later phase
                 }
             }
         }
