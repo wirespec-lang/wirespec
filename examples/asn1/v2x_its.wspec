@@ -1,0 +1,20 @@
+// ETSI ITS (Intelligent Transport Systems) V2X message framing.
+// Binary header dispatches to UPER-encoded CAM/DENM payloads.
+//
+// CAM  = Cooperative Awareness Message (vehicle position/speed)
+// DENM = Decentralized Environmental Notification Message (hazard alerts)
+
+extern asn1 "etsi/cam.asn1" use crate::cam { Cam }
+extern asn1 "etsi/denm.asn1" use crate::denm { Denm }
+
+packet ItsPduHeader {
+    protocol_version: u8,
+    message_id: u8,
+    station_id: u32,
+}
+
+frame ItsPayload = match message_id: u8 {
+    2 => CamMessage { payload: asn1(Cam, encoding: uper, remaining) },
+    1 => DenmMessage { payload: asn1(Denm, encoding: uper, remaining) },
+    _ => Unknown { data: bytes[remaining] },
+}
