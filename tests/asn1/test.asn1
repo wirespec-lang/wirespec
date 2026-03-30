@@ -1,0 +1,12 @@
+TestModule DEFINITIONS AUTOMATIC TAGS ::= BEGIN
+
+SimpleMessage ::= SEQUENCE {
+    messageId   INTEGER (0..255),
+    payload     OCTET STRING
+}
+
+AnotherType ::= SEQUENCE {
+    value       INTEGER
+}
+
+END

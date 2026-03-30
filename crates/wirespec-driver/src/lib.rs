@@ -9,5 +9,8 @@ pub mod driver;
 pub mod pipeline;
 pub mod resolve;
 
+#[cfg(feature = "asn1")]
+pub mod asn1_compile;
+
 pub use driver::{CompileRequest, CompileResult, CompiledModule, compile};
 pub use pipeline::{ExternalType, ExternalTypeKind, ExternalTypes, compile_module};
