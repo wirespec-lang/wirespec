@@ -555,6 +555,13 @@ fn emit_packet(
     out.push_str("    }\n\n");
 
     // serialized_len method (uses resolved fields)
+    let has_asn1 = resolved_fields.iter().any(|f| f.asn1_hint.is_some());
+    if has_asn1 {
+        out.push_str("    /// Note: for ASN.1 fields, this method encodes the payload to compute the length.\n");
+        out.push_str(
+            "    /// For best performance, use `serialize()` directly with a pre-allocated buffer.\n",
+        );
+    }
     out.push_str("    pub fn serialized_len(&self) -> usize {\n");
     out.push_str("        let mut len = 0usize;\n");
     serialize_emit::emit_serialized_len_items(
@@ -762,6 +769,16 @@ fn emit_frame(
     out.push_str("    }\n\n");
 
     // serialized_len method
+    let has_asn1 = resolved_frame
+        .variants
+        .iter()
+        .any(|v| v.fields.iter().any(|f| f.asn1_hint.is_some()));
+    if has_asn1 {
+        out.push_str("    /// Note: for ASN.1 fields, this method encodes the payload to compute the length.\n");
+        out.push_str(
+            "    /// For best performance, use `serialize()` directly with a pre-allocated buffer.\n",
+        );
+    }
     out.push_str("    pub fn serialized_len(&self) -> usize {\n");
     out.push_str("        let mut len = 0usize;\n");
     serialize_emit::emit_frame_serialized_len_body(out, &resolved_frame, "        ");
@@ -872,6 +889,17 @@ fn emit_capsule(
     out.push_str("    }\n\n");
 
     // serialized_len method
+    let has_asn1 = resolved_header_fields.iter().any(|f| f.asn1_hint.is_some())
+        || resolved_capsule
+            .variants
+            .iter()
+            .any(|v| v.fields.iter().any(|f| f.asn1_hint.is_some()));
+    if has_asn1 {
+        out.push_str("    /// Note: for ASN.1 fields, this method encodes the payload to compute the length.\n");
+        out.push_str(
+            "    /// For best performance, use `serialize()` directly with a pre-allocated buffer.\n",
+        );
+    }
     out.push_str("    pub fn serialized_len(&self) -> usize {\n");
     out.push_str("        let mut len = 0usize;\n");
     serialize_emit::emit_serialized_len_items(

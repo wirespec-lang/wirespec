@@ -849,6 +849,23 @@ fn emit_action(out: &mut String, action: &SemanticAction, ctx: &SmExprContext, i
 
 // ── SM helper: emit delegate (child dispatch) ──
 
+/// Extract the child field name from a delegate target expression.
+/// Delegate target is typically `TransitionPeerRef { peer: Src, path: ["child_field"] }`
+/// or a `Subscript` over such a ref (e.g., `src.paths[id]`).
+fn extract_delegate_child_field(target: &SemanticExpr) -> Option<String> {
+    match target {
+        SemanticExpr::TransitionPeerRef { reference } => {
+            if reference.peer == TransitionPeerKind::Src && !reference.path.is_empty() {
+                Some(reference.path[0].clone())
+            } else {
+                None
+            }
+        }
+        SemanticExpr::Subscript { base, .. } => extract_delegate_child_field(base),
+        _ => None,
+    }
+}
+
 /// Emit delegate child dispatch code. This auto-copies dst from sm,
 /// dispatches to the child SM, and re-dispatches the parent if the child's
 /// state changed.
@@ -861,36 +878,26 @@ fn emit_delegate(
     src_state_snake: &str,
     indent: &str,
 ) {
-    // The delegate target is a TransitionPeerRef pointing to the child SM field.
-    // E.g., TransitionPeerRef { peer: Src, path: ["field_name"] }
-    let (field_name, child_sm_name) = match &delegate.target {
-        SemanticExpr::TransitionPeerRef { reference }
-            if reference.peer == TransitionPeerKind::Src =>
-        {
-            if let Some(fname) = reference.path.first() {
-                // Look up the field in the source state to find the child SM type
-                let child_name = sm
-                    .states
-                    .iter()
-                    .find(|s| to_snake_case(&s.name) == src_state_snake)
-                    .and_then(|state| state.fields.iter().find(|f| &f.name == fname))
-                    .and_then(|f| f.child_sm_name.clone());
-                (fname.clone(), child_name)
-            } else {
-                // Path is empty, can't resolve
-                (String::new(), None)
-            }
-        }
-        _ => (String::new(), None),
-    };
+    // Extract the child field name from TransitionPeerRef or Subscript(TransitionPeerRef, index).
+    let field_name = extract_delegate_child_field(&delegate.target);
+    let is_indexed = matches!(delegate.target, SemanticExpr::Subscript { .. });
 
-    if let Some(ref child_sm) = child_sm_name {
+    // Look up the child SM type from the source state's field definitions
+    let child_sm_name = field_name.as_ref().and_then(|fname| {
+        sm.states
+            .iter()
+            .find(|s| to_snake_case(&s.name) == src_state_snake)
+            .and_then(|state| state.fields.iter().find(|f| &f.name == fname))
+            .and_then(|f| f.child_sm_name.clone())
+    });
+
+    if let (Some(field_name), Some(child_sm)) = (&field_name, &child_sm_name) {
         let child_snake = to_snake_case(child_sm);
         let _child_type = format!("{prefix}_{child_snake}_t");
         let child_event_type = format!("{prefix}_{child_snake}_event_t");
         let child_dispatch_fn = format!("{prefix}_{child_snake}_dispatch");
         let child_tag_type = format!("{prefix}_{child_snake}_state_tag_t");
-        let field_snake = to_snake_case(&field_name);
+        let field_snake = to_snake_case(field_name);
 
         let prefix_upper = prefix.to_uppercase();
         let sm_snake = to_snake_case(&sm.name);
@@ -900,9 +907,6 @@ fn emit_delegate(
             "{indent}/* delegate: child dispatch to {child_sm} */\n"
         ));
         out.push_str(&format!("{indent}dst = *sm;\n"));
-        out.push_str(&format!(
-            "{indent}{child_tag_type} _old_tag = dst.{src_state_snake}.{field_snake}.tag;\n"
-        ));
 
         // Build child event: the delegate event_name is the parent event
         // parameter that carries the child event tag value (a u8), so cast it
@@ -915,35 +919,89 @@ fn emit_delegate(
             "{indent}_child_ev.tag = ({child_event_tag_type})event->{parent_event_snake}.{delegate_param_snake};\n"
         ));
 
-        // Dispatch to child
-        out.push_str(&format!(
-            "{indent}wirespec_result_t _rc = {child_dispatch_fn}(\n{indent}    &dst.{src_state_snake}.{field_snake}, &_child_ev);\n"
-        ));
-        out.push_str(&format!("{indent}if (_rc != WIRESPEC_OK) return _rc;\n"));
+        if is_indexed {
+            // Indexed delegate: src.field[index] <- ev
+            let index_expr = if let SemanticExpr::Subscript { index, .. } = &delegate.target {
+                crate::expr::sema_expr_to_c(index, _ctx)
+            } else {
+                "0".to_string()
+            };
+            let child_ref = format!("dst.{src_state_snake}.{field_snake}[_idx]");
 
-        // Re-dispatch if child tag changed and parent handles child_state_changed
-        if !sm.has_child_state_changed {
-            out.push_str(&format!("{indent}(void)_old_tag;\n"));
-        }
-        if sm.has_child_state_changed {
+            out.push_str(&format!("{indent}{{\n"));
             out.push_str(&format!(
-                "{indent}if (dst.{src_state_snake}.{field_snake}.tag != _old_tag) {{\n"
-            ));
-            let event_type = format!("{prefix}_{sm_snake}_event_t");
-            out.push_str(&format!("{indent}    {event_type} _csc_ev;\n"));
-            out.push_str(&format!(
-                "{indent}    _csc_ev.tag = {prefix_upper}_{sm_upper}_EVENT_CHILD_STATE_CHANGED;\n"
-            ));
-            out.push_str(&format!("{indent}    *sm = dst;\n"));
-            out.push_str(&format!(
-                "{indent}    wirespec_result_t _csc_rc = {prefix}_{sm_snake}_dispatch(sm, &_csc_ev);\n"
+                "{indent}    size_t _idx = (size_t)({index_expr});\n"
             ));
             out.push_str(&format!(
-                "{indent}    if (_csc_rc != WIRESPEC_OK && _csc_rc != WIRESPEC_ERR_INVALID_STATE)\n"
+                "{indent}    {child_tag_type} _old_tag = {child_ref}.tag;\n"
             ));
-            out.push_str(&format!("{indent}        return _csc_rc;\n"));
-            out.push_str(&format!("{indent}    return WIRESPEC_OK;\n"));
+            out.push_str(&format!(
+                "{indent}    wirespec_result_t _rc = {child_dispatch_fn}(\n{indent}        &{child_ref}, &_child_ev);\n"
+            ));
+            out.push_str(&format!(
+                "{indent}    if (_rc != WIRESPEC_OK) return _rc;\n"
+            ));
+
+            if !sm.has_child_state_changed {
+                out.push_str(&format!("{indent}    (void)_old_tag;\n"));
+            }
+            if sm.has_child_state_changed {
+                out.push_str(&format!(
+                    "{indent}    if ({child_ref}.tag != _old_tag) {{\n"
+                ));
+                let event_type = format!("{prefix}_{sm_snake}_event_t");
+                out.push_str(&format!("{indent}        {event_type} _csc_ev;\n"));
+                out.push_str(&format!(
+                    "{indent}        _csc_ev.tag = {prefix_upper}_{sm_upper}_EVENT_CHILD_STATE_CHANGED;\n"
+                ));
+                out.push_str(&format!("{indent}        *sm = dst;\n"));
+                out.push_str(&format!(
+                    "{indent}        wirespec_result_t _csc_rc = {prefix}_{sm_snake}_dispatch(sm, &_csc_ev);\n"
+                ));
+                out.push_str(&format!(
+                    "{indent}        if (_csc_rc != WIRESPEC_OK && _csc_rc != WIRESPEC_ERR_INVALID_STATE)\n"
+                ));
+                out.push_str(&format!("{indent}            return _csc_rc;\n"));
+                out.push_str(&format!("{indent}        return WIRESPEC_OK;\n"));
+                out.push_str(&format!("{indent}    }}\n"));
+            }
             out.push_str(&format!("{indent}}}\n"));
+        } else {
+            // Simple delegate: src.field <- ev
+            out.push_str(&format!(
+                "{indent}{child_tag_type} _old_tag = dst.{src_state_snake}.{field_snake}.tag;\n"
+            ));
+
+            // Dispatch to child
+            out.push_str(&format!(
+                "{indent}wirespec_result_t _rc = {child_dispatch_fn}(\n{indent}    &dst.{src_state_snake}.{field_snake}, &_child_ev);\n"
+            ));
+            out.push_str(&format!("{indent}if (_rc != WIRESPEC_OK) return _rc;\n"));
+
+            // Re-dispatch if child tag changed and parent handles child_state_changed
+            if !sm.has_child_state_changed {
+                out.push_str(&format!("{indent}(void)_old_tag;\n"));
+            }
+            if sm.has_child_state_changed {
+                out.push_str(&format!(
+                    "{indent}if (dst.{src_state_snake}.{field_snake}.tag != _old_tag) {{\n"
+                ));
+                let event_type = format!("{prefix}_{sm_snake}_event_t");
+                out.push_str(&format!("{indent}    {event_type} _csc_ev;\n"));
+                out.push_str(&format!(
+                    "{indent}    _csc_ev.tag = {prefix_upper}_{sm_upper}_EVENT_CHILD_STATE_CHANGED;\n"
+                ));
+                out.push_str(&format!("{indent}    *sm = dst;\n"));
+                out.push_str(&format!(
+                    "{indent}    wirespec_result_t _csc_rc = {prefix}_{sm_snake}_dispatch(sm, &_csc_ev);\n"
+                ));
+                out.push_str(&format!(
+                    "{indent}    if (_csc_rc != WIRESPEC_OK && _csc_rc != WIRESPEC_ERR_INVALID_STATE)\n"
+                ));
+                out.push_str(&format!("{indent}        return _csc_rc;\n"));
+                out.push_str(&format!("{indent}    return WIRESPEC_OK;\n"));
+                out.push_str(&format!("{indent}}}\n"));
+            }
         }
     } else {
         // Cannot resolve child SM type — emit documented comment

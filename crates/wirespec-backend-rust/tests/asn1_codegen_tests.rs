@@ -341,3 +341,24 @@ fn asn1_multiple_encodings_import_both() {
         rs
     );
 }
+
+#[test]
+fn asn1_variant_length_field_not_double_written() {
+    let rs = generate_rust(
+        r#"
+        extern asn1 "s.asn1" { Foo }
+        frame F = match tag: u8 {
+            1 => Data { len: u16, payload: asn1(Foo, encoding: uper, length: len) },
+            _ => Unknown { data: bytes[remaining] },
+        }
+    "#,
+    );
+    let serialize_section = rs.split("fn serialize").nth(1).unwrap_or("");
+    // In the Data variant, len should NOT be written directly
+    // It should only appear as _payload_encoded.len()
+    assert!(
+        !serialize_section.contains("w.write_u16be(*val)"),
+        "length field should not be written directly in variant with ASN.1 payload, got:\n{}",
+        rs,
+    );
+}

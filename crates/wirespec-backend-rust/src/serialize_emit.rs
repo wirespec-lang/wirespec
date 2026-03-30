@@ -593,10 +593,16 @@ fn collect_variant_field_names(variant: &CodecVariantScope) -> Vec<String> {
 fn emit_variant_serialize_fields(out: &mut String, variant: &CodecVariantScope, indent: &str) {
     let mut emitted_bitgroups: Vec<u32> = Vec::new();
 
+    // Pre-scan: skip length fields associated with ASN.1 payloads
+    let asn1_length_fields = collect_asn1_length_field_names(&variant.fields);
+
     for item in &variant.items {
         match item {
             CodecItem::Field { field_id } => {
                 if let Some(f) = variant.fields.iter().find(|f| &f.field_id == field_id) {
+                    if asn1_length_fields.contains(&f.name.as_str()) {
+                        continue;
+                    }
                     emit_variant_field_serialize(
                         out,
                         f,
@@ -674,6 +680,20 @@ fn emit_variant_field_serialize(
                     "{indent}let {encoded_name} = {}::encode({field_name}).map_err(|_| Error::Asn1Encode)?;\n",
                     hint.encoding
                 ));
+                // For length-prefixed ASN.1 fields, write the recomputed length before the payload
+                if let Some(BytesSpec::Length {
+                    expr: CodecExpr::ValueRef { reference },
+                }) = &f.bytes_spec
+                {
+                    let len_field = crate::expr::extract_field_name(&reference.value_id);
+                    if let Some(lf) = all_fields.iter().find(|af| af.name == len_field) {
+                        let write_method = writer_write_method(&lf.wire_type, lf.endianness);
+                        out.push_str(&format!(
+                            "{indent}w.{write_method}({encoded_name}.len() as {})?;\n",
+                            wire_type_to_rust(&lf.wire_type)
+                        ));
+                    }
+                }
                 out.push_str(&format!("{indent}w.write_bytes(&{encoded_name})?;\n"));
             } else {
                 out.push_str(&format!("{indent}w.write_bytes({field_name})?;\n"));
