@@ -110,7 +110,7 @@ fn rust_backend_generates_rasn_code() {
     use wirespec_backend_api::*;
 
     let src = r#"
-        extern asn1 "supl/SUPL.asn1" { SuplPosInit }
+        extern asn1 "supl/SUPL.asn1" use supl_types { SuplPosInit }
         packet SuplMessage {
             version: u8,
             length: u16,
@@ -139,6 +139,10 @@ fn rust_backend_generates_rasn_code() {
 
     // Verify key patterns in generated Rust
     assert!(rs.contains("use rasn::uper;"), "should import rasn");
+    assert!(
+        rs.contains("use supl_types::SuplPosInit;"),
+        "should import ASN.1 type from use clause"
+    );
     assert!(
         rs.contains("pub payload: SuplPosInit"),
         "field should be decoded type"

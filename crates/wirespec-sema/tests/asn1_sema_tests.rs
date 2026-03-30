@@ -96,4 +96,26 @@ fn ok_asn1_field_has_hint_in_sema() {
     assert_eq!(hint.type_name, "MyType");
     assert_eq!(hint.encoding, "uper");
     assert_eq!(hint.extern_path, "path/schema.asn1");
+    assert_eq!(hint.rust_module, None);
+}
+
+#[test]
+fn ok_asn1_field_has_rust_module_in_hint() {
+    let ast = parse(
+        r#"
+        extern asn1 "path/schema.asn1" use my_types { MyType }
+        packet P {
+            len: u16,
+            data: asn1(MyType, encoding: uper, length: len),
+        }
+    "#,
+    )
+    .unwrap();
+    let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
+    let hint = sem.packets[0].fields[1]
+        .asn1_hint
+        .as_ref()
+        .expect("should have asn1_hint");
+    assert_eq!(hint.type_name, "MyType");
+    assert_eq!(hint.rust_module.as_deref(), Some("my_types"));
 }

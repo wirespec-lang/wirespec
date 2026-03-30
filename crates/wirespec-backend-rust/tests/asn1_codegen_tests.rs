@@ -118,6 +118,56 @@ fn asn1_field_no_lifetime() {
 }
 
 #[test]
+fn asn1_field_generates_type_import() {
+    let rs = generate_rust(
+        r#"
+        extern asn1 "s.asn1" use asn1_types { Foo }
+        packet P { len: u16, data: asn1(Foo, encoding: uper, length: len) }
+    "#,
+    );
+    assert!(
+        rs.contains("use asn1_types::Foo;"),
+        "should import ASN.1 type, got:\n{}",
+        rs
+    );
+}
+
+#[test]
+fn asn1_field_no_import_without_use() {
+    let rs = generate_rust(
+        r#"
+        extern asn1 "s.asn1" { Foo }
+        packet P { len: u16, data: asn1(Foo, encoding: uper, length: len) }
+    "#,
+    );
+    assert!(
+        !rs.contains("use asn1_types::"),
+        "should not import without use clause, got:\n{}",
+        rs
+    );
+}
+
+#[test]
+fn asn1_field_generates_grouped_import() {
+    let rs = generate_rust(
+        r#"
+        extern asn1 "s.asn1" use asn1_types { Foo, Bar }
+        packet P {
+            len1: u16,
+            data1: asn1(Foo, encoding: uper, length: len1),
+            len2: u16,
+            data2: asn1(Bar, encoding: uper, length: len2),
+        }
+    "#,
+    );
+    assert!(
+        rs.contains("use asn1_types::{Bar, Foo};"),
+        "should group imports, got:\n{}",
+        rs
+    );
+}
+
+#[test]
 fn asn1_remaining_parse() {
     let rs = generate_rust(
         r#"

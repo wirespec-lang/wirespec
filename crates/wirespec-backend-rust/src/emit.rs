@@ -175,7 +175,65 @@ pub fn emit_source(module: &CodecModule, _prefix: &str) -> String {
                     .any(|v| v.fields.iter().any(|f| f.asn1_hint.is_some()))
         });
     if has_asn1 {
-        out.push_str("use rasn::uper;\n\n");
+        out.push_str("use rasn::uper;\n");
+
+        // Collect unique imports from ASN.1 hints
+        let mut imports: std::collections::BTreeMap<String, Vec<String>> =
+            std::collections::BTreeMap::new();
+        for packet in &module.packets {
+            for f in &packet.fields {
+                if let Some(ref hint) = f.asn1_hint
+                    && let Some(ref rust_mod) = hint.rust_module
+                {
+                    imports
+                        .entry(rust_mod.clone())
+                        .or_default()
+                        .push(hint.type_name.clone());
+                }
+            }
+        }
+        for frame in &module.frames {
+            for v in &frame.variants {
+                for f in &v.fields {
+                    if let Some(ref hint) = f.asn1_hint
+                        && let Some(ref rust_mod) = hint.rust_module
+                    {
+                        imports
+                            .entry(rust_mod.clone())
+                            .or_default()
+                            .push(hint.type_name.clone());
+                    }
+                }
+            }
+        }
+        for capsule in &module.capsules {
+            for f in capsule
+                .header_fields
+                .iter()
+                .chain(capsule.variants.iter().flat_map(|v| v.fields.iter()))
+            {
+                if let Some(ref hint) = f.asn1_hint
+                    && let Some(ref rust_mod) = hint.rust_module
+                {
+                    imports
+                        .entry(rust_mod.clone())
+                        .or_default()
+                        .push(hint.type_name.clone());
+                }
+            }
+        }
+
+        // Emit use statements
+        for (mod_path, mut types) in imports {
+            types.sort();
+            types.dedup();
+            if types.len() == 1 {
+                out.push_str(&format!("use {}::{};\n", mod_path, types[0]));
+            } else {
+                out.push_str(&format!("use {}::{{{}}};\n", mod_path, types.join(", ")));
+            }
+        }
+        out.push('\n');
     }
 
     // VarInts

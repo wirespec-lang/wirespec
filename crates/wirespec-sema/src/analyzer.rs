@@ -320,6 +320,7 @@ impl Analyzer {
                 AstTopItem::ExternAsn1(e) => {
                     self.asn1_externs.push(Asn1ExternDecl {
                         path: e.path.clone(),
+                        rust_module: e.rust_module.clone(),
                         type_names: e.type_names.clone(),
                         span: e.span,
                     });
@@ -1375,11 +1376,10 @@ impl Analyzer {
                 length,
             } => {
                 // Validate type name exists in extern declarations
-                let extern_path = self
+                let extern_decl = self
                     .asn1_externs
                     .iter()
                     .find(|e| e.type_names.contains(type_name))
-                    .map(|e| e.path.clone())
                     .ok_or_else(|| {
                         SemaError::new(
                             ErrorKind::UndefinedAsn1Type,
@@ -1389,6 +1389,8 @@ impl Analyzer {
                             ),
                         )
                     })?;
+                let extern_path = extern_decl.path.clone();
+                let rust_module = extern_decl.rust_module.clone();
 
                 // Validate encoding (v0.2.0: only uper)
                 if encoding != "uper" {
@@ -1416,6 +1418,7 @@ impl Analyzer {
                     type_name: type_name.clone(),
                     encoding: encoding.clone(),
                     extern_path,
+                    rust_module,
                 });
 
                 Ok((

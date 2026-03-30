@@ -1874,6 +1874,19 @@ impl Parser {
             _ => return Err(self.error("expected string literal for ASN.1 file path".into())),
         };
 
+        // Optional: use <module_path>
+        let rust_module = if let Some(name) = self.token_as_name() {
+            if name == "use" {
+                self.advance(); // skip "use"
+                let (mod_path, _) = self.expect_name()?;
+                Some(mod_path)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         // Expect { TypeA, TypeB, ... }
         self.expect(&TokenKind::LBrace)?;
         let mut type_names = Vec::new();
@@ -1888,6 +1901,7 @@ impl Parser {
 
         Ok(AstTopItem::ExternAsn1(AstExternAsn1 {
             path,
+            rust_module,
             type_names,
             span: Some(start),
         }))

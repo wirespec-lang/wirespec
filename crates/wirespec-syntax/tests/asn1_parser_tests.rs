@@ -8,6 +8,20 @@ fn parse_extern_asn1_single_type() {
     match &ast.items[0] {
         wirespec_syntax::ast::AstTopItem::ExternAsn1(e) => {
             assert_eq!(e.path, "supl/SUPL.asn1");
+            assert_eq!(e.rust_module, None);
+            assert_eq!(e.type_names, vec!["SuplPosInit"]);
+        }
+        other => panic!("expected ExternAsn1, got {:?}", other),
+    }
+}
+
+#[test]
+fn parse_extern_asn1_with_use() {
+    let ast = parse(r#"extern asn1 "SUPL.asn1" use supl_types { SuplPosInit }"#).unwrap();
+    match &ast.items[0] {
+        wirespec_syntax::ast::AstTopItem::ExternAsn1(e) => {
+            assert_eq!(e.path, "SUPL.asn1");
+            assert_eq!(e.rust_module.as_deref(), Some("supl_types"));
             assert_eq!(e.type_names, vec!["SuplPosInit"]);
         }
         other => panic!("expected ExternAsn1, got {:?}", other),

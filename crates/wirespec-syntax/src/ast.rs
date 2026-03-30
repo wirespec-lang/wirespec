@@ -298,6 +298,7 @@ pub enum AstTopItem {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AstExternAsn1 {
     pub path: String,
+    pub rust_module: Option<String>,
     pub type_names: Vec<String>,
     pub span: Option<Span>,
 }

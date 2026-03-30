@@ -131,6 +131,7 @@ pub enum DeriveTrait {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Asn1ExternDecl {
     pub path: String,
+    pub rust_module: Option<String>,
     pub type_names: Vec<String>,
     pub span: Option<wirespec_syntax::span::Span>,
 }
@@ -141,4 +142,5 @@ pub struct Asn1Hint {
     pub type_name: String,
     pub encoding: String,
     pub extern_path: String,
+    pub rust_module: Option<String>,
 }
