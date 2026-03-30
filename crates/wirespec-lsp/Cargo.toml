@@ -1,0 +1,16 @@
+[package]
+name = "wirespec-lsp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Language Server Protocol server for wirespec"
+
+[[bin]]
+name = "wirespec-lsp"
+path = "src/main.rs"
+
+[dependencies]
+tower-lsp = "0.20"
+tokio = { version = "1", features = ["full"] }
+wirespec-syntax = { path = "../wirespec-syntax" }
+wirespec-sema = { path = "../wirespec-sema" }
