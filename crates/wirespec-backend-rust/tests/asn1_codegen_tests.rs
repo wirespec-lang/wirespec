@@ -168,6 +168,36 @@ fn asn1_field_generates_grouped_import() {
 }
 
 #[test]
+fn asn1_serialize_recomputes_length_field() {
+    let rs = generate_rust(
+        r#"
+        extern asn1 "s.asn1" { Foo }
+        packet P { len: u16, data: asn1(Foo, encoding: uper, length: len) }
+    "#,
+    );
+    // serialize must NOT write self.len directly — it should write
+    // the encoded payload length instead
+    assert!(
+        !rs.contains("w.write_u16be(self.len)"),
+        "serialize should NOT write self.len directly; must recompute from encoded payload.\nGot:\n{}",
+        rs
+    );
+    // The encoded payload should be computed BEFORE the length is written
+    let serialize_section = rs.split("fn serialize").nth(1).unwrap_or("");
+    let encode_pos = serialize_section
+        .find("uper::encode(")
+        .expect("should call uper::encode");
+    let write_len_pos = serialize_section
+        .find("_encoded.len()")
+        .expect("should write encoded length");
+    assert!(
+        encode_pos < write_len_pos,
+        "payload must be encoded before length is written.\nGot:\n{}",
+        rs
+    );
+}
+
+#[test]
 fn asn1_remaining_parse() {
     let rs = generate_rust(
         r#"

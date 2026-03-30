@@ -18,10 +18,19 @@ pub fn emit_serialize_items(
 ) {
     let mut emitted_bitgroups: Vec<u32> = Vec::new();
 
+    // Pre-scan: find length fields that are associated with ASN.1 payload fields.
+    // These length fields must NOT be serialized normally — their value is recomputed
+    // from the encoded ASN.1 payload.
+    let asn1_length_fields = collect_asn1_length_field_names(fields);
+
     for item in items {
         match item {
             CodecItem::Field { field_id } => {
                 if let Some(f) = fields.iter().find(|f| &f.field_id == field_id) {
+                    // Skip length fields that will be recomputed by ASN.1 payload serialization
+                    if asn1_length_fields.contains(&f.name.as_str()) {
+                        continue;
+                    }
                     emit_field_serialize(
                         out,
                         f,
@@ -37,6 +46,22 @@ pub fn emit_serialize_items(
             }
         }
     }
+}
+
+/// Collect names of length fields that are referenced by ASN.1 payload fields.
+fn collect_asn1_length_field_names(fields: &[CodecField]) -> Vec<&str> {
+    let mut names = Vec::new();
+    for f in fields {
+        if f.asn1_hint.is_some()
+            && let Some(BytesSpec::Length {
+                expr: CodecExpr::ValueRef { reference },
+            }) = &f.bytes_spec
+        {
+            let field_name = crate::expr::extract_field_name(&reference.value_id);
+            names.push(field_name);
+        }
+    }
+    names
 }
 
 fn emit_field_serialize(
@@ -68,10 +93,26 @@ fn emit_field_serialize(
         | FieldStrategy::BytesRemaining
         | FieldStrategy::BytesLor => {
             if let Some(ref _hint) = f.asn1_hint {
+                // Encode payload first
                 out.push_str(&format!(
                     "{indent}let _{}_encoded = uper::encode(&{val_prefix}{}).map_err(|_| Error::Asn1Encode)?;\n",
                     f.name, f.name
                 ));
+                // For length-prefixed ASN.1 fields, write the recomputed length before the payload
+                if let Some(BytesSpec::Length {
+                    expr: CodecExpr::ValueRef { reference },
+                }) = &f.bytes_spec
+                {
+                    let len_field = crate::expr::extract_field_name(&reference.value_id);
+                    if let Some(lf) = all_fields.iter().find(|af| af.name == len_field) {
+                        let write_method = writer_write_method(&lf.wire_type, lf.endianness);
+                        out.push_str(&format!(
+                            "{indent}w.{write_method}(_{}_encoded.len() as {})?;\n",
+                            f.name,
+                            wire_type_to_rust(&lf.wire_type)
+                        ));
+                    }
+                }
                 out.push_str(&format!("{indent}w.write_bytes(&_{}_encoded)?;\n", f.name));
             } else {
                 out.push_str(&format!(
