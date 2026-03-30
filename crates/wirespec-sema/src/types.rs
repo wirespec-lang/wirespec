@@ -126,3 +126,19 @@ pub enum DeriveTrait {
     Debug,
     Compare,
 }
+
+/// ASN.1 extern declaration (module-level).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Asn1ExternDecl {
+    pub path: String,
+    pub type_names: Vec<String>,
+    pub span: Option<wirespec_syntax::span::Span>,
+}
+
+/// ASN.1 hint attached to a field for backend codegen.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Asn1Hint {
+    pub type_name: String,
+    pub encoding: String,
+    pub extern_path: String,
+}

@@ -38,6 +38,10 @@ struct Analyzer {
     errors: Vec<SemaError>,
     /// External type names and kinds from previously-compiled modules.
     external_types: std::collections::HashMap<String, DeclKind>,
+    /// ASN.1 extern declarations collected during Pass 1.
+    asn1_externs: Vec<Asn1ExternDecl>,
+    /// Pending ASN.1 hint from the most recent `resolve_type_expr` call.
+    pending_asn1_hint: Option<Asn1Hint>,
 }
 
 impl Analyzer {
@@ -48,6 +52,8 @@ impl Analyzer {
             profile,
             errors: Vec::new(),
             external_types: std::collections::HashMap::new(),
+            asn1_externs: Vec::new(),
+            pending_asn1_hint: None,
         }
     }
 
@@ -169,7 +175,7 @@ impl Analyzer {
                     item_order.push(id);
                 }
                 AstTopItem::ExternAsn1(_) => {
-                    // Handled in a later phase
+                    // Already registered in Pass 1
                 }
             }
         }
@@ -190,6 +196,7 @@ impl Analyzer {
             capsules,
             state_machines,
             static_asserts,
+            asn1_externs: self.asn1_externs.clone(),
             item_order,
         })
     }
@@ -310,8 +317,12 @@ impl Analyzer {
                 AstTopItem::StaticAssert(_) => {
                     // Nothing to register
                 }
-                AstTopItem::ExternAsn1(_) => {
-                    // Handled in a later phase
+                AstTopItem::ExternAsn1(e) => {
+                    self.asn1_externs.push(Asn1ExternDecl {
+                        path: e.path.clone(),
+                        type_names: e.type_names.clone(),
+                        span: e.span,
+                    });
                 }
             }
         }
@@ -1015,8 +1026,14 @@ impl Analyzer {
     ) -> SemaResult<SemanticField> {
         let field_id = format!("{}.field[{}]", scope_id, index);
 
+        // Clear any pending hint before resolving
+        self.pending_asn1_hint = None;
+
         // Resolve type expression
         let (ty, presence) = self.resolve_type_expr(&field.type_expr)?;
+
+        // Take the pending ASN.1 hint (set by resolve_type_expr for asn1() types)
+        let asn1_hint = self.pending_asn1_hint.take();
 
         // bool is a semantic type, not a wire type — reject in wire field context
         if let SemanticType::Primitive {
@@ -1089,6 +1106,7 @@ impl Analyzer {
             presence,
             max_elements,
             checksum_algorithm,
+            asn1_hint,
             span: field.span,
         })
     }
@@ -1351,10 +1369,64 @@ impl Analyzer {
                     ))
                 }
             }
-            AstTypeExpr::Asn1 { .. } => Err(SemaError::new(
-                ErrorKind::TypeMismatch,
-                "ASN.1 field types not yet implemented",
-            )),
+            AstTypeExpr::Asn1 {
+                type_name,
+                encoding,
+                length,
+            } => {
+                // Validate type name exists in extern declarations
+                let extern_path = self
+                    .asn1_externs
+                    .iter()
+                    .find(|e| e.type_names.contains(type_name))
+                    .map(|e| e.path.clone())
+                    .ok_or_else(|| {
+                        SemaError::new(
+                            ErrorKind::UndefinedAsn1Type,
+                            format!(
+                                "ASN.1 type '{}' not declared in any 'extern asn1' block",
+                                type_name
+                            ),
+                        )
+                    })?;
+
+                // Validate encoding (v0.2.0: only uper)
+                if encoding != "uper" {
+                    return Err(SemaError::new(
+                        ErrorKind::UnsupportedAsn1Encoding,
+                        format!(
+                            "unsupported ASN.1 encoding '{}'; only 'uper' is supported",
+                            encoding
+                        ),
+                    ));
+                }
+
+                // Lower to bytes type
+                use wirespec_syntax::ast::Asn1Length;
+                let (bytes_kind, size_expr) = match length {
+                    Asn1Length::Remaining => (SemanticBytesKind::Remaining, None),
+                    Asn1Length::Expr(expr) => {
+                        let sem_expr = self.lower_expr(expr, &[], &[]);
+                        (SemanticBytesKind::Length, Some(Box::new(sem_expr)))
+                    }
+                };
+
+                // Store hint for pending attachment
+                self.pending_asn1_hint = Some(Asn1Hint {
+                    type_name: type_name.clone(),
+                    encoding: encoding.clone(),
+                    extern_path,
+                });
+
+                Ok((
+                    SemanticType::Bytes {
+                        bytes_kind,
+                        fixed_size: None,
+                        size_expr,
+                    },
+                    FieldPresence::Always,
+                ))
+            }
         }
     }
 

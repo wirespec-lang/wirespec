@@ -24,6 +24,8 @@ pub enum ErrorKind {
     SmDelegateWithAction,
     CyclicDependency,
     ReservedIdentifier,
+    UndefinedAsn1Type,
+    UnsupportedAsn1Encoding,
 }
 
 #[derive(Debug, Clone)]

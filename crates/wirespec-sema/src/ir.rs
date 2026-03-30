@@ -20,6 +20,7 @@ pub struct SemanticModule {
     pub capsules: Vec<SemanticCapsule>,
     pub state_machines: Vec<SemanticStateMachine>,
     pub static_asserts: Vec<SemanticStaticAssert>,
+    pub asn1_externs: Vec<crate::types::Asn1ExternDecl>,
     /// All items in declaration order, by ID.
     pub item_order: Vec<String>,
 }
@@ -126,6 +127,7 @@ pub struct SemanticField {
     pub presence: FieldPresence,
     pub max_elements: Option<u32>,
     pub checksum_algorithm: Option<String>,
+    pub asn1_hint: Option<crate::types::Asn1Hint>,
     pub span: Option<Span>,
 }
 
