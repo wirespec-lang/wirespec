@@ -1,4 +1,4 @@
-extern asn1 "supl/SUPL.asn1" use supl_types { SuplPosInit }
+extern asn1 "supl/SUPL.asn1" use crate::supl_types { SuplPosInit }
 
 packet SuplMessage {
     version: u8,

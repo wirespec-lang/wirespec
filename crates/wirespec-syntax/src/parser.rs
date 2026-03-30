@@ -1878,7 +1878,12 @@ impl Parser {
         let rust_module = if let Some(name) = self.token_as_name() {
             if name == "use" {
                 self.advance(); // skip "use"
-                let (mod_path, _) = self.expect_name()?;
+                let (first, _) = self.expect_name()?;
+                let mut mod_path = first;
+                while self.eat(&TokenKind::ColonColon) {
+                    let (part, _) = self.expect_name()?;
+                    mod_path = format!("{mod_path}::{part}");
+                }
                 Some(mod_path)
             } else {
                 None
