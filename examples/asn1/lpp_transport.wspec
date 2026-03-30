@@ -3,7 +3,7 @@
 //
 // LPP messages carry positioning measurements between UE and location server.
 
-extern asn1 "3gpp/lpp.asn1" use crate::lpp { LppMessage }
+extern asn1 "lpp.asn1" { LppMessage }
 
 capsule LppTransportPdu {
     transaction_id: u8,

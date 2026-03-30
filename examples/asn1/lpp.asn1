@@ -1,0 +1,16 @@
+-- Simplified LPP positioning message for wirespec example
+LPP-Types DEFINITIONS AUTOMATIC TAGS ::= BEGIN
+
+LppMessage ::= SEQUENCE {
+    transactionId  INTEGER (0..255),
+    sequenceNumber INTEGER (0..255),
+    acknowledgement BOOLEAN OPTIONAL,
+    body           LppBody
+}
+
+LppBody ::= SEQUENCE {
+    messageType    INTEGER (0..15),
+    payload        OCTET STRING
+}
+
+END

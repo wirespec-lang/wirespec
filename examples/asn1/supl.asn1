@@ -1,0 +1,17 @@
+-- Simplified SUPL positioning types for wirespec example
+SUPL-Types DEFINITIONS AUTOMATIC TAGS ::= BEGIN
+
+SuplPosInit ::= SEQUENCE {
+    sessionId    INTEGER (0..65535),
+    suplVersion  INTEGER (0..255),
+    locationId   LocationId
+}
+
+LocationId ::= SEQUENCE {
+    mcc    INTEGER (0..999),
+    mnc    INTEGER (0..999),
+    lac    INTEGER (0..65535),
+    ci     INTEGER (0..65535)
+}
+
+END
