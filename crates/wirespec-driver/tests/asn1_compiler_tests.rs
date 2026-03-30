@@ -66,3 +66,59 @@ fn compile_asn1_file_not_found() {
     let result = asn1_compile::compile_asn1(&PathBuf::from("nonexistent.asn1"));
     assert!(result.is_err());
 }
+
+#[test]
+fn compile_asn1_handles_multiple_types() {
+    let result = asn1_compile::compile_asn1(&test_asn1_path()).unwrap();
+    // Should find both struct types
+    assert!(
+        result.type_names.len() >= 2,
+        "should find at least 2 types, got: {:?}",
+        result.type_names
+    );
+}
+
+#[test]
+fn extract_module_name_from_rasn_output() {
+    // Verify the compile result has the right module name
+    let result = asn1_compile::compile_asn1(&test_asn1_path()).unwrap();
+    assert!(
+        !result.module_name.is_empty(),
+        "module_name should not be empty"
+    );
+    // ASN.1 module "TestModule" becomes "test_module" in rasn output
+    assert_eq!(result.module_name, "test_module");
+}
+
+#[test]
+fn validate_types_multiple_declared() {
+    let result = asn1_compile::compile_asn1(&test_asn1_path()).unwrap();
+    // Validate multiple types at once
+    assert!(
+        asn1_compile::validate_types(
+            &["SimpleMessage".to_string(), "AnotherType".to_string()],
+            &result.type_names,
+            "test.asn1"
+        )
+        .is_ok()
+    );
+}
+
+#[test]
+fn validate_types_error_lists_available() {
+    let result = asn1_compile::compile_asn1(&test_asn1_path()).unwrap();
+    let err =
+        asn1_compile::validate_types(&["BadType".to_string()], &result.type_names, "test.asn1")
+            .unwrap_err();
+    // Error message should list available types
+    assert!(err.contains("BadType"), "should mention the missing type");
+    assert!(err.contains("test.asn1"), "should mention the ASN.1 file");
+    for t in &result.type_names {
+        assert!(
+            err.contains(t),
+            "should list available type '{}' in error: {}",
+            t,
+            err
+        );
+    }
+}
