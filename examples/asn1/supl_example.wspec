@@ -1,0 +1,7 @@
+extern asn1 "supl/SUPL.asn1" { SuplPosInit }
+
+packet SuplMessage {
+    version: u8,
+    length: u16,
+    payload: asn1(SuplPosInit, encoding: uper, length: length),
+}
