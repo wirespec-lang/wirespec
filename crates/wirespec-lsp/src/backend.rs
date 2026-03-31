@@ -26,6 +26,16 @@ impl LanguageServer for Backend {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
                     TextDocumentSyncKind::FULL,
                 )),
+                semantic_tokens_provider: Some(
+                    SemanticTokensServerCapabilities::SemanticTokensOptions(
+                        SemanticTokensOptions {
+                            legend: crate::semantic_tokens::legend(),
+                            full: Some(SemanticTokensFullOptions::Bool(true)),
+                            range: None,
+                            ..Default::default()
+                        },
+                    ),
+                ),
                 ..Default::default()
             },
             ..Default::default()
@@ -63,6 +73,28 @@ impl LanguageServer for Backend {
             let (_ast, diags) = crate::diagnostics::compute_diagnostics(&change.text);
             self.client.publish_diagnostics(uri, diags, None).await;
         }
+    }
+
+    async fn semantic_tokens_full(
+        &self,
+        params: SemanticTokensParams,
+    ) -> Result<Option<SemanticTokensResult>> {
+        let uri = params.text_document.uri;
+        let docs = self.documents.lock().unwrap();
+        let Some(source) = docs.get(&uri) else {
+            return Ok(None);
+        };
+        let source = source.clone();
+        drop(docs);
+
+        let Ok(ast) = wirespec_syntax::parse(&source) else {
+            return Ok(None);
+        };
+        let tokens = crate::semantic_tokens::compute_semantic_tokens(&source, &ast);
+        Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
+            result_id: None,
+            data: tokens,
+        })))
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
