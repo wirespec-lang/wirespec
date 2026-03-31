@@ -36,6 +36,11 @@ impl LanguageServer for Backend {
                         },
                     ),
                 ),
+                completion_provider: Some(CompletionOptions {
+                    trigger_characters: Some(vec![":".into(), "@".into(), " ".into()]),
+                    ..Default::default()
+                }),
+                hover_provider: Some(HoverProviderCapability::Simple(true)),
                 ..Default::default()
             },
             ..Default::default()
@@ -95,6 +100,31 @@ impl LanguageServer for Backend {
             result_id: None,
             data: tokens,
         })))
+    }
+
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+        let docs = self.documents.lock().unwrap();
+        let Some(source) = docs.get(&uri) else {
+            return Ok(None);
+        };
+        let source = source.clone();
+        drop(docs);
+        let items = crate::completion::compute_completions(&source, position);
+        Ok(Some(CompletionResponse::Array(items)))
+    }
+
+    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+        let docs = self.documents.lock().unwrap();
+        let Some(source) = docs.get(&uri) else {
+            return Ok(None);
+        };
+        let source = source.clone();
+        drop(docs);
+        Ok(crate::hover::compute_hover(&source, position))
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
