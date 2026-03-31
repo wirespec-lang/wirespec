@@ -1,0 +1,77 @@
+use std::collections::HashMap;
+use std::sync::Mutex;
+use tower_lsp::jsonrpc::Result;
+use tower_lsp::lsp_types::*;
+use tower_lsp::{Client, LanguageServer};
+
+pub struct Backend {
+    pub client: Client,
+    pub documents: Mutex<HashMap<Url, String>>,
+}
+
+impl Backend {
+    pub fn new(client: Client) -> Self {
+        Self {
+            client,
+            documents: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+#[tower_lsp::async_trait]
+impl LanguageServer for Backend {
+    async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
+        Ok(InitializeResult {
+            capabilities: ServerCapabilities {
+                text_document_sync: Some(TextDocumentSyncCapability::Kind(
+                    TextDocumentSyncKind::FULL,
+                )),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+    }
+
+    async fn initialized(&self, _: InitializedParams) {
+        self.client
+            .log_message(MessageType::INFO, "wirespec LSP initialized")
+            .await;
+    }
+
+    async fn shutdown(&self) -> Result<()> {
+        Ok(())
+    }
+
+    async fn did_open(&self, params: DidOpenTextDocumentParams) {
+        let uri = params.text_document.uri.clone();
+        let text = params.text_document.text.clone();
+        self.documents
+            .lock()
+            .unwrap()
+            .insert(uri.clone(), text.clone());
+        let (_ast, diags) = crate::diagnostics::compute_diagnostics(&text);
+        self.client.publish_diagnostics(uri, diags, None).await;
+    }
+
+    async fn did_change(&self, params: DidChangeTextDocumentParams) {
+        if let Some(change) = params.content_changes.into_iter().last() {
+            let uri = params.text_document.uri.clone();
+            self.documents
+                .lock()
+                .unwrap()
+                .insert(uri.clone(), change.text.clone());
+            let (_ast, diags) = crate::diagnostics::compute_diagnostics(&change.text);
+            self.client.publish_diagnostics(uri, diags, None).await;
+        }
+    }
+
+    async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        self.documents
+            .lock()
+            .unwrap()
+            .remove(&params.text_document.uri);
+        self.client
+            .publish_diagnostics(params.text_document.uri, vec![], None)
+            .await;
+    }
+}
