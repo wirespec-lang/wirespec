@@ -36,6 +36,7 @@ struct Analyzer {
     registry: TypeRegistry,
     profile: ComplianceProfile,
     errors: Vec<SemaError>,
+    warnings: Vec<SemaWarning>,
     /// External type names and kinds from previously-compiled modules.
     external_types: std::collections::HashMap<String, DeclKind>,
     /// ASN.1 extern declarations collected during Pass 1.
@@ -51,6 +52,7 @@ impl Analyzer {
             registry: TypeRegistry::new(Endianness::Big),
             profile,
             errors: Vec::new(),
+            warnings: Vec::new(),
             external_types: std::collections::HashMap::new(),
             asn1_externs: Vec::new(),
             pending_asn1_hint: None,
@@ -260,6 +262,7 @@ impl Analyzer {
             static_asserts,
             asn1_externs: self.asn1_externs.clone(),
             item_order,
+            warnings: std::mem::take(&mut self.warnings),
         })
     }
 

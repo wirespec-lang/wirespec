@@ -218,3 +218,30 @@ fn ok_sm_delegate_diamond() {
     "#,
     );
 }
+
+// ── Warning Infrastructure ──
+
+fn get_warnings(src: &str) -> Vec<wirespec_sema::ir::SemaWarning> {
+    let ast = parse(src).unwrap();
+    let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
+    sem.warnings
+}
+
+#[test]
+fn ok_module_with_no_warnings() {
+    let warnings = get_warnings(
+        r#"
+        state machine S {
+            state A {}
+            state B [terminal]
+            initial A
+            transition A -> B { on go }
+        }
+    "#,
+    );
+    assert!(
+        warnings.is_empty(),
+        "expected no warnings, got: {:?}",
+        warnings
+    );
+}
