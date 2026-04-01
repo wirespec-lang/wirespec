@@ -182,6 +182,68 @@ impl Analyzer {
 
         self.first_error()?;
 
+        // S4: Delegate acyclicity — detect cyclic SM delegation chains
+        {
+            use std::collections::{HashMap, HashSet, VecDeque};
+            let mut edges: HashMap<&str, HashSet<&str>> = HashMap::new();
+            let mut all_names: HashSet<&str> = HashSet::new();
+            for sm in &state_machines {
+                all_names.insert(&sm.name);
+                for state in &sm.states {
+                    for field in &state.fields {
+                        if let Some(ref child) = field.child_sm_name {
+                            edges
+                                .entry(sm.name.as_str())
+                                .or_default()
+                                .insert(child.as_str());
+                        }
+                    }
+                }
+            }
+            let mut in_deg: HashMap<&str, usize> = all_names.iter().map(|&n| (n, 0)).collect();
+            for targets in edges.values() {
+                for &t in targets {
+                    if let Some(d) = in_deg.get_mut(t) {
+                        *d += 1;
+                    }
+                }
+            }
+            let mut queue: VecDeque<&str> = in_deg
+                .iter()
+                .filter(|&(_, &d)| d == 0)
+                .map(|(&n, _)| n)
+                .collect();
+            let mut count = 0;
+            while let Some(node) = queue.pop_front() {
+                count += 1;
+                if let Some(targets) = edges.get(node) {
+                    for &t in targets {
+                        if let Some(d) = in_deg.get_mut(t) {
+                            *d -= 1;
+                            if *d == 0 {
+                                queue.push_back(t);
+                            }
+                        }
+                    }
+                }
+            }
+            if count < all_names.len() {
+                let cycle: Vec<&str> = in_deg
+                    .iter()
+                    .filter(|&(_, &d)| d > 0)
+                    .map(|(&n, _)| n)
+                    .collect();
+                return Err(SemaError::new(
+                    ErrorKind::CyclicDependency,
+                    format!(
+                        "cyclic delegate dependency detected: {}",
+                        cycle.join(" -> ")
+                    ),
+                )
+                .with_hint("state machines cannot form a circular delegation chain"));
+            }
+        }
+
         Ok(SemanticModule {
             schema_version: "semantic-ir/v1".to_string(),
             compliance_profile: self.profile.as_str().to_string(),
