@@ -1793,6 +1793,21 @@ impl Analyzer {
         for t in &sm.transitions {
             let is_wildcard = t.src_state == "*";
 
+            // S2: Terminal states cannot have explicit outgoing transitions
+            if !is_wildcard && terminal_names.contains(&t.src_state) {
+                return Err(SemaError::new(
+                    ErrorKind::SmTerminalHasOutgoing,
+                    format!(
+                        "terminal state '{}' cannot have outgoing transitions in state machine '{}'",
+                        t.src_state, sm.name
+                    ),
+                )
+                .with_span(t.span)
+                .with_hint(
+                    "remove this transition or un-mark the state as [terminal]",
+                ));
+            }
+
             // Determine source states to expand
             let src_states: Vec<String> = if is_wildcard {
                 // Expand to all non-terminal states

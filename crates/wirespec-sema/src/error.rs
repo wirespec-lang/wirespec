@@ -22,6 +22,7 @@ pub enum ErrorKind {
     SmMissingAssignment,
     SmDelegateNotSelfTransition,
     SmDelegateWithAction,
+    SmTerminalHasOutgoing,
     CyclicDependency,
     ReservedIdentifier,
     UndefinedAsn1Type,
