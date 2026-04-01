@@ -2118,6 +2118,88 @@ impl Analyzer {
 
         self.first_error()?;
 
+        // S5: StructuralReachability — warn about states that cannot reach a
+        // terminal or are unreachable from the initial state.
+        {
+            use std::collections::{HashMap, HashSet, VecDeque};
+
+            let terminal_set: HashSet<&str> = terminal_names.iter().map(|s| s.as_str()).collect();
+
+            // A) Reverse BFS from terminals — can each non-terminal reach a terminal?
+            {
+                let mut reverse: HashMap<&str, Vec<&str>> = HashMap::new();
+                for t in &transitions {
+                    reverse
+                        .entry(t.dst_state_name.as_str())
+                        .or_default()
+                        .push(t.src_state_name.as_str());
+                }
+                let mut visited: HashSet<&str> = HashSet::new();
+                let mut queue: VecDeque<&str> = VecDeque::new();
+                for name in &terminal_set {
+                    visited.insert(name);
+                    queue.push_back(name);
+                }
+                while let Some(node) = queue.pop_front() {
+                    if let Some(preds) = reverse.get(node) {
+                        for &pred in preds {
+                            if visited.insert(pred) {
+                                queue.push_back(pred);
+                            }
+                        }
+                    }
+                }
+                for state in &states {
+                    if !state.is_terminal && !visited.contains(state.name.as_str()) {
+                        self.warnings.push(SemaWarning {
+                            kind: SemaWarningKind::SmUnreachableTerminal,
+                            msg: format!(
+                                "state '{}' in state machine '{}' cannot reach any terminal state",
+                                state.name, sm.name
+                            ),
+                            span: state.span,
+                        });
+                    }
+                }
+            }
+
+            // B) Forward BFS from initial — is each state reachable from initial?
+            {
+                let mut forward: HashMap<&str, Vec<&str>> = HashMap::new();
+                for t in &transitions {
+                    forward
+                        .entry(t.src_state_name.as_str())
+                        .or_default()
+                        .push(t.dst_state_name.as_str());
+                }
+                let mut visited: HashSet<&str> = HashSet::new();
+                let mut queue: VecDeque<&str> = VecDeque::new();
+                visited.insert(sm.initial_state.as_str());
+                queue.push_back(sm.initial_state.as_str());
+                while let Some(node) = queue.pop_front() {
+                    if let Some(succs) = forward.get(node) {
+                        for &succ in succs {
+                            if visited.insert(succ) {
+                                queue.push_back(succ);
+                            }
+                        }
+                    }
+                }
+                for state in &states {
+                    if !visited.contains(state.name.as_str()) {
+                        self.warnings.push(SemaWarning {
+                            kind: SemaWarningKind::SmUnreachableFromInitial,
+                            msg: format!(
+                                "state '{}' in state machine '{}' is not reachable from the initial state",
+                                state.name, sm.name
+                            ),
+                            span: state.span,
+                        });
+                    }
+                }
+            }
+        }
+
         Ok(SemanticStateMachine {
             sm_id,
             name: sm.name.clone(),

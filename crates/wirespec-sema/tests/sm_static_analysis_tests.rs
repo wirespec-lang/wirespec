@@ -245,3 +245,135 @@ fn ok_module_with_no_warnings() {
         warnings
     );
 }
+
+use wirespec_sema::ir::SemaWarningKind;
+
+fn get_warning_kinds(src: &str) -> Vec<SemaWarningKind> {
+    get_warnings(src).iter().map(|w| w.kind).collect()
+}
+
+// ── S5: StructuralReachability ──
+
+#[test]
+fn warning_sm_unreachable_terminal() {
+    let kinds = get_warning_kinds(
+        r#"
+        state machine S {
+            state A {}
+            state B {}
+            state Done [terminal]
+            initial A
+            transition A -> B { on go }
+            transition B -> A { on back }
+        }
+    "#,
+    );
+    assert!(
+        kinds.contains(&SemaWarningKind::SmUnreachableTerminal),
+        "expected SmUnreachableTerminal, got: {:?}",
+        kinds
+    );
+}
+
+#[test]
+fn warning_sm_unreachable_from_initial() {
+    let kinds = get_warning_kinds(
+        r#"
+        state machine S {
+            state A {}
+            state B {}
+            state Orphan {}
+            state Done [terminal]
+            initial A
+            transition A -> B { on go }
+            transition B -> Done { on finish }
+            transition Orphan -> Done { on finish }
+        }
+    "#,
+    );
+    assert!(
+        kinds.contains(&SemaWarningKind::SmUnreachableFromInitial),
+        "expected SmUnreachableFromInitial, got: {:?}",
+        kinds
+    );
+}
+
+#[test]
+fn ok_sm_all_states_reach_terminal() {
+    let warnings = get_warnings(
+        r#"
+        state machine S {
+            state A {}
+            state B {}
+            state Done [terminal]
+            initial A
+            transition A -> B { on go }
+            transition B -> Done { on finish }
+        }
+    "#,
+    );
+    assert!(
+        warnings.is_empty(),
+        "expected no warnings, got: {:?}",
+        warnings
+    );
+}
+
+#[test]
+fn ok_sm_linear_to_terminal() {
+    let warnings = get_warnings(
+        r#"
+        state machine S {
+            state Init {}
+            state Active {}
+            state Closing {}
+            state Closed [terminal]
+            initial Init
+            transition Init -> Active { on start }
+            transition Active -> Closing { on close }
+            transition Closing -> Closed { on done }
+        }
+    "#,
+    );
+    assert!(warnings.is_empty());
+}
+
+#[test]
+fn ok_sm_wildcard_ensures_reachability() {
+    let warnings = get_warnings(
+        r#"
+        state machine S {
+            state A {}
+            state B {}
+            state Done [terminal]
+            initial A
+            transition A -> B { on go }
+            transition * -> Done { on abort }
+        }
+    "#,
+    );
+    assert!(warnings.is_empty());
+}
+
+#[test]
+fn warning_sm_cycle_without_exit() {
+    let kinds = get_warning_kinds(
+        r#"
+        state machine S {
+            state A {}
+            state B {}
+            state C {}
+            state Done [terminal]
+            initial A
+            transition A -> B { on x }
+            transition B -> C { on y }
+            transition C -> A { on z }
+        }
+    "#,
+    );
+    assert!(
+        kinds.contains(&SemaWarningKind::SmUnreachableTerminal),
+        "cycle should warn about unreachable terminal, got: {:?}",
+        kinds
+    );
+}
