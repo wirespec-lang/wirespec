@@ -84,13 +84,26 @@ pub fn emit_spec(sm: &SemanticStateMachine, _bound: u32) -> String {
     let action_names = compute_action_names(sm);
     emit_next(&mut out, &action_names);
 
-    // Spec
+    // Determine if terminal states exist (for liveness)
+    let has_terminals = sm.states.iter().any(|s| s.is_terminal);
+
+    // Spec (include WF when liveness properties are present)
     out.push_str("\\* Specification\n");
-    out.push_str("Spec == Init /\\ [][Next]_sm\n\n");
+    if has_terminals {
+        out.push_str("Spec == Init /\\ [][Next]_sm /\\ WF_sm(Next)\n\n");
+    } else {
+        out.push_str("Spec == Init /\\ [][Next]_sm\n\n");
+    }
 
     // NoDeadlock property
     out.push_str("\\* NoDeadlock: terminal states or transitions enabled\n");
     out.push_str("NoDeadlock == sm.tag \\in TerminalStates \\/ ENABLED(Next)\n\n");
+
+    // AllReachClosed liveness property (only when terminal states exist)
+    if has_terminals {
+        out.push_str("\\* AllReachClosed: eventually reach a terminal state\n");
+        out.push_str("AllReachClosed == <>(sm.tag \\in TerminalStates)\n\n");
+    }
 
     // Module footer
     out.push_str("====\n");
@@ -100,12 +113,18 @@ pub fn emit_spec(sm: &SemanticStateMachine, _bound: u32) -> String {
 
 /// Emit the .cfg file.
 pub fn emit_config(sm: &SemanticStateMachine, bound: u32) -> String {
-    let _ = sm;
+    let has_terminals = sm.states.iter().any(|s| s.is_terminal);
+
     let mut out = String::new();
     out.push_str("SPECIFICATION Spec\n");
     out.push_str(&format!("CONSTANT Bound = {}\n\n", bound));
     out.push_str("INVARIANT TypeOK\n");
     out.push_str("INVARIANT NoDeadlock\n");
+
+    if has_terminals {
+        out.push_str("\nPROPERTY AllReachClosed\n");
+    }
+
     out
 }
 
@@ -456,6 +475,7 @@ fn expr_to_tla(expr: &SemanticExpr) -> String {
                 "!=" => "/=",
                 "and" => "/\\",
                 "or" => "\\/",
+                "~>" => "~>",
                 _ => op.as_str(), // <, <=, >, >=, +, -, * pass through
             };
             format!("({} {} {})", l, tla_op, r)
@@ -464,6 +484,8 @@ fn expr_to_tla(expr: &SemanticExpr) -> String {
             let o = expr_to_tla(operand);
             match op.as_str() {
                 "not" | "!" => format!("~({})", o),
+                "<>" => format!("<>({})", o),
+                "[]" => format!("[]({})", o),
                 _ => format!("{}({})", op, o),
             }
         }

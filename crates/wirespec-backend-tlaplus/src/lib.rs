@@ -332,6 +332,79 @@ mod tests {
         );
     }
 
+    // ── liveness / Phase 2a ────────────────────────────────────────────────
+
+    #[test]
+    fn test_all_reach_closed_generated() {
+        let out = tla(
+            r#"
+            state machine S {
+                state A {}
+                state Done [terminal]
+                initial A
+                transition A -> Done { on go }
+            }
+        "#,
+            2,
+        );
+        assert!(
+            out.spec.contains("AllReachClosed"),
+            "should generate AllReachClosed"
+        );
+        assert!(
+            out.spec.contains("<>(sm.tag \\in TerminalStates)"),
+            "AllReachClosed should use <> operator"
+        );
+        assert!(
+            out.spec.contains("WF_sm(Next)"),
+            "Spec should include WF for liveness"
+        );
+        assert!(
+            out.config.contains("PROPERTY AllReachClosed"),
+            "cfg should include AllReachClosed property"
+        );
+    }
+
+    #[test]
+    fn test_spec_includes_wf_with_terminal() {
+        let out = tla(
+            r#"
+            state machine S {
+                state A {}
+                state Done [terminal]
+                initial A
+                transition A -> Done { on go }
+            }
+        "#,
+            2,
+        );
+        assert!(
+            out.spec.contains("WF_sm(Next)"),
+            "Spec should include weak fairness"
+        );
+    }
+
+    #[test]
+    fn test_no_terminal_no_allreachclosed() {
+        // SM with no terminal states should not generate AllReachClosed
+        let out = tla(
+            r#"
+            state machine S {
+                state A {}
+                state B {}
+                initial A
+                transition A -> B { on go }
+                transition B -> A { on back }
+            }
+        "#,
+            2,
+        );
+        assert!(
+            !out.spec.contains("AllReachClosed"),
+            "no terminal = no AllReachClosed"
+        );
+    }
+
     #[test]
     fn test_multiple_states_union_fields() {
         // Two states with different fields — TypeOK union should cover all fields
