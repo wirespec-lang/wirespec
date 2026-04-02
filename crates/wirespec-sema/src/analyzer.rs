@@ -2022,20 +2022,34 @@ impl Analyzer {
         }
 
         // Task 1: detect duplicate (src_state, event) pairs
+        // Allow duplicates if ALL transitions in the group have guards.
+        // Reject if any transition in the group lacks a guard.
         {
-            use std::collections::HashSet;
-            let mut seen_transitions: HashSet<(String, String)> = HashSet::new();
-            for t in &transitions {
+            use std::collections::HashMap;
+            let mut groups: HashMap<(String, String), Vec<usize>> = HashMap::new();
+            for (i, t) in transitions.iter().enumerate() {
                 let key = (t.src_state_name.clone(), t.event_name.clone());
-                if !seen_transitions.insert(key) {
+                groups.entry(key).or_default().push(i);
+            }
+
+            for ((state, event), indices) in &groups {
+                if indices.len() <= 1 {
+                    continue; // No duplicate
+                }
+                // Multiple transitions for same (state, event)
+                let any_unguarded = indices.iter().any(|&i| transitions[i].guard.is_none());
+
+                if any_unguarded {
+                    // At least one has no guard -- this is ambiguous
                     return Err(SemaError::new(
                         ErrorKind::SmDuplicateTransition,
                         format!(
-                            "duplicate transition: state '{}' + event '{}'",
-                            t.src_state_name, t.event_name
+                            "duplicate transition: state '{}' + event '{}' (guard-free transitions cannot coexist with other transitions for the same state+event)",
+                            state, event
                         ),
                     ));
                 }
+                // All guarded -- allowed. TLC will verify exclusivity.
             }
         }
 
