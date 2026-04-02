@@ -1308,6 +1308,7 @@ dependencies = [
  "wirespec-backend-api",
  "wirespec-backend-c",
  "wirespec-backend-rust",
+ "wirespec-backend-tlaplus",
  "wirespec-codec",
  "wirespec-layout",
  "wirespec-rt",
