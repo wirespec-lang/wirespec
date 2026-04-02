@@ -65,6 +65,7 @@ fn main() {
     match args[1].as_str() {
         "compile" => cmd_compile(&args[2..]),
         "check" => cmd_check(&args[2..]),
+        "verify" => cmd_verify(&args[2..]),
         "--help" | "-h" => print_usage(),
         other => {
             eprintln!("error: unknown command: {other}");
@@ -441,6 +442,190 @@ fn cmd_check(args: &[String]) {
     }
 }
 
+fn cmd_verify(args: &[String]) {
+    let mut input = None;
+    let mut output = None;
+    let mut run_tlc = false;
+    let mut tlc_path = std::env::var("TLC_JAR").unwrap_or_else(|_| "tla2tools.jar".to_string());
+    let mut bound: u32 = 3;
+    let mut i = 0;
+
+    while i < args.len() {
+        match args[i].as_str() {
+            "-o" | "--output" => {
+                i += 1;
+                output = Some(PathBuf::from(&args[i]));
+            }
+            "--run-tlc" => {
+                run_tlc = true;
+            }
+            "--tlc-path" => {
+                i += 1;
+                tlc_path = args[i].clone();
+            }
+            "--bound" => {
+                i += 1;
+                bound = args[i].parse().unwrap_or(3);
+            }
+            "--help" | "-h" => {
+                print_verify_usage();
+                return;
+            }
+            arg if arg.starts_with('-') => {
+                eprintln!("error: unknown option: {arg}");
+                process::exit(1);
+            }
+            _ => {
+                input = Some(PathBuf::from(&args[i]));
+            }
+        }
+        i += 1;
+    }
+
+    let input = input.unwrap_or_else(|| {
+        eprintln!("error: no input file specified");
+        print_verify_usage();
+        process::exit(1);
+    });
+
+    // Read and parse the .wspec file
+    let source = std::fs::read_to_string(&input).unwrap_or_else(|e| {
+        eprintln!("error: cannot read {}: {e}", input.display());
+        process::exit(1);
+    });
+
+    let ast = wirespec_syntax::parse(&source).unwrap_or_else(|e| {
+        eprintln!("error: parse error: {}", e.msg);
+        process::exit(1);
+    });
+
+    let sem = wirespec_sema::analyze(
+        &ast,
+        wirespec_sema::ComplianceProfile::default(),
+        &Default::default(),
+    )
+    .unwrap_or_else(|e| {
+        eprintln!("error: {}", e.msg);
+        process::exit(1);
+    });
+
+    if sem.state_machines.is_empty() {
+        eprintln!("error: no state machines found in {}", input.display());
+        process::exit(1);
+    }
+
+    // Determine output directory
+    let out_dir = output.unwrap_or_else(|| std::env::temp_dir().join("wirespec-verify"));
+    std::fs::create_dir_all(&out_dir).unwrap_or_else(|e| {
+        eprintln!("error: cannot create output directory: {e}");
+        process::exit(1);
+    });
+
+    // Generate TLA+ for each state machine
+    for sm in &sem.state_machines {
+        let result = wirespec_backend_tlaplus::generate_tlaplus(sm, bound);
+        match result {
+            Ok(output_tla) => {
+                let tla_path = out_dir.join(format!("{}.tla", sm.name));
+                let cfg_path = out_dir.join(format!("{}.cfg", sm.name));
+                std::fs::write(&tla_path, &output_tla.spec).unwrap_or_else(|e| {
+                    eprintln!("error: cannot write {}: {e}", tla_path.display());
+                    process::exit(1);
+                });
+                std::fs::write(&cfg_path, &output_tla.config).unwrap_or_else(|e| {
+                    eprintln!("error: cannot write {}: {e}", cfg_path.display());
+                    process::exit(1);
+                });
+                eprintln!("  wrote {}", tla_path.display());
+                eprintln!("  wrote {}", cfg_path.display());
+
+                // Run TLC if requested
+                if run_tlc {
+                    run_tlc_check(&tla_path, &cfg_path, &tlc_path);
+                }
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                process::exit(1);
+            }
+        }
+    }
+}
+
+fn run_tlc_check(tla_path: &std::path::Path, cfg_path: &std::path::Path, tlc_jar: &str) {
+    let tla_name = tla_path.file_stem().unwrap().to_string_lossy();
+    let cfg_name = cfg_path.file_name().unwrap().to_string_lossy();
+
+    eprintln!("\n  running TLC on {}...", tla_name);
+
+    let output = match std::process::Command::new("java")
+        .args([
+            "-jar",
+            tlc_jar,
+            "-config",
+            &cfg_name,
+            &format!("{}.tla", tla_name),
+            "-deadlock",
+        ])
+        .current_dir(tla_path.parent().unwrap())
+        .output()
+    {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("\nError: TLC not found ({}). Install TLA+ tools:", e);
+            eprintln!("  https://github.com/tlaplus/tlaplus/releases");
+            eprintln!("\nSet TLC_JAR environment variable to the path of tla2tools.jar,");
+            eprintln!("or use --tlc-path option.\n");
+            eprintln!("Generated files:");
+            eprintln!("  {}", tla_path.display());
+            eprintln!("  {}", cfg_path.display());
+            eprintln!("\nYou can run TLC manually:");
+            eprintln!(
+                "  java -jar tla2tools.jar -config {} {}.tla -deadlock",
+                cfg_name, tla_name
+            );
+            return;
+        }
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    if output.status.success() && stdout.contains("Model checking completed. No error found") {
+        eprintln!("  PASS: {} — no errors found", tla_name);
+    } else if stdout.contains("Error:") || stderr.contains("Error:") {
+        eprintln!("  FAIL: {} — TLC found errors:\n", tla_name);
+        // Print relevant output
+        for line in stdout.lines() {
+            if line.contains("Error")
+                || line.contains("Invariant")
+                || line.contains("violated")
+                || line.contains("State")
+                || line.starts_with("  ")
+            {
+                eprintln!("    {}", line);
+            }
+        }
+    } else {
+        eprintln!("  TLC output:\n{}", stdout);
+    }
+}
+
+fn print_verify_usage() {
+    eprintln!("Usage: wirespec verify <input.wspec> [options]");
+    eprintln!();
+    eprintln!("Generate TLA+ spec from state machines and optionally run TLC.");
+    eprintln!();
+    eprintln!("Options:");
+    eprintln!("  -o, --output <dir>       Output directory (default: temp dir)");
+    eprintln!("  --bound <N>              Value domain bound (default: 3)");
+    eprintln!("  --run-tlc                Run TLC model checker on generated spec");
+    eprintln!(
+        "  --tlc-path <path>        Path to tla2tools.jar (default: $TLC_JAR or tla2tools.jar)"
+    );
+    eprintln!("  -h, --help               Show this help message");
+}
+
 fn print_usage() {
     eprintln!("wirespec - protocol description language compiler");
     eprintln!();
@@ -449,6 +634,7 @@ fn print_usage() {
     eprintln!("Commands:");
     eprintln!("  compile    Compile .wspec/.wspec files to C or Rust");
     eprintln!("  check      Parse and type-check a file (no code generation)");
+    eprintln!("  verify     Generate TLA+ and verify state machines");
     eprintln!();
     eprintln!("Options:");
     eprintln!("  -h, --help    Show this help message");

@@ -11,6 +11,7 @@ members = [
     "crates/wirespec-driver",
     "crates/wirespec-rt",
     "crates/wirespec-lsp",
+    "crates/wirespec-backend-tlaplus",
 ]
 
 [workspace.package]

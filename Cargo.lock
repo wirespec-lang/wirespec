@@ -1283,6 +1283,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "wirespec-backend-tlaplus"
+version = "0.1.0"
+dependencies = [
+ "wirespec-sema",
+ "wirespec-syntax",
+]
+
+[[package]]
 name = "wirespec-codec"
 version = "0.1.0"
 dependencies = [
@@ -1300,6 +1308,7 @@ dependencies = [
  "wirespec-backend-api",
  "wirespec-backend-c",
  "wirespec-backend-rust",
+ "wirespec-backend-tlaplus",
  "wirespec-codec",
  "wirespec-layout",
  "wirespec-rt",

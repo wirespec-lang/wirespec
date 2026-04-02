@@ -1,0 +1,12 @@
+[package]
+name = "wirespec-backend-tlaplus"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "TLA+ code generation backend for wirespec state machines"
+
+[dependencies]
+wirespec-sema = { path = "../wirespec-sema" }
+
+[dev-dependencies]
+wirespec-syntax = { path = "../wirespec-syntax" }

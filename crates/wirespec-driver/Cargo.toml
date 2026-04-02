@@ -20,6 +20,7 @@ wirespec-codec = { path = "../wirespec-codec" }
 wirespec-backend-api = { path = "../wirespec-backend-api" }
 wirespec-backend-c = { path = "../wirespec-backend-c" }
 wirespec-backend-rust = { path = "../wirespec-backend-rust" }
+wirespec-backend-tlaplus = { path = "../wirespec-backend-tlaplus" }
 rasn-compiler = { version = "0.16", optional = true }
 
 [dev-dependencies]
