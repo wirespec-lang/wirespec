@@ -3,6 +3,21 @@ use crate::expr::*;
 use crate::types::*;
 use wirespec_syntax::span::Span;
 
+// ── Warnings ──
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SemaWarning {
+    pub kind: SemaWarningKind,
+    pub msg: String,
+    pub span: Option<Span>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SemaWarningKind {
+    SmUnreachableTerminal,
+    SmUnreachableFromInitial,
+}
+
 // ── Root ──
 
 #[derive(Debug, Clone, PartialEq)]
@@ -23,6 +38,7 @@ pub struct SemanticModule {
     pub asn1_externs: Vec<crate::types::Asn1ExternDecl>,
     /// All items in declaration order, by ID.
     pub item_order: Vec<String>,
+    pub warnings: Vec<SemaWarning>,
 }
 
 // ── Imports ──

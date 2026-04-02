@@ -10,5 +10,5 @@ pub mod types;
 pub mod validate;
 
 pub use analyzer::analyze;
-pub use ir::SemanticModule;
+pub use ir::{SemaWarning, SemaWarningKind, SemanticModule};
 pub use profile::ComplianceProfile;

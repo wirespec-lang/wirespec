@@ -36,6 +36,7 @@ struct Analyzer {
     registry: TypeRegistry,
     profile: ComplianceProfile,
     errors: Vec<SemaError>,
+    warnings: Vec<SemaWarning>,
     /// External type names and kinds from previously-compiled modules.
     external_types: std::collections::HashMap<String, DeclKind>,
     /// ASN.1 extern declarations collected during Pass 1.
@@ -51,6 +52,7 @@ impl Analyzer {
             registry: TypeRegistry::new(Endianness::Big),
             profile,
             errors: Vec::new(),
+            warnings: Vec::new(),
             external_types: std::collections::HashMap::new(),
             asn1_externs: Vec::new(),
             pending_asn1_hint: None,
@@ -182,6 +184,68 @@ impl Analyzer {
 
         self.first_error()?;
 
+        // S4: Delegate acyclicity — detect cyclic SM delegation chains
+        {
+            use std::collections::{HashMap, HashSet, VecDeque};
+            let mut edges: HashMap<&str, HashSet<&str>> = HashMap::new();
+            let mut all_names: HashSet<&str> = HashSet::new();
+            for sm in &state_machines {
+                all_names.insert(&sm.name);
+                for state in &sm.states {
+                    for field in &state.fields {
+                        if let Some(ref child) = field.child_sm_name {
+                            edges
+                                .entry(sm.name.as_str())
+                                .or_default()
+                                .insert(child.as_str());
+                        }
+                    }
+                }
+            }
+            let mut in_deg: HashMap<&str, usize> = all_names.iter().map(|&n| (n, 0)).collect();
+            for targets in edges.values() {
+                for &t in targets {
+                    if let Some(d) = in_deg.get_mut(t) {
+                        *d += 1;
+                    }
+                }
+            }
+            let mut queue: VecDeque<&str> = in_deg
+                .iter()
+                .filter(|&(_, &d)| d == 0)
+                .map(|(&n, _)| n)
+                .collect();
+            let mut count = 0;
+            while let Some(node) = queue.pop_front() {
+                count += 1;
+                if let Some(targets) = edges.get(node) {
+                    for &t in targets {
+                        if let Some(d) = in_deg.get_mut(t) {
+                            *d -= 1;
+                            if *d == 0 {
+                                queue.push_back(t);
+                            }
+                        }
+                    }
+                }
+            }
+            if count < all_names.len() {
+                let cycle: Vec<&str> = in_deg
+                    .iter()
+                    .filter(|&(_, &d)| d > 0)
+                    .map(|(&n, _)| n)
+                    .collect();
+                return Err(SemaError::new(
+                    ErrorKind::CyclicDependency,
+                    format!(
+                        "cyclic delegate dependency detected: {}",
+                        cycle.join(" -> ")
+                    ),
+                )
+                .with_hint("state machines cannot form a circular delegation chain"));
+            }
+        }
+
         Ok(SemanticModule {
             schema_version: "semantic-ir/v1".to_string(),
             compliance_profile: self.profile.as_str().to_string(),
@@ -198,6 +262,7 @@ impl Analyzer {
             static_asserts,
             asn1_externs: self.asn1_externs.clone(),
             item_order,
+            warnings: std::mem::take(&mut self.warnings),
         })
     }
 
@@ -1793,6 +1858,21 @@ impl Analyzer {
         for t in &sm.transitions {
             let is_wildcard = t.src_state == "*";
 
+            // S2: Terminal states cannot have explicit outgoing transitions
+            if !is_wildcard && terminal_names.contains(&t.src_state) {
+                return Err(SemaError::new(
+                    ErrorKind::SmTerminalHasOutgoing,
+                    format!(
+                        "terminal state '{}' cannot have outgoing transitions in state machine '{}'",
+                        t.src_state, sm.name
+                    ),
+                )
+                .with_span(t.span)
+                .with_hint(
+                    "remove this transition or un-mark the state as [terminal]",
+                ));
+            }
+
             // Determine source states to expand
             let src_states: Vec<String> = if is_wildcard {
                 // Expand to all non-terminal states
@@ -2037,6 +2117,88 @@ impl Analyzer {
         }
 
         self.first_error()?;
+
+        // S5: StructuralReachability — warn about states that cannot reach a
+        // terminal or are unreachable from the initial state.
+        {
+            use std::collections::{HashMap, HashSet, VecDeque};
+
+            let terminal_set: HashSet<&str> = terminal_names.iter().map(|s| s.as_str()).collect();
+
+            // A) Reverse BFS from terminals — can each non-terminal reach a terminal?
+            {
+                let mut reverse: HashMap<&str, Vec<&str>> = HashMap::new();
+                for t in &transitions {
+                    reverse
+                        .entry(t.dst_state_name.as_str())
+                        .or_default()
+                        .push(t.src_state_name.as_str());
+                }
+                let mut visited: HashSet<&str> = HashSet::new();
+                let mut queue: VecDeque<&str> = VecDeque::new();
+                for name in &terminal_set {
+                    visited.insert(name);
+                    queue.push_back(name);
+                }
+                while let Some(node) = queue.pop_front() {
+                    if let Some(preds) = reverse.get(node) {
+                        for &pred in preds {
+                            if visited.insert(pred) {
+                                queue.push_back(pred);
+                            }
+                        }
+                    }
+                }
+                for state in &states {
+                    if !state.is_terminal && !visited.contains(state.name.as_str()) {
+                        self.warnings.push(SemaWarning {
+                            kind: SemaWarningKind::SmUnreachableTerminal,
+                            msg: format!(
+                                "state '{}' in state machine '{}' cannot reach any terminal state",
+                                state.name, sm.name
+                            ),
+                            span: state.span,
+                        });
+                    }
+                }
+            }
+
+            // B) Forward BFS from initial — is each state reachable from initial?
+            {
+                let mut forward: HashMap<&str, Vec<&str>> = HashMap::new();
+                for t in &transitions {
+                    forward
+                        .entry(t.src_state_name.as_str())
+                        .or_default()
+                        .push(t.dst_state_name.as_str());
+                }
+                let mut visited: HashSet<&str> = HashSet::new();
+                let mut queue: VecDeque<&str> = VecDeque::new();
+                visited.insert(sm.initial_state.as_str());
+                queue.push_back(sm.initial_state.as_str());
+                while let Some(node) = queue.pop_front() {
+                    if let Some(succs) = forward.get(node) {
+                        for &succ in succs {
+                            if visited.insert(succ) {
+                                queue.push_back(succ);
+                            }
+                        }
+                    }
+                }
+                for state in &states {
+                    if !visited.contains(state.name.as_str()) {
+                        self.warnings.push(SemaWarning {
+                            kind: SemaWarningKind::SmUnreachableFromInitial,
+                            msg: format!(
+                                "state '{}' in state machine '{}' is not reachable from the initial state",
+                                state.name, sm.name
+                            ),
+                            span: state.span,
+                        });
+                    }
+                }
+            }
+        }
 
         Ok(SemanticStateMachine {
             sm_id,
