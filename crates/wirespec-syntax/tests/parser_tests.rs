@@ -1739,3 +1739,366 @@ fn parse_annotation_on_enum() {
 fn error_export_static_assert() {
     assert!(parse("export static_assert 1 == 1").is_err());
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Verify declarations
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn parse_verify_nodeadlock() {
+    let m = parse(
+        r#"
+        state machine S {
+            state A {}
+            state B [terminal]
+            initial A
+            transition A -> B { on go }
+            verify NoDeadlock
+        }
+    "#,
+    )
+    .unwrap();
+    match &m.items[0] {
+        AstTopItem::StateMachine(sm) => {
+            assert_eq!(sm.verify_declarations.len(), 1);
+            match &sm.verify_declarations[0] {
+                AstVerifyDecl::BuiltIn { name, .. } => assert_eq!(name, "NoDeadlock"),
+                _ => panic!("expected BuiltIn"),
+            }
+        }
+        _ => panic!("expected state machine"),
+    }
+}
+
+#[test]
+fn parse_verify_allreachclosed() {
+    let m = parse(
+        r#"
+        state machine S {
+            state A {}
+            state B [terminal]
+            initial A
+            transition A -> B { on go }
+            verify NoDeadlock
+            verify AllReachClosed
+        }
+    "#,
+    )
+    .unwrap();
+    match &m.items[0] {
+        AstTopItem::StateMachine(sm) => {
+            assert_eq!(sm.verify_declarations.len(), 2);
+            match &sm.verify_declarations[0] {
+                AstVerifyDecl::BuiltIn { name, .. } => assert_eq!(name, "NoDeadlock"),
+                _ => panic!("expected BuiltIn"),
+            }
+            match &sm.verify_declarations[1] {
+                AstVerifyDecl::BuiltIn { name, .. } => assert_eq!(name, "AllReachClosed"),
+                _ => panic!("expected BuiltIn"),
+            }
+        }
+        _ => panic!("expected state machine"),
+    }
+}
+
+#[test]
+fn parse_verify_property_with_formula() {
+    let m = parse(
+        r#"
+        state machine S {
+            state A {}
+            state B {}
+            state C [terminal]
+            initial A
+            transition A -> B { on go }
+            transition B -> C { on finish }
+            verify property P: in_state(A) -> [] not in_state(B)
+        }
+    "#,
+    )
+    .unwrap();
+    match &m.items[0] {
+        AstTopItem::StateMachine(sm) => {
+            assert_eq!(sm.verify_declarations.len(), 1);
+            match &sm.verify_declarations[0] {
+                AstVerifyDecl::Property { name, formula, .. } => {
+                    assert_eq!(name, "P");
+                    // formula should be Implies(InState("A"), Always(Not(InState("B"))))
+                    match formula {
+                        AstVerifyFormula::Implies { left, right } => {
+                            match left.as_ref() {
+                                AstVerifyFormula::InState { state_name } => {
+                                    assert_eq!(state_name, "A");
+                                }
+                                _ => panic!("expected InState on left"),
+                            }
+                            match right.as_ref() {
+                                AstVerifyFormula::Always { inner } => match inner.as_ref() {
+                                    AstVerifyFormula::Not { inner: inner2 } => {
+                                        match inner2.as_ref() {
+                                            AstVerifyFormula::InState { state_name } => {
+                                                assert_eq!(state_name, "B");
+                                            }
+                                            _ => panic!("expected InState"),
+                                        }
+                                    }
+                                    _ => panic!("expected Not"),
+                                },
+                                _ => panic!("expected Always"),
+                            }
+                        }
+                        _ => panic!("expected Implies"),
+                    }
+                }
+                _ => panic!("expected Property"),
+            }
+        }
+        _ => panic!("expected state machine"),
+    }
+}
+
+#[test]
+fn parse_verify_property_leads_to() {
+    let m = parse(
+        r#"
+        state machine S {
+            state A {}
+            state B [terminal]
+            initial A
+            transition A -> B { on go }
+            verify property Reach: in_state(A) ~> in_state(B)
+        }
+    "#,
+    )
+    .unwrap();
+    match &m.items[0] {
+        AstTopItem::StateMachine(sm) => {
+            assert_eq!(sm.verify_declarations.len(), 1);
+            match &sm.verify_declarations[0] {
+                AstVerifyDecl::Property { name, formula, .. } => {
+                    assert_eq!(name, "Reach");
+                    match formula {
+                        AstVerifyFormula::LeadsTo { left, right } => {
+                            match left.as_ref() {
+                                AstVerifyFormula::InState { state_name } => {
+                                    assert_eq!(state_name, "A");
+                                }
+                                _ => panic!("expected InState on left"),
+                            }
+                            match right.as_ref() {
+                                AstVerifyFormula::InState { state_name } => {
+                                    assert_eq!(state_name, "B");
+                                }
+                                _ => panic!("expected InState on right"),
+                            }
+                        }
+                        _ => panic!("expected LeadsTo, got {:?}", formula),
+                    }
+                }
+                _ => panic!("expected Property"),
+            }
+        }
+        _ => panic!("expected state machine"),
+    }
+}
+
+#[test]
+fn parse_verify_property_eventually() {
+    let m = parse(
+        r#"
+        state machine S {
+            state A {}
+            state B [terminal]
+            initial A
+            transition A -> B { on go }
+            verify property Ev: <> in_state(B)
+        }
+    "#,
+    )
+    .unwrap();
+    match &m.items[0] {
+        AstTopItem::StateMachine(sm) => {
+            assert_eq!(sm.verify_declarations.len(), 1);
+            match &sm.verify_declarations[0] {
+                AstVerifyDecl::Property { name, formula, .. } => {
+                    assert_eq!(name, "Ev");
+                    match formula {
+                        AstVerifyFormula::Eventually { inner } => match inner.as_ref() {
+                            AstVerifyFormula::InState { state_name } => {
+                                assert_eq!(state_name, "B");
+                            }
+                            _ => panic!("expected InState"),
+                        },
+                        _ => panic!("expected Eventually"),
+                    }
+                }
+                _ => panic!("expected Property"),
+            }
+        }
+        _ => panic!("expected state machine"),
+    }
+}
+
+#[test]
+fn parse_verify_property_compare_and_field_ref() {
+    let m = parse(
+        r#"
+        state machine S {
+            state A { count: u8 = 0 }
+            state B [terminal]
+            initial A
+            transition A -> B { on go }
+            verify property BoundCheck: [] (src.count < 10)
+        }
+    "#,
+    )
+    .unwrap();
+    match &m.items[0] {
+        AstTopItem::StateMachine(sm) => {
+            assert_eq!(sm.verify_declarations.len(), 1);
+            match &sm.verify_declarations[0] {
+                AstVerifyDecl::Property { name, formula, .. } => {
+                    assert_eq!(name, "BoundCheck");
+                    match formula {
+                        AstVerifyFormula::Always { inner } => match inner.as_ref() {
+                            AstVerifyFormula::Compare { left, op, right } => {
+                                assert_eq!(op, "<");
+                                match left.as_ref() {
+                                    AstVerifyFormula::FieldRef { path } => {
+                                        assert_eq!(path, &["src", "count"]);
+                                    }
+                                    _ => panic!("expected FieldRef"),
+                                }
+                                match right.as_ref() {
+                                    AstVerifyFormula::Literal {
+                                        value: AstLiteralValue::Int(10),
+                                    } => {}
+                                    _ => panic!("expected literal 10"),
+                                }
+                            }
+                            _ => panic!("expected Compare"),
+                        },
+                        _ => panic!("expected Always"),
+                    }
+                }
+                _ => panic!("expected Property"),
+            }
+        }
+        _ => panic!("expected state machine"),
+    }
+}
+
+#[test]
+fn parse_verify_bound_annotation() {
+    let m = parse(
+        r#"
+        @verify(bound=5)
+        state machine S {
+            state A {}
+            state B [terminal]
+            initial A
+            transition A -> B { on go }
+            verify NoDeadlock
+        }
+    "#,
+    )
+    .unwrap();
+    match &m.items[0] {
+        AstTopItem::StateMachine(sm) => {
+            assert_eq!(sm.annotations.len(), 1);
+            assert_eq!(sm.annotations[0].name, "verify");
+            assert_eq!(sm.annotations[0].args.len(), 1);
+            match &sm.annotations[0].args[0] {
+                AstAnnotationArg::NamedValue { name, value } => {
+                    assert_eq!(name, "bound");
+                    match value {
+                        AstLiteralValue::Int(5) => {}
+                        _ => panic!("expected Int(5)"),
+                    }
+                }
+                _ => panic!("expected NamedValue"),
+            }
+        }
+        _ => panic!("expected state machine"),
+    }
+}
+
+#[test]
+fn parse_verify_no_declarations() {
+    let m = parse(
+        r#"
+        state machine S {
+            state A {}
+            state B [terminal]
+            initial A
+            transition A -> B { on go }
+        }
+    "#,
+    )
+    .unwrap();
+    match &m.items[0] {
+        AstTopItem::StateMachine(sm) => {
+            assert!(sm.verify_declarations.is_empty());
+        }
+        _ => panic!("expected state machine"),
+    }
+}
+
+#[test]
+fn parse_verify_property_or_and() {
+    let m = parse(
+        r#"
+        state machine S {
+            state A {}
+            state B {}
+            state C [terminal]
+            initial A
+            transition A -> B { on go }
+            transition B -> C { on finish }
+            verify property OrAnd: in_state(A) or in_state(B) and in_state(C)
+        }
+    "#,
+    )
+    .unwrap();
+    match &m.items[0] {
+        AstTopItem::StateMachine(sm) => {
+            assert_eq!(sm.verify_declarations.len(), 1);
+            // 'and' binds tighter than 'or', so: Or(InState(A), And(InState(B), InState(C)))
+            match &sm.verify_declarations[0] {
+                AstVerifyDecl::Property { formula, .. } => match formula {
+                    AstVerifyFormula::Or { left, right } => {
+                        match left.as_ref() {
+                            AstVerifyFormula::InState { state_name } => {
+                                assert_eq!(state_name, "A");
+                            }
+                            _ => panic!("expected InState(A) on left of Or"),
+                        }
+                        match right.as_ref() {
+                            AstVerifyFormula::And {
+                                left: al,
+                                right: ar,
+                            } => {
+                                match al.as_ref() {
+                                    AstVerifyFormula::InState { state_name } => {
+                                        assert_eq!(state_name, "B");
+                                    }
+                                    _ => panic!("expected InState(B)"),
+                                }
+                                match ar.as_ref() {
+                                    AstVerifyFormula::InState { state_name } => {
+                                        assert_eq!(state_name, "C");
+                                    }
+                                    _ => panic!("expected InState(C)"),
+                                }
+                            }
+                            _ => panic!("expected And on right of Or"),
+                        }
+                    }
+                    _ => panic!("expected Or, got {:?}", formula),
+                },
+                _ => panic!("expected Property"),
+            }
+        }
+        _ => panic!("expected state machine"),
+    }
+}

@@ -2214,6 +2214,36 @@ impl Analyzer {
             }
         }
 
+        // Extract @verify(bound=N) from annotations
+        let verify_bound = sm
+            .annotations
+            .iter()
+            .find(|a| a.name == "verify")
+            .and_then(|a| {
+                a.args.iter().find_map(|arg| {
+                    if let AstAnnotationArg::NamedValue {
+                        name,
+                        value: AstLiteralValue::Int(n),
+                    } = arg
+                    {
+                        if name == "bound" {
+                            Some(*n as u32)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                })
+            });
+
+        // Lower verify declarations
+        let verify_declarations = sm
+            .verify_declarations
+            .iter()
+            .map(Self::lower_verify_decl)
+            .collect::<SemaResult<Vec<_>>>()?;
+
         Ok(SemanticStateMachine {
             sm_id,
             name: sm.name.clone(),
@@ -2223,8 +2253,82 @@ impl Analyzer {
             initial_state_id,
             transitions,
             has_child_state_changed: event_map.contains_key("child_state_changed"),
+            verify_bound,
+            verify_declarations,
             span: sm.span,
         })
+    }
+
+    fn lower_verify_decl(vd: &AstVerifyDecl) -> SemaResult<SemanticVerifyDecl> {
+        match vd {
+            AstVerifyDecl::BuiltIn { name, .. } => match name.as_str() {
+                "NoDeadlock" => Ok(SemanticVerifyDecl::NoDeadlock),
+                "AllReachClosed" => Ok(SemanticVerifyDecl::AllReachClosed),
+                other => Err(SemaError::new(
+                    ErrorKind::UndefinedType,
+                    format!("unknown built-in verify declaration: '{}'", other),
+                )),
+            },
+            AstVerifyDecl::Property { name, formula, .. } => {
+                let sem_formula = Self::lower_verify_formula(formula)?;
+                Ok(SemanticVerifyDecl::Property {
+                    name: name.clone(),
+                    formula: sem_formula,
+                })
+            }
+        }
+    }
+
+    fn lower_verify_formula(f: &AstVerifyFormula) -> SemaResult<SemanticVerifyFormula> {
+        match f {
+            AstVerifyFormula::InState { state_name } => Ok(SemanticVerifyFormula::InState {
+                state_name: state_name.clone(),
+            }),
+            AstVerifyFormula::Not { inner } => Ok(SemanticVerifyFormula::Not {
+                inner: Box::new(Self::lower_verify_formula(inner)?),
+            }),
+            AstVerifyFormula::And { left, right } => Ok(SemanticVerifyFormula::And {
+                left: Box::new(Self::lower_verify_formula(left)?),
+                right: Box::new(Self::lower_verify_formula(right)?),
+            }),
+            AstVerifyFormula::Or { left, right } => Ok(SemanticVerifyFormula::Or {
+                left: Box::new(Self::lower_verify_formula(left)?),
+                right: Box::new(Self::lower_verify_formula(right)?),
+            }),
+            AstVerifyFormula::Implies { left, right } => Ok(SemanticVerifyFormula::Implies {
+                left: Box::new(Self::lower_verify_formula(left)?),
+                right: Box::new(Self::lower_verify_formula(right)?),
+            }),
+            AstVerifyFormula::Always { inner } => Ok(SemanticVerifyFormula::Always {
+                inner: Box::new(Self::lower_verify_formula(inner)?),
+            }),
+            AstVerifyFormula::Eventually { inner } => Ok(SemanticVerifyFormula::Eventually {
+                inner: Box::new(Self::lower_verify_formula(inner)?),
+            }),
+            AstVerifyFormula::LeadsTo { left, right } => Ok(SemanticVerifyFormula::LeadsTo {
+                left: Box::new(Self::lower_verify_formula(left)?),
+                right: Box::new(Self::lower_verify_formula(right)?),
+            }),
+            AstVerifyFormula::Compare { left, op, right } => Ok(SemanticVerifyFormula::Compare {
+                left: Box::new(Self::lower_verify_formula(left)?),
+                op: op.clone(),
+                right: Box::new(Self::lower_verify_formula(right)?),
+            }),
+            AstVerifyFormula::FieldRef { path } => {
+                // Join dotted path into field_name (e.g., "src.count" -> "src.count")
+                Ok(SemanticVerifyFormula::FieldRef {
+                    field_name: path.join("."),
+                })
+            }
+            AstVerifyFormula::Literal { value } => match value {
+                AstLiteralValue::Int(n) => Ok(SemanticVerifyFormula::Literal { value: *n }),
+                AstLiteralValue::Bool(b) => Ok(SemanticVerifyFormula::BoolLiteral { value: *b }),
+                _ => Err(SemaError::new(
+                    ErrorKind::TypeMismatch,
+                    "unsupported literal type in verify formula".to_string(),
+                )),
+            },
+        }
     }
 
     /// Resolve a type expression used in state fields (simplified: only Named types).

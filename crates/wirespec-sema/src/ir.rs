@@ -268,7 +268,65 @@ pub struct SemanticStateMachine {
     pub initial_state_id: String,
     pub transitions: Vec<SemanticTransition>,
     pub has_child_state_changed: bool,
+    pub verify_bound: Option<u32>,
+    pub verify_declarations: Vec<SemanticVerifyDecl>,
     pub span: Option<Span>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum SemanticVerifyDecl {
+    NoDeadlock,
+    AllReachClosed,
+    Property {
+        name: String,
+        formula: SemanticVerifyFormula,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum SemanticVerifyFormula {
+    InState {
+        state_name: String,
+    },
+    Not {
+        inner: Box<SemanticVerifyFormula>,
+    },
+    And {
+        left: Box<SemanticVerifyFormula>,
+        right: Box<SemanticVerifyFormula>,
+    },
+    Or {
+        left: Box<SemanticVerifyFormula>,
+        right: Box<SemanticVerifyFormula>,
+    },
+    Implies {
+        left: Box<SemanticVerifyFormula>,
+        right: Box<SemanticVerifyFormula>,
+    },
+    Always {
+        inner: Box<SemanticVerifyFormula>,
+    },
+    Eventually {
+        inner: Box<SemanticVerifyFormula>,
+    },
+    LeadsTo {
+        left: Box<SemanticVerifyFormula>,
+        right: Box<SemanticVerifyFormula>,
+    },
+    FieldRef {
+        field_name: String,
+    },
+    Literal {
+        value: i64,
+    },
+    BoolLiteral {
+        value: bool,
+    },
+    Compare {
+        left: Box<SemanticVerifyFormula>,
+        op: String,
+        right: Box<SemanticVerifyFormula>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

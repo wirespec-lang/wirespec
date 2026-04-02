@@ -88,25 +88,68 @@ pub fn emit_spec(sm: &SemanticStateMachine, _bound: u32) -> String {
     // Determine if terminal states exist (for liveness)
     let has_terminals = sm.states.iter().any(|s| s.is_terminal);
 
+    // Check which built-in verify declarations are requested
+    let has_verify_decls = !sm.verify_declarations.is_empty();
+    let wants_nodeadlock = sm
+        .verify_declarations
+        .iter()
+        .any(|v| matches!(v, SemanticVerifyDecl::NoDeadlock));
+    let wants_allreachclosed = sm
+        .verify_declarations
+        .iter()
+        .any(|v| matches!(v, SemanticVerifyDecl::AllReachClosed));
+    let has_liveness_properties = wants_allreachclosed
+        || sm
+            .verify_declarations
+            .iter()
+            .any(|v| matches!(v, SemanticVerifyDecl::Property { .. }));
+
     // Spec (include WF when liveness properties are present)
     out.push_str("\\* Specification\n");
-    if has_terminals {
-        out.push_str("Spec == Init /\\ [][Next]_sm /\\ WF_sm(Next)\n\n");
+    if has_verify_decls {
+        // With explicit verify declarations, only add WF if liveness properties exist
+        if has_liveness_properties {
+            out.push_str("Spec == Init /\\ [][Next]_sm /\\ WF_sm(Next)\n\n");
+        } else {
+            out.push_str("Spec == Init /\\ [][Next]_sm\n\n");
+        }
     } else {
-        out.push_str("Spec == Init /\\ [][Next]_sm\n\n");
+        // Legacy behavior: include WF when terminal states exist
+        if has_terminals {
+            out.push_str("Spec == Init /\\ [][Next]_sm /\\ WF_sm(Next)\n\n");
+        } else {
+            out.push_str("Spec == Init /\\ [][Next]_sm\n\n");
+        }
     }
 
-    // NoDeadlock property
-    out.push_str("\\* NoDeadlock: terminal states or transitions enabled\n");
-    out.push_str("NoDeadlock == sm.tag \\in TerminalStates \\/ ENABLED(Next)\n\n");
+    // NoDeadlock property (only if explicitly requested or no verify declarations)
+    if !has_verify_decls || wants_nodeadlock {
+        out.push_str("\\* NoDeadlock: terminal states or transitions enabled\n");
+        out.push_str("NoDeadlock == sm.tag \\in TerminalStates \\/ ENABLED(Next)\n\n");
+    }
 
     // Guard exclusivity invariants
     emit_guard_exclusivity(&mut out, sm);
 
-    // AllReachClosed liveness property (only when terminal states exist)
-    if has_terminals {
+    // AllReachClosed liveness property
+    if !has_verify_decls {
+        // Legacy behavior: generate when terminal states exist
+        if has_terminals {
+            out.push_str("\\* AllReachClosed: eventually reach a terminal state\n");
+            out.push_str("AllReachClosed == <>(sm.tag \\in TerminalStates)\n\n");
+        }
+    } else if wants_allreachclosed && has_terminals {
         out.push_str("\\* AllReachClosed: eventually reach a terminal state\n");
         out.push_str("AllReachClosed == <>(sm.tag \\in TerminalStates)\n\n");
+    }
+
+    // User-defined verify properties
+    for vd in &sm.verify_declarations {
+        if let SemanticVerifyDecl::Property { name, formula } = vd {
+            let tla_formula = verify_formula_to_tla(formula);
+            out.push_str(&format!("\\* User property: {}\n", name));
+            out.push_str(&format!("{} == {}\n\n", name, tla_formula));
+        }
     }
 
     // Module footer
@@ -118,12 +161,24 @@ pub fn emit_spec(sm: &SemanticStateMachine, _bound: u32) -> String {
 /// Emit the .cfg file.
 pub fn emit_config(sm: &SemanticStateMachine, bound: u32) -> String {
     let has_terminals = sm.states.iter().any(|s| s.is_terminal);
+    let has_verify_decls = !sm.verify_declarations.is_empty();
+    let wants_nodeadlock = sm
+        .verify_declarations
+        .iter()
+        .any(|v| matches!(v, SemanticVerifyDecl::NoDeadlock));
+    let wants_allreachclosed = sm
+        .verify_declarations
+        .iter()
+        .any(|v| matches!(v, SemanticVerifyDecl::AllReachClosed));
 
     let mut out = String::new();
     out.push_str("SPECIFICATION Spec\n");
     out.push_str(&format!("CONSTANT Bound = {}\n\n", bound));
     out.push_str("INVARIANT TypeOK\n");
-    out.push_str("INVARIANT NoDeadlock\n");
+
+    if !has_verify_decls || wants_nodeadlock {
+        out.push_str("INVARIANT NoDeadlock\n");
+    }
 
     // Guard exclusivity invariants
     let groups = compute_transition_groups(sm);
@@ -140,8 +195,21 @@ pub fn emit_config(sm: &SemanticStateMachine, bound: u32) -> String {
         out.push_str(&format!("INVARIANT {}\n", inv_name));
     }
 
-    if has_terminals {
-        out.push_str("\nPROPERTY AllReachClosed\n");
+    if !has_verify_decls {
+        // Legacy behavior
+        if has_terminals {
+            out.push_str("\nPROPERTY AllReachClosed\n");
+        }
+    } else {
+        if wants_allreachclosed && has_terminals {
+            out.push_str("\nPROPERTY AllReachClosed\n");
+        }
+        // User-defined properties
+        for vd in &sm.verify_declarations {
+            if let SemanticVerifyDecl::Property { name, .. } = vd {
+                out.push_str(&format!("\nPROPERTY {}\n", name));
+            }
+        }
     }
 
     out
@@ -774,6 +842,72 @@ fn expr_to_tla(expr: &SemanticExpr) -> String {
             format!(
                 "\\A idx \\in DOMAIN {} : {}[idx].tag = \"{}\"",
                 c, c, state_name
+            )
+        }
+    }
+}
+
+/// Convert a SemanticVerifyFormula to TLA+ expression string.
+fn verify_formula_to_tla(f: &SemanticVerifyFormula) -> String {
+    match f {
+        SemanticVerifyFormula::InState { state_name } => {
+            format!("sm.tag = \"{}\"", state_name)
+        }
+        SemanticVerifyFormula::Not { inner } => {
+            format!("~({})", verify_formula_to_tla(inner))
+        }
+        SemanticVerifyFormula::And { left, right } => {
+            format!(
+                "({} /\\ {})",
+                verify_formula_to_tla(left),
+                verify_formula_to_tla(right)
+            )
+        }
+        SemanticVerifyFormula::Or { left, right } => {
+            format!(
+                "({} \\/ {})",
+                verify_formula_to_tla(left),
+                verify_formula_to_tla(right)
+            )
+        }
+        SemanticVerifyFormula::Implies { left, right } => {
+            format!(
+                "({} => {})",
+                verify_formula_to_tla(left),
+                verify_formula_to_tla(right)
+            )
+        }
+        SemanticVerifyFormula::Always { inner } => {
+            format!("[]({})", verify_formula_to_tla(inner))
+        }
+        SemanticVerifyFormula::Eventually { inner } => {
+            format!("<>({})", verify_formula_to_tla(inner))
+        }
+        SemanticVerifyFormula::LeadsTo { left, right } => {
+            format!(
+                "({}) ~> ({})",
+                verify_formula_to_tla(left),
+                verify_formula_to_tla(right)
+            )
+        }
+        SemanticVerifyFormula::FieldRef { field_name } => {
+            format!("sm.{}", field_name)
+        }
+        SemanticVerifyFormula::Literal { value } => value.to_string(),
+        SemanticVerifyFormula::BoolLiteral { value } => {
+            if *value { "TRUE" } else { "FALSE" }.to_string()
+        }
+        SemanticVerifyFormula::Compare { left, op, right } => {
+            let tla_op = match op.as_str() {
+                "==" => "=",
+                "!=" => "/=",
+                _ => op.as_str(),
+            };
+            format!(
+                "({} {} {})",
+                verify_formula_to_tla(left),
+                tla_op,
+                verify_formula_to_tla(right)
             )
         }
     }

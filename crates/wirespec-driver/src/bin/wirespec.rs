@@ -523,7 +523,7 @@ fn cmd_verify(args: &[String]) {
 
     // Generate TLA+ for each state machine
     for sm in &sem.state_machines {
-        let result = wirespec_backend_tlaplus::generate_tlaplus(sm, bound);
+        let result = wirespec_backend_tlaplus::generate_tlaplus(sm, Some(bound));
         match result {
             Ok(output_tla) => {
                 let tla_path = out_dir.join(format!("{}.tla", sm.name));

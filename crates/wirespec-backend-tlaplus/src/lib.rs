@@ -11,8 +11,13 @@ pub struct TlaplusOutput {
 }
 
 /// Generate TLA+ spec and config from a state machine.
-/// `bound` controls the finite domain size for model checking.
-pub fn generate_tlaplus(sm: &SemanticStateMachine, bound: u32) -> Result<TlaplusOutput, String> {
+///
+/// `cli_bound` is an optional override for the model-checking bound.
+/// Priority: cli_bound > @verify(bound=N) annotation > default (3).
+pub fn generate_tlaplus(
+    sm: &SemanticStateMachine,
+    cli_bound: Option<u32>,
+) -> Result<TlaplusOutput, String> {
     // Reject delegate SMs (Phase 1 limitation)
     for t in &sm.transitions {
         if t.delegate.is_some() {
@@ -22,6 +27,8 @@ pub fn generate_tlaplus(sm: &SemanticStateMachine, bound: u32) -> Result<Tlaplus
             ));
         }
     }
+
+    let bound = cli_bound.or(sm.verify_bound).unwrap_or(3);
 
     let spec = emit::emit_spec(sm, bound);
     let config = emit::emit_config(sm, bound);
@@ -40,7 +47,7 @@ mod tests {
     fn tla(src: &str, bound: u32) -> TlaplusOutput {
         let ast = parse(src).unwrap();
         let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
-        generate_tlaplus(&sem.state_machines[0], bound).unwrap()
+        generate_tlaplus(&sem.state_machines[0], Some(bound)).unwrap()
     }
 
     // ── smoke / reject ───────────────────────────────────────────────────────
@@ -64,7 +71,7 @@ mod tests {
         let ast = parse(src).unwrap();
         let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
         assert_eq!(sem.state_machines.len(), 1);
-        let output = generate_tlaplus(&sem.state_machines[0], 3).unwrap();
+        let output = generate_tlaplus(&sem.state_machines[0], Some(3)).unwrap();
 
         assert!(output.spec.contains("---- MODULE PathState ----"));
         assert!(output.spec.contains("VARIABLE sm"));
@@ -106,7 +113,7 @@ mod tests {
         "#;
         let ast = parse(src).unwrap();
         let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
-        let result = generate_tlaplus(&sem.state_machines[1], 3);
+        let result = generate_tlaplus(&sem.state_machines[1], Some(3));
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("delegate"));
     }
@@ -524,6 +531,259 @@ mod tests {
         assert!(
             !out.spec.contains("GuardExclusive"),
             "no guarded groups = no exclusivity invariant"
+        );
+    }
+
+    // ── verify declarations / Phase 3 ───────────────────────────────────
+
+    /// Helper that uses the SM's own verify_bound and verify_declarations
+    /// (no CLI bound override).
+    fn tla_no_bound(src: &str) -> TlaplusOutput {
+        let ast = parse(src).unwrap();
+        let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
+        generate_tlaplus(&sem.state_machines[0], None).unwrap()
+    }
+
+    #[test]
+    fn test_verify_nodeadlock_controls_generation() {
+        // SM with verify NoDeadlock -> generates NoDeadlock
+        let out = tla_no_bound(
+            r#"
+            state machine S {
+                state A {}
+                state B [terminal]
+                initial A
+                transition A -> B { on go }
+                verify NoDeadlock
+            }
+        "#,
+        );
+        assert!(
+            out.spec.contains("NoDeadlock"),
+            "should generate NoDeadlock when verify NoDeadlock is present"
+        );
+        assert!(
+            out.config.contains("INVARIANT NoDeadlock"),
+            "cfg should include NoDeadlock invariant"
+        );
+        // Should NOT generate AllReachClosed (not requested)
+        assert!(
+            !out.spec.contains("AllReachClosed"),
+            "should not generate AllReachClosed when not requested"
+        );
+        assert!(
+            !out.config.contains("PROPERTY AllReachClosed"),
+            "cfg should not include AllReachClosed property"
+        );
+    }
+
+    #[test]
+    fn test_verify_only_typeok_when_empty_verify() {
+        // SM with NO verify declarations -> legacy behavior (generates everything)
+        let out = tla_no_bound(
+            r#"
+            state machine S {
+                state A {}
+                state B [terminal]
+                initial A
+                transition A -> B { on go }
+            }
+        "#,
+        );
+        // Legacy behavior: NoDeadlock and AllReachClosed
+        assert!(
+            out.spec.contains("NoDeadlock"),
+            "legacy: generates NoDeadlock"
+        );
+        assert!(
+            out.spec.contains("AllReachClosed"),
+            "legacy: generates AllReachClosed"
+        );
+    }
+
+    #[test]
+    fn test_verify_nodeadlock_and_allreachclosed() {
+        let out = tla_no_bound(
+            r#"
+            state machine S {
+                state A {}
+                state B [terminal]
+                initial A
+                transition A -> B { on go }
+                verify NoDeadlock
+                verify AllReachClosed
+            }
+        "#,
+        );
+        assert!(
+            out.spec.contains("NoDeadlock"),
+            "should generate NoDeadlock"
+        );
+        assert!(
+            out.spec.contains("AllReachClosed"),
+            "should generate AllReachClosed"
+        );
+        assert!(
+            out.spec.contains("WF_sm(Next)"),
+            "should include WF for AllReachClosed liveness"
+        );
+        assert!(
+            out.config.contains("INVARIANT NoDeadlock"),
+            "cfg should include NoDeadlock"
+        );
+        assert!(
+            out.config.contains("PROPERTY AllReachClosed"),
+            "cfg should include AllReachClosed"
+        );
+    }
+
+    #[test]
+    fn test_verify_bound_annotation() {
+        let out = tla_no_bound(
+            r#"
+            @verify(bound=5)
+            state machine S {
+                state A {}
+                state B [terminal]
+                initial A
+                transition A -> B { on go }
+                verify NoDeadlock
+            }
+        "#,
+        );
+        assert!(
+            out.config.contains("Bound = 5"),
+            "should use bound=5 from annotation"
+        );
+    }
+
+    #[test]
+    fn test_verify_bound_cli_overrides_annotation() {
+        let src = r#"
+            @verify(bound=5)
+            state machine S {
+                state A {}
+                state B [terminal]
+                initial A
+                transition A -> B { on go }
+                verify NoDeadlock
+            }
+        "#;
+        let ast = parse(src).unwrap();
+        let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
+        let out = generate_tlaplus(&sem.state_machines[0], Some(10)).unwrap();
+        assert!(
+            out.config.contains("Bound = 10"),
+            "CLI bound should override annotation bound"
+        );
+    }
+
+    #[test]
+    fn test_verify_default_bound_when_no_annotation() {
+        let out = tla_no_bound(
+            r#"
+            state machine S {
+                state A {}
+                state B [terminal]
+                initial A
+                transition A -> B { on go }
+                verify NoDeadlock
+            }
+        "#,
+        );
+        assert!(
+            out.config.contains("Bound = 3"),
+            "should default to bound=3 when no annotation"
+        );
+    }
+
+    #[test]
+    fn test_user_property_formula_to_tla() {
+        let out = tla_no_bound(
+            r#"
+            state machine S {
+                state Active {}
+                state Closing {}
+                state Done [terminal]
+                initial Active
+                transition Active -> Closing { on close }
+                transition Closing -> Done { on finish }
+                verify property NeverBack: in_state(Closing) -> [] not in_state(Active)
+            }
+        "#,
+        );
+        // The property formula should be:
+        // NeverBack == (sm.tag = "Closing" => [](~(sm.tag = "Active")))
+        assert!(
+            out.spec.contains("NeverBack =="),
+            "should define NeverBack property: got\n{}",
+            out.spec
+        );
+        assert!(
+            out.spec.contains("sm.tag = \"Closing\""),
+            "should reference Closing state tag"
+        );
+        assert!(
+            out.spec.contains("sm.tag = \"Active\""),
+            "should reference Active state tag"
+        );
+        assert!(
+            out.config.contains("PROPERTY NeverBack"),
+            "cfg should include NeverBack property"
+        );
+        // WF should be present since we have a liveness property
+        assert!(
+            out.spec.contains("WF_sm(Next)"),
+            "should include WF for liveness property"
+        );
+    }
+
+    #[test]
+    fn test_verify_no_wf_when_only_safety() {
+        // verify NoDeadlock only — no liveness, no WF
+        let out = tla_no_bound(
+            r#"
+            state machine S {
+                state A {}
+                state B [terminal]
+                initial A
+                transition A -> B { on go }
+                verify NoDeadlock
+            }
+        "#,
+        );
+        assert!(
+            !out.spec.contains("WF_sm(Next)"),
+            "should NOT include WF when only safety properties: got\n{}",
+            out.spec
+        );
+    }
+
+    #[test]
+    fn test_verify_leads_to_property() {
+        let out = tla_no_bound(
+            r#"
+            state machine S {
+                state A {}
+                state B [terminal]
+                initial A
+                transition A -> B { on go }
+                verify property Reach: in_state(A) ~> in_state(B)
+            }
+        "#,
+        );
+        assert!(
+            out.spec.contains("Reach =="),
+            "should define Reach property"
+        );
+        assert!(
+            out.spec.contains("~>"),
+            "should contain leads-to operator: got\n{}",
+            out.spec
+        );
+        assert!(
+            out.config.contains("PROPERTY Reach"),
+            "cfg should include Reach property"
         );
     }
 }
