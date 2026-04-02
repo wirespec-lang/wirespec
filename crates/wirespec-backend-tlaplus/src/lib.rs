@@ -34,6 +34,17 @@ mod tests {
     use wirespec_sema::{ComplianceProfile, analyze};
     use wirespec_syntax::parse;
 
+    // ── helper ──────────────────────────────────────────────────────────────
+
+    /// Parse, analyze, and generate TLA+ for the first state machine in `src`.
+    fn tla(src: &str, bound: u32) -> TlaplusOutput {
+        let ast = parse(src).unwrap();
+        let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
+        generate_tlaplus(&sem.state_machines[0], bound).unwrap()
+    }
+
+    // ── smoke / reject ───────────────────────────────────────────────────────
+
     #[test]
     fn smoke_test_pathstate_generates_tla() {
         let src = r#"
@@ -98,5 +109,259 @@ mod tests {
         let result = generate_tlaplus(&sem.state_machines[1], 3);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("delegate"));
+    }
+
+    // ── new tests ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_type_abstraction_bounded_nat() {
+        // u8 field should cause BoundedNat to be defined and used in TypeOK
+        let src = r#"
+            state machine S {
+                state A { count: u8 = 0 }
+                state B [terminal]
+                initial A
+                transition A -> B { on done }
+            }
+        "#;
+        let out = tla(src, 3);
+        assert!(
+            out.spec.contains("BoundedNat == 0..(Bound - 1)"),
+            "should define BoundedNat for u8 fields"
+        );
+        assert!(
+            out.spec.contains("sm.count \\in BoundedNat"),
+            "count should appear in BoundedNat domain in TypeOK"
+        );
+    }
+
+    #[test]
+    fn test_transition_with_guard() {
+        let src = r#"
+            state machine S {
+                state A { count: u8 = 0 }
+                state B [terminal]
+                initial A
+                transition A -> A {
+                    on tick
+                    guard src.count < 10
+                    action { dst.count = src.count + 1; }
+                }
+                transition A -> B { on done }
+            }
+        "#;
+        let out = tla(src, 3);
+        // Guard `src.count < 10` should translate to `(sm.count < 10)`
+        assert!(
+            out.spec.contains("(sm.count < 10)"),
+            "guard should be translated to TLA+ expression: got\n{}",
+            out.spec
+        );
+    }
+
+    #[test]
+    fn test_transition_without_guard() {
+        let src = r#"
+            state machine S {
+                state A {}
+                state B [terminal]
+                initial A
+                transition A -> B { on done }
+            }
+        "#;
+        let out = tla(src, 2);
+        assert!(
+            out.spec.contains("sm.tag = \"A\""),
+            "should guard on source state tag"
+        );
+        assert!(
+            out.spec.contains("sm' = MkB"),
+            "should transition to destination state MkB"
+        );
+    }
+
+    #[test]
+    fn test_terminal_state_no_outgoing() {
+        let src = r#"
+            state machine S {
+                state A {}
+                state Done [terminal]
+                initial A
+                transition A -> Done { on finish }
+            }
+        "#;
+        let out = tla(src, 2);
+        // Done is terminal — no transition should have Done as source state tag
+        let tag_done = "sm.tag = \"Done\"";
+        assert!(
+            !out.spec.contains(tag_done),
+            "terminal state Done should not appear as a transition source"
+        );
+    }
+
+    #[test]
+    fn test_cfg_generation() {
+        let src = r#"
+            state machine S {
+                state A {}
+                state B [terminal]
+                initial A
+                transition A -> B { on go }
+            }
+        "#;
+        let out = tla(src, 5);
+        assert!(out.config.contains("SPECIFICATION Spec"));
+        assert!(out.config.contains("Bound = 5"));
+        assert!(out.config.contains("INVARIANT TypeOK"));
+        assert!(out.config.contains("INVARIANT NoDeadlock"));
+    }
+
+    #[test]
+    fn test_mk_helper_correct_fields() {
+        let src = r#"
+            state machine S {
+                state Active { path_id: u8, rtt: u64 = 0, cwnd: u64 = 0 }
+                state Closed [terminal]
+                initial Active
+                transition Active -> Closed { on close }
+            }
+        "#;
+        let out = tla(src, 2);
+        // path_id has no default → parameter; rtt and cwnd have defaults → inlined
+        assert!(
+            out.spec.contains("MkActive(path_id_v)"),
+            "MkActive should take only path_id as a parameter"
+        );
+        assert!(
+            out.spec.contains("rtt |-> 0"),
+            "rtt should use default value 0"
+        );
+        assert!(
+            out.spec.contains("cwnd |-> 0"),
+            "cwnd should use default value 0"
+        );
+    }
+
+    #[test]
+    fn test_default_values_in_mk_helper() {
+        let src = r#"
+            state machine S {
+                state A { x: u8 = 42, y: u8 }
+                state B [terminal]
+                initial A
+                transition A -> B { on done }
+            }
+        "#;
+        let out = tla(src, 3);
+        // y has no default → parameter; x has default 42 → inlined
+        assert!(
+            out.spec.contains("MkA(y_v)"),
+            "MkA should only take y (x has a default)"
+        );
+        assert!(
+            out.spec.contains("x |-> 42"),
+            "x should use default value 42"
+        );
+    }
+
+    #[test]
+    fn test_wildcard_expansion() {
+        let src = r#"
+            state machine S {
+                state A {}
+                state B {}
+                state Done [terminal]
+                initial A
+                transition A -> B { on go }
+                transition B -> Done { on finish }
+                transition * -> Done { on abort }
+            }
+        "#;
+        let out = tla(src, 2);
+        // Wildcard * -> Done on abort should expand to AbortFromA and AbortFromB
+        assert!(
+            out.spec.contains("AbortFromA"),
+            "wildcard should expand to AbortFromA transition"
+        );
+        assert!(
+            out.spec.contains("AbortFromB"),
+            "wildcard should expand to AbortFromB transition"
+        );
+    }
+
+    #[test]
+    fn test_event_params_existential_quantification() {
+        let src = r#"
+            state machine S {
+                state A { val: u8 = 0 }
+                state B [terminal]
+                initial A
+                transition A -> A {
+                    on set_value(v: u8)
+                    action { dst.val = v; }
+                }
+                transition A -> B { on done }
+            }
+        "#;
+        let out = tla(src, 3);
+        // Event param v: u8 should produce \E v \in BoundedNat:
+        assert!(
+            out.spec.contains("\\E v \\in BoundedNat"),
+            "event param should be existentially quantified over BoundedNat"
+        );
+    }
+
+    #[test]
+    fn test_no_verify_bound_uses_default() {
+        // Verify that the bound passed to generate_tlaplus is reflected in cfg
+        let src = r#"
+            state machine S {
+                state A {}
+                state B [terminal]
+                initial A
+                transition A -> B { on go }
+            }
+        "#;
+        let out = tla(src, 3);
+        assert!(out.config.contains("Bound = 3"), "bound should be 3 in cfg");
+
+        let out2 = tla(src, 7);
+        assert!(
+            out2.config.contains("Bound = 7"),
+            "bound should be 7 in cfg"
+        );
+    }
+
+    #[test]
+    fn test_multiple_states_union_fields() {
+        // Two states with different fields — TypeOK union should cover all fields
+        let src = r#"
+            state machine S {
+                state A { x: u8 }
+                state B { y: u16 }
+                state Done [terminal]
+                initial A
+                transition A -> B {
+                    on go(val: u16)
+                    action { dst.y = val; }
+                }
+                transition B -> Done { on finish }
+            }
+        "#;
+        let out = tla(src, 2);
+        // Both x and y should appear in TypeOK
+        assert!(
+            out.spec.contains("sm.x \\in BoundedNat"),
+            "x (u8) should appear in TypeOK"
+        );
+        assert!(
+            out.spec.contains("sm.y \\in BoundedNat"),
+            "y (u16) should appear in TypeOK"
+        );
+        // Non-belonging fields use NullVal in Mk helpers
+        assert!(
+            out.spec.contains("y |-> NullVal") || out.spec.contains("x |-> NullVal"),
+            "fields not belonging to a state should be NullVal"
+        );
     }
 }
