@@ -437,4 +437,93 @@ mod tests {
             "fields not belonging to a state should be NullVal"
         );
     }
+
+    // ── guarded branches / Phase 2b ─────────────────────────────────────
+
+    #[test]
+    fn test_guarded_branches_tla_disjunction() {
+        let out = tla(
+            r#"
+            state machine S {
+                state A { count: u8 = 0 }
+                state B [terminal]
+                initial A
+                transition A -> A {
+                    on tick
+                    guard src.count < 3
+                    action { dst.count = src.count + 1; }
+                }
+                transition A -> B {
+                    on tick
+                    guard src.count >= 3
+                }
+            }
+        "#,
+            5,
+        );
+        // Should generate single Tick action with disjunction
+        assert!(
+            out.spec.contains("Tick =="),
+            "should have single Tick action"
+        );
+        assert!(
+            out.spec.contains("\\/"),
+            "should have disjunction for guard branches"
+        );
+        assert!(out.spec.contains("sm.count < 3"), "should have first guard");
+        assert!(
+            out.spec.contains("sm.count >= 3"),
+            "should have second guard"
+        );
+    }
+
+    #[test]
+    fn test_guard_exclusivity_invariant_generated() {
+        let out = tla(
+            r#"
+            state machine S {
+                state A { count: u8 = 0 }
+                state B [terminal]
+                initial A
+                transition A -> A {
+                    on tick
+                    guard src.count < 3
+                    action { dst.count = src.count + 1; }
+                }
+                transition A -> B {
+                    on tick
+                    guard src.count >= 3
+                }
+            }
+        "#,
+            5,
+        );
+        assert!(
+            out.spec.contains("GuardExclusive"),
+            "should generate guard exclusivity invariant"
+        );
+        assert!(
+            out.config.contains("INVARIANT GuardExclusive"),
+            "cfg should include exclusivity invariant"
+        );
+    }
+
+    #[test]
+    fn test_no_guard_group_no_exclusivity() {
+        let out = tla(
+            r#"
+            state machine S {
+                state A {}
+                state B [terminal]
+                initial A
+                transition A -> B { on go }
+            }
+        "#,
+            2,
+        );
+        assert!(
+            !out.spec.contains("GuardExclusive"),
+            "no guarded groups = no exclusivity invariant"
+        );
+    }
 }
