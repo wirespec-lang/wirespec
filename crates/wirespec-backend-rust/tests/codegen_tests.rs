@@ -149,6 +149,56 @@ fn codegen_artifact_emission() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Endianness codegen
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn codegen_little_endian_module() {
+    let rs = generate_rust(
+        r#"
+        @endian little
+        packet LittleEndianPacket {
+            x: u16,
+            y: u32,
+        }
+    "#,
+    );
+    assert!(
+        rs.contains("read_u16le"),
+        "should use le with @endian little, got:\n{}",
+        rs
+    );
+    assert!(
+        rs.contains("read_u32le"),
+        "should use le with @endian little, got:\n{}",
+        rs
+    );
+}
+
+#[test]
+fn codegen_big_endian_module() {
+    let rs = generate_rust(
+        r#"
+        @endian big
+        packet BigEndianPacket {
+            x: u16,
+            y: u32,
+        }
+    "#,
+    );
+    assert!(
+        rs.contains("read_u16be"),
+        "should use be with @endian big, got:\n{}",
+        rs
+    );
+    assert!(
+        rs.contains("read_u32be"),
+        "should use be with @endian big, got:\n{}",
+        rs
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // VarInt codegen
 // ═══════════════════════════════════════════════════════════════════════════
 
