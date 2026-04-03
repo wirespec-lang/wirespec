@@ -1,5 +1,6 @@
 // crates/wirespec-backend-tlaplus/src/lib.rs
 pub mod emit;
+pub mod tlc_result;
 
 use wirespec_sema::ir::SemanticStateMachine;
 
@@ -11,8 +12,13 @@ pub struct TlaplusOutput {
 }
 
 /// Generate TLA+ spec and config from a state machine.
-/// `bound` controls the finite domain size for model checking.
-pub fn generate_tlaplus(sm: &SemanticStateMachine, bound: u32) -> Result<TlaplusOutput, String> {
+///
+/// `cli_bound` is an optional override for the model-checking bound.
+/// Priority: cli_bound > @verify(bound=N) annotation > default (3).
+pub fn generate_tlaplus(
+    sm: &SemanticStateMachine,
+    cli_bound: Option<u32>,
+) -> Result<TlaplusOutput, String> {
     // Reject delegate SMs (Phase 1 limitation)
     for t in &sm.transitions {
         if t.delegate.is_some() {
@@ -22,6 +28,8 @@ pub fn generate_tlaplus(sm: &SemanticStateMachine, bound: u32) -> Result<Tlaplus
             ));
         }
     }
+
+    let bound = cli_bound.or(sm.verify_bound).unwrap_or(3);
 
     let spec = emit::emit_spec(sm, bound);
     let config = emit::emit_config(sm, bound);
@@ -40,7 +48,7 @@ mod tests {
     fn tla(src: &str, bound: u32) -> TlaplusOutput {
         let ast = parse(src).unwrap();
         let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
-        generate_tlaplus(&sem.state_machines[0], bound).unwrap()
+        generate_tlaplus(&sem.state_machines[0], Some(bound)).unwrap()
     }
 
     // ── smoke / reject ───────────────────────────────────────────────────────
@@ -64,7 +72,7 @@ mod tests {
         let ast = parse(src).unwrap();
         let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
         assert_eq!(sem.state_machines.len(), 1);
-        let output = generate_tlaplus(&sem.state_machines[0], 3).unwrap();
+        let output = generate_tlaplus(&sem.state_machines[0], Some(3)).unwrap();
 
         assert!(output.spec.contains("---- MODULE PathState ----"));
         assert!(output.spec.contains("VARIABLE sm"));
@@ -106,7 +114,7 @@ mod tests {
         "#;
         let ast = parse(src).unwrap();
         let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
-        let result = generate_tlaplus(&sem.state_machines[1], 3);
+        let result = generate_tlaplus(&sem.state_machines[1], Some(3));
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("delegate"));
     }
@@ -332,6 +340,79 @@ mod tests {
         );
     }
 
+    // ── liveness / Phase 2a ────────────────────────────────────────────────
+
+    #[test]
+    fn test_all_reach_closed_generated() {
+        let out = tla(
+            r#"
+            state machine S {
+                state A {}
+                state Done [terminal]
+                initial A
+                transition A -> Done { on go }
+            }
+        "#,
+            2,
+        );
+        assert!(
+            out.spec.contains("AllReachClosed"),
+            "should generate AllReachClosed"
+        );
+        assert!(
+            out.spec.contains("<>(sm.tag \\in TerminalStates)"),
+            "AllReachClosed should use <> operator"
+        );
+        assert!(
+            out.spec.contains("WF_sm(Next)"),
+            "Spec should include WF for liveness"
+        );
+        assert!(
+            out.config.contains("PROPERTY AllReachClosed"),
+            "cfg should include AllReachClosed property"
+        );
+    }
+
+    #[test]
+    fn test_spec_includes_wf_with_terminal() {
+        let out = tla(
+            r#"
+            state machine S {
+                state A {}
+                state Done [terminal]
+                initial A
+                transition A -> Done { on go }
+            }
+        "#,
+            2,
+        );
+        assert!(
+            out.spec.contains("WF_sm(Next)"),
+            "Spec should include weak fairness"
+        );
+    }
+
+    #[test]
+    fn test_no_terminal_no_allreachclosed() {
+        // SM with no terminal states should not generate AllReachClosed
+        let out = tla(
+            r#"
+            state machine S {
+                state A {}
+                state B {}
+                initial A
+                transition A -> B { on go }
+                transition B -> A { on back }
+            }
+        "#,
+            2,
+        );
+        assert!(
+            !out.spec.contains("AllReachClosed"),
+            "no terminal = no AllReachClosed"
+        );
+    }
+
     #[test]
     fn test_multiple_states_union_fields() {
         // Two states with different fields — TypeOK union should cover all fields
@@ -363,5 +444,444 @@ mod tests {
             out.spec.contains("y |-> NullVal") || out.spec.contains("x |-> NullVal"),
             "fields not belonging to a state should be NullVal"
         );
+    }
+
+    // ── guarded branches / Phase 2b ─────────────────────────────────────
+
+    #[test]
+    fn test_guarded_branches_tla_disjunction() {
+        let out = tla(
+            r#"
+            state machine S {
+                state A { count: u8 = 0 }
+                state B [terminal]
+                initial A
+                transition A -> A {
+                    on tick
+                    guard src.count < 3
+                    action { dst.count = src.count + 1; }
+                }
+                transition A -> B {
+                    on tick
+                    guard src.count >= 3
+                }
+            }
+        "#,
+            5,
+        );
+        // Should generate single Tick action with disjunction
+        assert!(
+            out.spec.contains("Tick =="),
+            "should have single Tick action"
+        );
+        assert!(
+            out.spec.contains("\\/"),
+            "should have disjunction for guard branches"
+        );
+        assert!(out.spec.contains("sm.count < 3"), "should have first guard");
+        assert!(
+            out.spec.contains("sm.count >= 3"),
+            "should have second guard"
+        );
+    }
+
+    #[test]
+    fn test_guard_exclusivity_invariant_generated() {
+        let out = tla(
+            r#"
+            state machine S {
+                state A { count: u8 = 0 }
+                state B [terminal]
+                initial A
+                transition A -> A {
+                    on tick
+                    guard src.count < 3
+                    action { dst.count = src.count + 1; }
+                }
+                transition A -> B {
+                    on tick
+                    guard src.count >= 3
+                }
+            }
+        "#,
+            5,
+        );
+        assert!(
+            out.spec.contains("GuardExclusive"),
+            "should generate guard exclusivity invariant"
+        );
+        assert!(
+            out.config.contains("INVARIANT GuardExclusive"),
+            "cfg should include exclusivity invariant"
+        );
+    }
+
+    #[test]
+    fn test_no_guard_group_no_exclusivity() {
+        let out = tla(
+            r#"
+            state machine S {
+                state A {}
+                state B [terminal]
+                initial A
+                transition A -> B { on go }
+            }
+        "#,
+            2,
+        );
+        assert!(
+            !out.spec.contains("GuardExclusive"),
+            "no guarded groups = no exclusivity invariant"
+        );
+    }
+
+    // ── verify declarations / Phase 3 ───────────────────────────────────
+
+    /// Helper that uses the SM's own verify_bound and verify_declarations
+    /// (no CLI bound override).
+    fn tla_no_bound(src: &str) -> TlaplusOutput {
+        let ast = parse(src).unwrap();
+        let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
+        generate_tlaplus(&sem.state_machines[0], None).unwrap()
+    }
+
+    #[test]
+    fn test_verify_nodeadlock_controls_generation() {
+        // SM with verify NoDeadlock -> generates NoDeadlock
+        let out = tla_no_bound(
+            r#"
+            state machine S {
+                state A {}
+                state B [terminal]
+                initial A
+                transition A -> B { on go }
+                verify NoDeadlock
+            }
+        "#,
+        );
+        assert!(
+            out.spec.contains("NoDeadlock"),
+            "should generate NoDeadlock when verify NoDeadlock is present"
+        );
+        assert!(
+            out.config.contains("INVARIANT NoDeadlock"),
+            "cfg should include NoDeadlock invariant"
+        );
+        // Should NOT generate AllReachClosed (not requested)
+        assert!(
+            !out.spec.contains("AllReachClosed"),
+            "should not generate AllReachClosed when not requested"
+        );
+        assert!(
+            !out.config.contains("PROPERTY AllReachClosed"),
+            "cfg should not include AllReachClosed property"
+        );
+    }
+
+    #[test]
+    fn test_verify_only_typeok_when_empty_verify() {
+        // SM with NO verify declarations -> legacy behavior (generates everything)
+        let out = tla_no_bound(
+            r#"
+            state machine S {
+                state A {}
+                state B [terminal]
+                initial A
+                transition A -> B { on go }
+            }
+        "#,
+        );
+        // Legacy behavior: NoDeadlock and AllReachClosed
+        assert!(
+            out.spec.contains("NoDeadlock"),
+            "legacy: generates NoDeadlock"
+        );
+        assert!(
+            out.spec.contains("AllReachClosed"),
+            "legacy: generates AllReachClosed"
+        );
+    }
+
+    #[test]
+    fn test_verify_nodeadlock_and_allreachclosed() {
+        let out = tla_no_bound(
+            r#"
+            state machine S {
+                state A {}
+                state B [terminal]
+                initial A
+                transition A -> B { on go }
+                verify NoDeadlock
+                verify AllReachClosed
+            }
+        "#,
+        );
+        assert!(
+            out.spec.contains("NoDeadlock"),
+            "should generate NoDeadlock"
+        );
+        assert!(
+            out.spec.contains("AllReachClosed"),
+            "should generate AllReachClosed"
+        );
+        assert!(
+            out.spec.contains("WF_sm(Next)"),
+            "should include WF for AllReachClosed liveness"
+        );
+        assert!(
+            out.config.contains("INVARIANT NoDeadlock"),
+            "cfg should include NoDeadlock"
+        );
+        assert!(
+            out.config.contains("PROPERTY AllReachClosed"),
+            "cfg should include AllReachClosed"
+        );
+    }
+
+    #[test]
+    fn test_verify_bound_annotation() {
+        let out = tla_no_bound(
+            r#"
+            @verify(bound=5)
+            state machine S {
+                state A {}
+                state B [terminal]
+                initial A
+                transition A -> B { on go }
+                verify NoDeadlock
+            }
+        "#,
+        );
+        assert!(
+            out.config.contains("Bound = 5"),
+            "should use bound=5 from annotation"
+        );
+    }
+
+    #[test]
+    fn test_verify_bound_cli_overrides_annotation() {
+        let src = r#"
+            @verify(bound=5)
+            state machine S {
+                state A {}
+                state B [terminal]
+                initial A
+                transition A -> B { on go }
+                verify NoDeadlock
+            }
+        "#;
+        let ast = parse(src).unwrap();
+        let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
+        let out = generate_tlaplus(&sem.state_machines[0], Some(10)).unwrap();
+        assert!(
+            out.config.contains("Bound = 10"),
+            "CLI bound should override annotation bound"
+        );
+    }
+
+    #[test]
+    fn test_verify_default_bound_when_no_annotation() {
+        let out = tla_no_bound(
+            r#"
+            state machine S {
+                state A {}
+                state B [terminal]
+                initial A
+                transition A -> B { on go }
+                verify NoDeadlock
+            }
+        "#,
+        );
+        assert!(
+            out.config.contains("Bound = 3"),
+            "should default to bound=3 when no annotation"
+        );
+    }
+
+    #[test]
+    fn test_user_property_formula_to_tla() {
+        let out = tla_no_bound(
+            r#"
+            state machine S {
+                state Active {}
+                state Closing {}
+                state Done [terminal]
+                initial Active
+                transition Active -> Closing { on close }
+                transition Closing -> Done { on finish }
+                verify property NeverBack: in_state(Closing) -> [] not in_state(Active)
+            }
+        "#,
+        );
+        // The property formula should be:
+        // NeverBack == (sm.tag = "Closing" => [](~(sm.tag = "Active")))
+        assert!(
+            out.spec.contains("NeverBack =="),
+            "should define NeverBack property: got\n{}",
+            out.spec
+        );
+        assert!(
+            out.spec.contains("sm.tag = \"Closing\""),
+            "should reference Closing state tag"
+        );
+        assert!(
+            out.spec.contains("sm.tag = \"Active\""),
+            "should reference Active state tag"
+        );
+        assert!(
+            out.config.contains("PROPERTY NeverBack"),
+            "cfg should include NeverBack property"
+        );
+        // WF should be present since we have a liveness property
+        assert!(
+            out.spec.contains("WF_sm(Next)"),
+            "should include WF for liveness property"
+        );
+    }
+
+    #[test]
+    fn test_verify_no_wf_when_only_safety() {
+        // verify NoDeadlock only — no liveness, no WF
+        let out = tla_no_bound(
+            r#"
+            state machine S {
+                state A {}
+                state B [terminal]
+                initial A
+                transition A -> B { on go }
+                verify NoDeadlock
+            }
+        "#,
+        );
+        assert!(
+            !out.spec.contains("WF_sm(Next)"),
+            "should NOT include WF when only safety properties: got\n{}",
+            out.spec
+        );
+    }
+
+    #[test]
+    fn test_verify_leads_to_property() {
+        let out = tla_no_bound(
+            r#"
+            state machine S {
+                state A {}
+                state B [terminal]
+                initial A
+                transition A -> B { on go }
+                verify property Reach: in_state(A) ~> in_state(B)
+            }
+        "#,
+        );
+        assert!(
+            out.spec.contains("Reach =="),
+            "should define Reach property"
+        );
+        assert!(
+            out.spec.contains("~>"),
+            "should contain leads-to operator: got\n{}",
+            out.spec
+        );
+        assert!(
+            out.config.contains("PROPERTY Reach"),
+            "cfg should include Reach property"
+        );
+    }
+
+    // ── TLC result parser tests ────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_tlc_pass() {
+        use tlc_result::*;
+        let output = r#"
+Model checking completed. No error found.
+42 states generated, 12 distinct states found.
+        "#;
+        match parse_tlc_output(output) {
+            TlcResult::Pass {
+                states_explored,
+                distinct_states,
+            } => {
+                assert_eq!(states_explored, Some(42));
+                assert_eq!(distinct_states, Some(12));
+            }
+            other => panic!("expected Pass, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_tlc_invariant_violation() {
+        use tlc_result::*;
+        let output = r#"
+Error: Invariant NoDeadlock is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ sm = [tag |-> "Init", path_id |-> 0, rtt |-> "@@null"]
+State 2: <Action>
+/\ sm = [tag |-> "Active", path_id |-> 0, rtt |-> 0]
+State 3: Stuttering
+        "#;
+        match parse_tlc_output(output) {
+            TlcResult::Fail {
+                violated_property,
+                counterexample,
+            } => {
+                assert_eq!(violated_property, "NoDeadlock");
+                assert!(counterexample.len() >= 2);
+                assert_eq!(counterexample[0].state_tag.as_deref(), Some("Init"));
+            }
+            other => panic!("expected Fail, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_nullval_hidden() {
+        use tlc_result::*;
+        let output = r#"
+Error: Invariant NoDeadlock is violated.
+State 1: <Initial predicate>
+/\ sm = [tag |-> "Init", path_id |-> 0, rtt |-> "@@null", cwnd |-> "@@null"]
+        "#;
+        let result = parse_tlc_output(output);
+        if let TlcResult::Fail { counterexample, .. } = result {
+            let step = &counterexample[0];
+            // NullVal fields should be filtered out
+            assert!(
+                !step.fields.iter().any(|(_, v)| v.contains("@@null")),
+                "NullVal fields should be hidden: {:?}",
+                step.fields
+            );
+        }
+    }
+
+    #[test]
+    fn test_format_pass() {
+        use tlc_result::*;
+        let result = TlcResult::Pass {
+            states_explored: Some(42),
+            distinct_states: Some(12),
+        };
+        let formatted = format_result(&result, "PathState", 2);
+        assert!(formatted.contains("PASS"));
+        assert!(formatted.contains("PathState"));
+        assert!(formatted.contains("42"));
+    }
+
+    #[test]
+    fn test_format_fail() {
+        use tlc_result::*;
+        let result = TlcResult::Fail {
+            violated_property: "NoDeadlock".to_string(),
+            counterexample: vec![TlcStep {
+                step_number: 1,
+                state_tag: Some("Init".to_string()),
+                fields: vec![("path_id".to_string(), "0".to_string())],
+                is_stuttering: false,
+            }],
+        };
+        let formatted = format_result(&result, "PathState", 2);
+        assert!(formatted.contains("FAIL"));
+        assert!(formatted.contains("NoDeadlock"));
+        assert!(formatted.contains("Init"));
     }
 }

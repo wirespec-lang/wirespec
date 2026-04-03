@@ -81,16 +81,76 @@ pub fn emit_spec(sm: &SemanticStateMachine, _bound: u32) -> String {
     emit_transitions(&mut out, sm);
 
     // Next
-    let action_names = compute_action_names(sm);
+    let groups = compute_transition_groups(sm);
+    let action_names: Vec<String> = groups.iter().map(|g| g.action_name.clone()).collect();
     emit_next(&mut out, &action_names);
 
-    // Spec
-    out.push_str("\\* Specification\n");
-    out.push_str("Spec == Init /\\ [][Next]_sm\n\n");
+    // Determine if terminal states exist (for liveness)
+    let has_terminals = sm.states.iter().any(|s| s.is_terminal);
 
-    // NoDeadlock property
-    out.push_str("\\* NoDeadlock: terminal states or transitions enabled\n");
-    out.push_str("NoDeadlock == sm.tag \\in TerminalStates \\/ ENABLED(Next)\n\n");
+    // Check which built-in verify declarations are requested
+    let has_verify_decls = !sm.verify_declarations.is_empty();
+    let wants_nodeadlock = sm
+        .verify_declarations
+        .iter()
+        .any(|v| matches!(v, SemanticVerifyDecl::NoDeadlock));
+    let wants_allreachclosed = sm
+        .verify_declarations
+        .iter()
+        .any(|v| matches!(v, SemanticVerifyDecl::AllReachClosed));
+    let has_liveness_properties = wants_allreachclosed
+        || sm
+            .verify_declarations
+            .iter()
+            .any(|v| matches!(v, SemanticVerifyDecl::Property { .. }));
+
+    // Spec (include WF when liveness properties are present)
+    out.push_str("\\* Specification\n");
+    if has_verify_decls {
+        // With explicit verify declarations, only add WF if liveness properties exist
+        if has_liveness_properties {
+            out.push_str("Spec == Init /\\ [][Next]_sm /\\ WF_sm(Next)\n\n");
+        } else {
+            out.push_str("Spec == Init /\\ [][Next]_sm\n\n");
+        }
+    } else {
+        // Legacy behavior: include WF when terminal states exist
+        if has_terminals {
+            out.push_str("Spec == Init /\\ [][Next]_sm /\\ WF_sm(Next)\n\n");
+        } else {
+            out.push_str("Spec == Init /\\ [][Next]_sm\n\n");
+        }
+    }
+
+    // NoDeadlock property (only if explicitly requested or no verify declarations)
+    if !has_verify_decls || wants_nodeadlock {
+        out.push_str("\\* NoDeadlock: terminal states or transitions enabled\n");
+        out.push_str("NoDeadlock == sm.tag \\in TerminalStates \\/ ENABLED(Next)\n\n");
+    }
+
+    // Guard exclusivity invariants
+    emit_guard_exclusivity(&mut out, sm);
+
+    // AllReachClosed liveness property
+    if !has_verify_decls {
+        // Legacy behavior: generate when terminal states exist
+        if has_terminals {
+            out.push_str("\\* AllReachClosed: eventually reach a terminal state\n");
+            out.push_str("AllReachClosed == <>(sm.tag \\in TerminalStates)\n\n");
+        }
+    } else if wants_allreachclosed && has_terminals {
+        out.push_str("\\* AllReachClosed: eventually reach a terminal state\n");
+        out.push_str("AllReachClosed == <>(sm.tag \\in TerminalStates)\n\n");
+    }
+
+    // User-defined verify properties
+    for vd in &sm.verify_declarations {
+        if let SemanticVerifyDecl::Property { name, formula } = vd {
+            let tla_formula = verify_formula_to_tla(formula);
+            out.push_str(&format!("\\* User property: {}\n", name));
+            out.push_str(&format!("{} == {}\n\n", name, tla_formula));
+        }
+    }
 
     // Module footer
     out.push_str("====\n");
@@ -100,12 +160,58 @@ pub fn emit_spec(sm: &SemanticStateMachine, _bound: u32) -> String {
 
 /// Emit the .cfg file.
 pub fn emit_config(sm: &SemanticStateMachine, bound: u32) -> String {
-    let _ = sm;
+    let has_terminals = sm.states.iter().any(|s| s.is_terminal);
+    let has_verify_decls = !sm.verify_declarations.is_empty();
+    let wants_nodeadlock = sm
+        .verify_declarations
+        .iter()
+        .any(|v| matches!(v, SemanticVerifyDecl::NoDeadlock));
+    let wants_allreachclosed = sm
+        .verify_declarations
+        .iter()
+        .any(|v| matches!(v, SemanticVerifyDecl::AllReachClosed));
+
     let mut out = String::new();
     out.push_str("SPECIFICATION Spec\n");
     out.push_str(&format!("CONSTANT Bound = {}\n\n", bound));
     out.push_str("INVARIANT TypeOK\n");
-    out.push_str("INVARIANT NoDeadlock\n");
+
+    if !has_verify_decls || wants_nodeadlock {
+        out.push_str("INVARIANT NoDeadlock\n");
+    }
+
+    // Guard exclusivity invariants
+    let groups = compute_transition_groups(sm);
+    for group in &groups {
+        if group.indices.len() <= 1 {
+            continue;
+        }
+        let first_trans = &sm.transitions[group.indices[0]];
+        let event_pascal = to_pascal_case(&first_trans.event_name);
+        let inv_name = format!(
+            "GuardExclusive_{}_{}",
+            first_trans.src_state_name, event_pascal
+        );
+        out.push_str(&format!("INVARIANT {}\n", inv_name));
+    }
+
+    if !has_verify_decls {
+        // Legacy behavior
+        if has_terminals {
+            out.push_str("\nPROPERTY AllReachClosed\n");
+        }
+    } else {
+        if wants_allreachclosed && has_terminals {
+            out.push_str("\nPROPERTY AllReachClosed\n");
+        }
+        // User-defined properties
+        for vd in &sm.verify_declarations {
+            if let SemanticVerifyDecl::Property { name, .. } = vd {
+                out.push_str(&format!("\nPROPERTY {}\n", name));
+            }
+        }
+    }
+
     out
 }
 
@@ -313,95 +419,301 @@ fn emit_init(out: &mut String, sm: &SemanticStateMachine) {
     }
 }
 
-/// Compute unique action names for each transition. This must be consistent
-/// between emit_transitions and emit_next.
-fn compute_action_names(sm: &SemanticStateMachine) -> Vec<String> {
-    let mut action_names: Vec<String> = Vec::new();
+/// A group of transitions sharing (src_state, event). If the group has
+/// multiple members, they must all be guarded (enforced by sema).
+struct TransitionGroup {
+    /// Indices into sm.transitions
+    indices: Vec<usize>,
+    /// The action name for this group
+    action_name: String,
+}
+
+/// Group transitions by (src_state, event) and compute a unique action name
+/// for each group. Preserves ordering by first occurrence.
+fn compute_transition_groups(sm: &SemanticStateMachine) -> Vec<TransitionGroup> {
+    use std::collections::HashMap;
+
+    // Build groups keyed by (src_state, event), preserving order of first occurrence
+    let mut group_map: HashMap<(String, String), usize> = HashMap::new();
+    let mut groups: Vec<TransitionGroup> = Vec::new();
 
     for (i, trans) in sm.transitions.iter().enumerate() {
+        let key = (trans.src_state_name.clone(), trans.event_name.clone());
+        if let Some(&gidx) = group_map.get(&key) {
+            groups[gidx].indices.push(i);
+        } else {
+            let gidx = groups.len();
+            group_map.insert(key, gidx);
+            groups.push(TransitionGroup {
+                indices: vec![i],
+                action_name: String::new(), // filled below
+            });
+        }
+    }
+
+    // Compute action names for each group
+    // Count how many groups share the same event name (across different src states)
+    let mut event_group_count: HashMap<String, usize> = HashMap::new();
+    for g in &groups {
+        let trans = &sm.transitions[g.indices[0]];
+        *event_group_count
+            .entry(trans.event_name.clone())
+            .or_default() += 1;
+    }
+
+    let mut seen_names: Vec<String> = Vec::new();
+    for g in &mut groups {
+        let trans = &sm.transitions[g.indices[0]];
         let event_pascal = to_pascal_case(&trans.event_name);
 
-        // Check if multiple transitions have same event name
-        let same_event_count = sm
-            .transitions
-            .iter()
-            .filter(|t| t.event_name == trans.event_name)
-            .count();
-
-        let action_name = if same_event_count > 1 {
+        let action_name = if event_group_count
+            .get(&trans.event_name)
+            .copied()
+            .unwrap_or(0)
+            > 1
+        {
             format!("{}From{}", event_pascal, trans.src_state_name)
         } else {
-            event_pascal.clone()
+            event_pascal
         };
 
         // Deduplicate if collision
-        let final_name = if action_names.contains(&action_name) {
-            format!("{}_{}", action_name, i)
+        let final_name = if seen_names.contains(&action_name) {
+            format!("{}_{}", action_name, g.indices[0])
         } else {
             action_name
         };
-        action_names.push(final_name);
+        seen_names.push(final_name.clone());
+        g.action_name = final_name;
     }
 
-    action_names
+    groups
 }
 
-/// Emit transition actions.
+/// Emit transition actions, handling guarded groups as disjunctions.
 fn emit_transitions(out: &mut String, sm: &SemanticStateMachine) {
-    let action_names = compute_action_names(sm);
+    let groups = compute_transition_groups(sm);
 
-    for (i, trans) in sm.transitions.iter().enumerate() {
-        let final_name = &action_names[i];
+    for group in &groups {
+        let first_trans = &sm.transitions[group.indices[0]];
 
-        // Comment
+        if group.indices.len() == 1 {
+            // Single transition -- emit normally
+            let trans = first_trans;
+
+            // Comment
+            out.push_str(&format!(
+                "\\* transition {} -> {} {{ on {} }}\n",
+                trans.src_state_name, trans.dst_state_name, trans.event_name
+            ));
+
+            out.push_str(&format!("{} ==\n", group.action_name));
+
+            // Source state guard
+            out.push_str(&format!("    /\\ sm.tag = \"{}\"\n", trans.src_state_name));
+
+            // Event params -> existential quantification
+            let event = sm.events.iter().find(|e| e.event_id == trans.event_id);
+            let params = event.map(|e| &e.params).cloned().unwrap_or_default();
+
+            let mut indent = "    ";
+            if !params.is_empty() {
+                let quantifiers: Vec<String> = params
+                    .iter()
+                    .map(|p| format!("{} \\in {}", p.name, type_to_tla_domain(&p.ty)))
+                    .collect();
+                out.push_str(&format!("    /\\ \\E {}:\n", quantifiers.join(", ")));
+                indent = "        ";
+            }
+
+            // Guard
+            if let Some(ref guard) = trans.guard {
+                let guard_str = expr_to_tla(guard);
+                out.push_str(&format!("{}/\\ {}\n", indent, guard_str));
+            }
+
+            // Destination state construction
+            emit_dst_state(out, sm, trans, indent);
+
+            out.push('\n');
+        } else {
+            // Multiple guarded transitions -- emit as disjunction
+            // Comment
+            let branch_descs: Vec<String> = group
+                .indices
+                .iter()
+                .map(|&i| {
+                    let t = &sm.transitions[i];
+                    format!("{} -> {}", t.src_state_name, t.dst_state_name)
+                })
+                .collect();
+            out.push_str(&format!(
+                "\\* guarded branches on {}: {}\n",
+                first_trans.event_name,
+                branch_descs.join(", ")
+            ));
+
+            out.push_str(&format!("{} ==\n", group.action_name));
+
+            // Source state guard (shared by all branches)
+            out.push_str(&format!(
+                "    /\\ sm.tag = \"{}\"\n",
+                first_trans.src_state_name
+            ));
+
+            // Event params -> existential quantification (shared)
+            let event = sm
+                .events
+                .iter()
+                .find(|e| e.event_id == first_trans.event_id);
+            let params = event.map(|e| &e.params).cloned().unwrap_or_default();
+
+            let base_indent = if !params.is_empty() {
+                let quantifiers: Vec<String> = params
+                    .iter()
+                    .map(|p| format!("{} \\in {}", p.name, type_to_tla_domain(&p.ty)))
+                    .collect();
+                out.push_str(&format!("    /\\ \\E {}:\n", quantifiers.join(", ")));
+                "        "
+            } else {
+                "    "
+            };
+
+            // Disjunction of guarded branches
+            for (branch_idx, &ti) in group.indices.iter().enumerate() {
+                let trans = &sm.transitions[ti];
+                let disj_prefix = if branch_idx == 0 {
+                    format!("{}/\\ \\/ ", base_indent)
+                } else {
+                    format!("{}   \\/ ", base_indent)
+                };
+
+                // Guard (required for all branches in a group)
+                if let Some(ref guard) = trans.guard {
+                    let guard_str = expr_to_tla(guard);
+                    out.push_str(&format!("{}/\\ {}\n", disj_prefix, guard_str));
+                }
+
+                // Destination state construction
+                let inner_indent = format!("{}      ", base_indent);
+                emit_dst_state_with_indent(out, sm, trans, &inner_indent);
+            }
+
+            out.push('\n');
+        }
+    }
+}
+
+/// Emit destination state construction for a transition.
+fn emit_dst_state(
+    out: &mut String,
+    sm: &SemanticStateMachine,
+    trans: &SemanticTransition,
+    indent: &str,
+) {
+    let dst_state = sm.states.iter().find(|s| s.name == trans.dst_state_name);
+    if let Some(dst) = dst_state {
+        let mk_args = build_mk_args(dst, &trans.actions);
+        if mk_args.is_empty() {
+            out.push_str(&format!("{}/\\ sm' = Mk{}\n", indent, dst.name));
+        } else {
+            out.push_str(&format!(
+                "{}/\\ sm' = Mk{}({})\n",
+                indent,
+                dst.name,
+                mk_args.join(", ")
+            ));
+        }
+    }
+}
+
+/// Emit destination state construction with a specific indent string.
+fn emit_dst_state_with_indent(
+    out: &mut String,
+    sm: &SemanticStateMachine,
+    trans: &SemanticTransition,
+    indent: &str,
+) {
+    let dst_state = sm.states.iter().find(|s| s.name == trans.dst_state_name);
+    if let Some(dst) = dst_state {
+        let mk_args = build_mk_args(dst, &trans.actions);
+        if mk_args.is_empty() {
+            out.push_str(&format!("{}/\\ sm' = Mk{}\n", indent, dst.name));
+        } else {
+            out.push_str(&format!(
+                "{}/\\ sm' = Mk{}({})\n",
+                indent,
+                dst.name,
+                mk_args.join(", ")
+            ));
+        }
+    }
+}
+
+/// Emit guard exclusivity invariants for guarded groups. For each group of
+/// guarded transitions sharing (state, event), generate pairwise mutual
+/// exclusion invariants.
+fn emit_guard_exclusivity(out: &mut String, sm: &SemanticStateMachine) -> Vec<String> {
+    let groups = compute_transition_groups(sm);
+    let mut invariant_names: Vec<String> = Vec::new();
+
+    for group in &groups {
+        if group.indices.len() <= 1 {
+            continue; // No exclusivity needed for single transitions
+        }
+
+        let first_trans = &sm.transitions[group.indices[0]];
+        let event_pascal = to_pascal_case(&first_trans.event_name);
+        let inv_name = format!(
+            "GuardExclusive_{}_{}",
+            first_trans.src_state_name, event_pascal
+        );
+
         out.push_str(&format!(
-            "\\* transition {} -> {} {{ on {} }}\n",
-            trans.src_state_name, trans.dst_state_name, trans.event_name
+            "\\* Guard exclusivity for {} in state {}\n",
+            first_trans.event_name, first_trans.src_state_name
+        ));
+        out.push_str(&format!("{} ==\n", inv_name));
+        out.push_str(&format!(
+            "    sm.tag = \"{}\" =>\n",
+            first_trans.src_state_name
         ));
 
-        out.push_str(&format!("{} ==\n", final_name));
+        // Collect guard expressions
+        let guards: Vec<String> = group
+            .indices
+            .iter()
+            .map(|&i| {
+                let trans = &sm.transitions[i];
+                trans
+                    .guard
+                    .as_ref()
+                    .map(expr_to_tla)
+                    .unwrap_or_else(|| "TRUE".to_string())
+            })
+            .collect();
 
-        // Source state guard
-        out.push_str(&format!("    /\\ sm.tag = \"{}\"\n", trans.src_state_name));
-
-        // Event params -> existential quantification
-        let event = sm.events.iter().find(|e| e.event_id == trans.event_id);
-        let params = event.map(|e| &e.params).cloned().unwrap_or_default();
-
-        let mut indent = "    ";
-        if !params.is_empty() {
-            let quantifiers: Vec<String> = params
-                .iter()
-                .map(|p| format!("{} \\in {}", p.name, type_to_tla_domain(&p.ty)))
-                .collect();
-            out.push_str(&format!("    /\\ \\E {}:\n", quantifiers.join(", ")));
-            indent = "        ";
+        // Generate pairwise exclusivity: ~(g_i /\ g_j) for all i < j
+        let mut pairs: Vec<String> = Vec::new();
+        for i in 0..guards.len() {
+            for j in (i + 1)..guards.len() {
+                pairs.push(format!("~({} /\\ {})", guards[i], guards[j]));
+            }
         }
 
-        // Guard
-        if let Some(ref guard) = trans.guard {
-            let guard_str = expr_to_tla(guard);
-            out.push_str(&format!("{}/\\ {}\n", indent, guard_str));
-        }
-
-        // Destination state construction
-        let dst_state = sm.states.iter().find(|s| s.name == trans.dst_state_name);
-        if let Some(dst) = dst_state {
-            let mk_args = build_mk_args(dst, &trans.actions);
-            if mk_args.is_empty() {
-                out.push_str(&format!("{}/\\ sm' = Mk{}\n", indent, dst.name));
-            } else {
-                out.push_str(&format!(
-                    "{}/\\ sm' = Mk{}({})\n",
-                    indent,
-                    dst.name,
-                    mk_args.join(", ")
-                ));
+        if pairs.len() == 1 {
+            out.push_str(&format!("        {}\n", pairs[0]));
+        } else {
+            for pair in &pairs {
+                out.push_str(&format!("        /\\ {}\n", pair));
             }
         }
 
         out.push('\n');
+        invariant_names.push(inv_name);
     }
+
+    invariant_names
 }
 
 /// Build Mk helper arguments from transition actions.
@@ -456,6 +768,7 @@ fn expr_to_tla(expr: &SemanticExpr) -> String {
                 "!=" => "/=",
                 "and" => "/\\",
                 "or" => "\\/",
+                "~>" => "~>",
                 _ => op.as_str(), // <, <=, >, >=, +, -, * pass through
             };
             format!("({} {} {})", l, tla_op, r)
@@ -464,6 +777,8 @@ fn expr_to_tla(expr: &SemanticExpr) -> String {
             let o = expr_to_tla(operand);
             match op.as_str() {
                 "not" | "!" => format!("~({})", o),
+                "<>" => format!("<>({})", o),
+                "[]" => format!("[]({})", o),
                 _ => format!("{}({})", op, o),
             }
         }
@@ -527,6 +842,72 @@ fn expr_to_tla(expr: &SemanticExpr) -> String {
             format!(
                 "\\A idx \\in DOMAIN {} : {}[idx].tag = \"{}\"",
                 c, c, state_name
+            )
+        }
+    }
+}
+
+/// Convert a SemanticVerifyFormula to TLA+ expression string.
+fn verify_formula_to_tla(f: &SemanticVerifyFormula) -> String {
+    match f {
+        SemanticVerifyFormula::InState { state_name } => {
+            format!("sm.tag = \"{}\"", state_name)
+        }
+        SemanticVerifyFormula::Not { inner } => {
+            format!("~({})", verify_formula_to_tla(inner))
+        }
+        SemanticVerifyFormula::And { left, right } => {
+            format!(
+                "({} /\\ {})",
+                verify_formula_to_tla(left),
+                verify_formula_to_tla(right)
+            )
+        }
+        SemanticVerifyFormula::Or { left, right } => {
+            format!(
+                "({} \\/ {})",
+                verify_formula_to_tla(left),
+                verify_formula_to_tla(right)
+            )
+        }
+        SemanticVerifyFormula::Implies { left, right } => {
+            format!(
+                "({} => {})",
+                verify_formula_to_tla(left),
+                verify_formula_to_tla(right)
+            )
+        }
+        SemanticVerifyFormula::Always { inner } => {
+            format!("[]({})", verify_formula_to_tla(inner))
+        }
+        SemanticVerifyFormula::Eventually { inner } => {
+            format!("<>({})", verify_formula_to_tla(inner))
+        }
+        SemanticVerifyFormula::LeadsTo { left, right } => {
+            format!(
+                "({}) ~> ({})",
+                verify_formula_to_tla(left),
+                verify_formula_to_tla(right)
+            )
+        }
+        SemanticVerifyFormula::FieldRef { field_name } => {
+            format!("sm.{}", field_name)
+        }
+        SemanticVerifyFormula::Literal { value } => value.to_string(),
+        SemanticVerifyFormula::BoolLiteral { value } => {
+            if *value { "TRUE" } else { "FALSE" }.to_string()
+        }
+        SemanticVerifyFormula::Compare { left, op, right } => {
+            let tla_op = match op.as_str() {
+                "==" => "=",
+                "!=" => "/=",
+                _ => op.as_str(),
+            };
+            format!(
+                "({} {} {})",
+                verify_formula_to_tla(left),
+                tla_op,
+                verify_formula_to_tla(right)
             )
         }
     }

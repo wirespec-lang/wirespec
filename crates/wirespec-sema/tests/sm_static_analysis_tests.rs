@@ -377,3 +377,47 @@ fn warning_sm_cycle_without_exit() {
         kinds
     );
 }
+
+// ── S1 refinement: guarded duplicate transitions ────────────────────
+
+#[test]
+fn ok_s1_guarded_branches_same_event() {
+    expect_ok(
+        r#"
+        state machine S {
+            state A { count: u8 = 0 }
+            state B [terminal]
+            initial A
+            transition A -> A {
+                on tick
+                guard src.count < 3
+                action { dst.count = src.count + 1; }
+            }
+            transition A -> B {
+                on tick
+                guard src.count >= 3
+            }
+        }
+    "#,
+    );
+}
+
+#[test]
+fn error_s1_mixed_guard_and_guardless() {
+    expect_error(
+        r#"
+        state machine S {
+            state A { count: u8 = 0 }
+            state B [terminal]
+            initial A
+            transition A -> A {
+                on tick
+                guard src.count < 3
+                action { dst.count = src.count + 1; }
+            }
+            transition A -> B { on tick }
+        }
+    "#,
+        ErrorKind::SmDuplicateTransition,
+    );
+}

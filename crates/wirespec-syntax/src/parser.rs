@@ -819,6 +819,7 @@ impl Parser {
         let mut states = Vec::new();
         let mut initial_state = String::new();
         let mut transitions = Vec::new();
+        let mut verify_declarations = Vec::new();
 
         while !self.at(&TokenKind::RBrace) {
             match self.peek() {
@@ -834,8 +835,7 @@ impl Parser {
                     transitions.push(self.parse_transition()?);
                 }
                 TokenKind::Name(n) if n == "verify" => {
-                    // Skip verify declarations for now (Phase 3)
-                    self.skip_verify()?;
+                    verify_declarations.push(self.parse_verify_decl()?);
                 }
                 _ => {
                     return Err(
@@ -851,6 +851,7 @@ impl Parser {
             states,
             initial_state,
             transitions,
+            verify_declarations,
             annotations,
             exported,
             span: Some(start),
@@ -1041,48 +1042,217 @@ impl Parser {
         })
     }
 
-    fn skip_verify(&mut self) -> Result<()> {
-        // Skip "verify" ... until we hit a keyword that starts a new SM item
+    fn parse_verify_decl(&mut self) -> Result<AstVerifyDecl> {
+        let start = self.span();
         self.advance(); // skip "verify"
 
-        // Simple heuristic: skip tokens until we see state/initial/transition/verify/}
-        // Handle "verify property Name:" with nested expressions
-        if let TokenKind::Name(ref n) = self.peek().clone() {
-            if n == "property" {
-                self.advance(); // skip "property"
-                self.expect_name()?; // skip name
-                self.expect(&TokenKind::Colon)?;
-            }
-        } else {
-            // verify Name (bare name reference)
-            self.expect_name()?;
-            return Ok(());
+        // Check if it's `verify property Name: formula`
+        if let TokenKind::Name(ref n) = self.peek().clone()
+            && n == "property"
+        {
+            self.advance(); // skip "property"
+            let (prop_name, _) = self.expect_name()?;
+            self.expect(&TokenKind::Colon)?;
+            let formula = self.parse_verify_formula()?;
+            return Ok(AstVerifyDecl::Property {
+                name: prop_name,
+                formula,
+                span: Some(start),
+            });
         }
 
-        // Skip the verify expression body — count braces/parens
-        let mut depth = 0i32;
+        // Otherwise it's a built-in: `verify Name`
+        let (builtin_name, _) = self.expect_name()?;
+        Ok(AstVerifyDecl::BuiltIn {
+            name: builtin_name,
+            span: Some(start),
+        })
+    }
+
+    /// Parse a verify formula expression. Uses recursive descent with explicit
+    /// precedence levels:
+    ///   formula     → implies_expr
+    ///   implies_expr → or_expr ( ( '->' | '~>' ) or_expr )*
+    ///   or_expr     → and_expr ( 'or' and_expr )*
+    ///   and_expr    → compare_expr ( 'and' compare_expr )*
+    ///   compare_expr → unary_expr ( ( '<' | '<=' | '>' | '>=' | '==' | '!=' ) unary_expr )?
+    ///   unary_expr  → '[]' unary_expr | '<>' unary_expr | 'not' unary_expr | primary
+    ///   primary     → 'in_state' '(' Name ')' | 'true' | 'false' | Integer | Name ( '.' Name )* | '(' formula ')'
+    fn parse_verify_formula(&mut self) -> Result<AstVerifyFormula> {
+        self.parse_verify_implies()
+    }
+
+    fn parse_verify_implies(&mut self) -> Result<AstVerifyFormula> {
+        let mut left = self.parse_verify_or()?;
         loop {
-            match self.peek() {
-                TokenKind::Eof => break,
-                TokenKind::RBrace if depth == 0 => break,
-                TokenKind::State | TokenKind::Initial | TokenKind::Transition if depth == 0 => {
-                    break;
-                }
-                TokenKind::Name(n) if n == "verify" && depth == 0 => break,
-                TokenKind::LParen | TokenKind::LBrace | TokenKind::LBracket => {
-                    depth += 1;
-                    self.advance();
-                }
-                TokenKind::RParen | TokenKind::RBrace | TokenKind::RBracket => {
-                    depth -= 1;
-                    self.advance();
-                }
-                _ => {
-                    self.advance();
-                }
+            if self.at(&TokenKind::Arrow) {
+                self.advance();
+                let right = self.parse_verify_or()?;
+                left = AstVerifyFormula::Implies {
+                    left: Box::new(left),
+                    right: Box::new(right),
+                };
+            } else if self.at(&TokenKind::TildeGt) {
+                self.advance();
+                let right = self.parse_verify_or()?;
+                left = AstVerifyFormula::LeadsTo {
+                    left: Box::new(left),
+                    right: Box::new(right),
+                };
+            } else {
+                break;
             }
         }
-        Ok(())
+        Ok(left)
+    }
+
+    fn parse_verify_or(&mut self) -> Result<AstVerifyFormula> {
+        let mut left = self.parse_verify_and()?;
+        while self.at(&TokenKind::Or) {
+            self.advance();
+            let right = self.parse_verify_and()?;
+            left = AstVerifyFormula::Or {
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+        }
+        Ok(left)
+    }
+
+    fn parse_verify_and(&mut self) -> Result<AstVerifyFormula> {
+        let mut left = self.parse_verify_compare()?;
+        while self.at(&TokenKind::And) {
+            self.advance();
+            let right = self.parse_verify_compare()?;
+            left = AstVerifyFormula::And {
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+        }
+        Ok(left)
+    }
+
+    fn parse_verify_compare(&mut self) -> Result<AstVerifyFormula> {
+        let left = self.parse_verify_unary()?;
+        let op = match self.peek() {
+            TokenKind::Lt => Some("<"),
+            TokenKind::Le => Some("<="),
+            TokenKind::Gt => Some(">"),
+            TokenKind::Ge => Some(">="),
+            TokenKind::EqEq => Some("=="),
+            TokenKind::BangEq => Some("!="),
+            _ => None,
+        };
+        if let Some(op_str) = op {
+            let op_string = op_str.to_string();
+            self.advance();
+            let right = self.parse_verify_unary()?;
+            Ok(AstVerifyFormula::Compare {
+                left: Box::new(left),
+                op: op_string,
+                right: Box::new(right),
+            })
+        } else {
+            Ok(left)
+        }
+    }
+
+    fn parse_verify_unary(&mut self) -> Result<AstVerifyFormula> {
+        // [] formula (Always)
+        if self.at(&TokenKind::LBracket) {
+            // Look ahead: [] means LBracket followed immediately by RBracket
+            let saved = self.pos;
+            self.advance(); // skip '['
+            if self.at(&TokenKind::RBracket) {
+                self.advance(); // skip ']'
+                let inner = self.parse_verify_unary()?;
+                return Ok(AstVerifyFormula::Always {
+                    inner: Box::new(inner),
+                });
+            }
+            // Not [], restore position
+            self.pos = saved;
+        }
+
+        // <> formula (Eventually) — Lt followed by Gt
+        if self.at(&TokenKind::Lt) {
+            let saved = self.pos;
+            self.advance(); // skip '<'
+            if self.at(&TokenKind::Gt) {
+                self.advance(); // skip '>'
+                let inner = self.parse_verify_unary()?;
+                return Ok(AstVerifyFormula::Eventually {
+                    inner: Box::new(inner),
+                });
+            }
+            // Not <>, restore position
+            self.pos = saved;
+        }
+
+        // not formula
+        if self.at(&TokenKind::Not) {
+            self.advance();
+            let inner = self.parse_verify_unary()?;
+            return Ok(AstVerifyFormula::Not {
+                inner: Box::new(inner),
+            });
+        }
+
+        self.parse_verify_primary()
+    }
+
+    fn parse_verify_primary(&mut self) -> Result<AstVerifyFormula> {
+        // in_state(Name)
+        if self.at(&TokenKind::InState) {
+            self.advance();
+            self.expect(&TokenKind::LParen)?;
+            let (state_name, _) = self.expect_name()?;
+            self.expect(&TokenKind::RParen)?;
+            return Ok(AstVerifyFormula::InState { state_name });
+        }
+
+        // true / false
+        if self.at(&TokenKind::True) {
+            self.advance();
+            return Ok(AstVerifyFormula::Literal {
+                value: AstLiteralValue::Bool(true),
+            });
+        }
+        if self.at(&TokenKind::False) {
+            self.advance();
+            return Ok(AstVerifyFormula::Literal {
+                value: AstLiteralValue::Bool(false),
+            });
+        }
+
+        // Integer literal
+        if let TokenKind::Integer(n) = self.peek().clone() {
+            self.advance();
+            return Ok(AstVerifyFormula::Literal {
+                value: AstLiteralValue::Int(n),
+            });
+        }
+
+        // Parenthesized formula
+        if self.at(&TokenKind::LParen) {
+            self.advance();
+            let inner = self.parse_verify_formula()?;
+            self.expect(&TokenKind::RParen)?;
+            return Ok(inner);
+        }
+
+        // Name — possibly dotted path like src.field
+        if let Some(name) = self.token_as_name() {
+            self.advance();
+            let mut path = vec![name];
+            while self.eat(&TokenKind::Dot) {
+                let (next, _) = self.expect_name()?;
+                path.push(next);
+            }
+            return Ok(AstVerifyFormula::FieldRef { path });
+        }
+
+        Err(self.error(format!("expected verify formula, found {:?}", self.peek())))
     }
 
     // ── Fields ──

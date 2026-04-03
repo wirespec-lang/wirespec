@@ -436,9 +436,66 @@ pub struct AstStateMachineDecl {
     pub states: Vec<AstStateDecl>,
     pub initial_state: String,
     pub transitions: Vec<AstTransitionDecl>,
+    pub verify_declarations: Vec<AstVerifyDecl>,
     pub annotations: Vec<AstAnnotation>,
     pub exported: bool,
     pub span: Option<Span>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AstVerifyDecl {
+    /// `verify NoDeadlock` or `verify AllReachClosed`
+    BuiltIn { name: String, span: Option<Span> },
+    /// `verify property Name: formula`
+    Property {
+        name: String,
+        formula: AstVerifyFormula,
+        span: Option<Span>,
+    },
+}
+
+/// A verify formula — simplified temporal logic expression
+#[derive(Debug, Clone, PartialEq)]
+pub enum AstVerifyFormula {
+    InState {
+        state_name: String,
+    },
+    Not {
+        inner: Box<AstVerifyFormula>,
+    },
+    And {
+        left: Box<AstVerifyFormula>,
+        right: Box<AstVerifyFormula>,
+    },
+    Or {
+        left: Box<AstVerifyFormula>,
+        right: Box<AstVerifyFormula>,
+    },
+    Implies {
+        left: Box<AstVerifyFormula>,
+        right: Box<AstVerifyFormula>,
+    },
+    Always {
+        inner: Box<AstVerifyFormula>,
+    },
+    Eventually {
+        inner: Box<AstVerifyFormula>,
+    },
+    LeadsTo {
+        left: Box<AstVerifyFormula>,
+        right: Box<AstVerifyFormula>,
+    },
+    Compare {
+        left: Box<AstVerifyFormula>,
+        op: String,
+        right: Box<AstVerifyFormula>,
+    },
+    FieldRef {
+        path: Vec<String>,
+    },
+    Literal {
+        value: AstLiteralValue,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

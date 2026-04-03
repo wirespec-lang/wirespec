@@ -1,0 +1,33 @@
+// PathState — self-contained version using u8 instead of VarInt.
+// Expected: all 4 properties PASS.
+
+@verify(bound=3)
+state machine PathState {
+    state Init       { path_id: u8 }
+    state Active     { path_id: u8, rtt: u8 = 0 }
+    state Standby    { path_id: u8 }
+    state Closed [terminal]
+
+    initial Init
+
+    transition Init -> Active {
+        on activate(id: u8)
+        action { dst.path_id = src.path_id; }
+    }
+    transition Active -> Standby {
+        on standby
+        action { dst.path_id = src.path_id; }
+    }
+    transition Standby -> Active {
+        on resume
+        action { dst.path_id = src.path_id; }
+    }
+    transition Active -> Closed { on close }
+    transition Standby -> Closed { on close }
+    transition * -> Closed { on abort }
+
+    verify NoDeadlock
+    verify AllReachClosed
+    verify property AbandonIsFinal: in_state(Closed) -> [] in_state(Closed)
+    verify property ActiveStandbyReversible: in_state(Active) ~> in_state(Active)
+}

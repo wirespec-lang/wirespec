@@ -106,6 +106,8 @@ pub enum TokenKind {
 
     // Misc
     QuestionQuestion, // ??
+    Tilde,            // ~
+    TildeGt,          // ~>
 
     // Special
     Eof,
@@ -290,6 +292,14 @@ impl<'src> Lexer<'src> {
             b'&' => TokenKind::Amp,
             b'|' => TokenKind::Pipe,
             b'/' => TokenKind::Slash,
+            b'~' => {
+                if self.peek() == b'>' {
+                    self.advance();
+                    TokenKind::TildeGt
+                } else {
+                    TokenKind::Tilde
+                }
+            }
 
             b'?' => {
                 if self.peek() == b'?' {

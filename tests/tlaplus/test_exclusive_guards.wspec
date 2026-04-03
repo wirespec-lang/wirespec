@@ -1,0 +1,30 @@
+// RetryMachine — exclusive guards on same event.
+// Expected: PASS (guards are mutually exclusive).
+
+@verify(bound=5)
+state machine RetryMachine {
+    state Idle { retries: u8 = 0 }
+    state Retrying { retries: u8 }
+    state Failed [terminal]
+    state Done [terminal]
+
+    initial Idle
+
+    transition Idle -> Retrying {
+        on start
+        action { dst.retries = 0; }
+    }
+    transition Retrying -> Retrying {
+        on retry
+        guard src.retries < 3
+        action { dst.retries = src.retries + 1; }
+    }
+    transition Retrying -> Failed {
+        on retry
+        guard src.retries >= 3
+    }
+    transition Retrying -> Done { on succeed }
+
+    verify NoDeadlock
+    verify AllReachClosed
+}

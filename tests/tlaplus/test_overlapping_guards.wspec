@@ -1,0 +1,22 @@
+// OverlapMachine — guards on tick overlap when count == 3.
+// Expected: FAIL (GuardExclusive violated — both guards true at count == 3).
+
+@verify(bound=5)
+state machine OverlapMachine {
+    state Running { count: u8 = 0 }
+    state Done [terminal]
+
+    initial Running
+
+    transition Running -> Running {
+        on tick
+        guard src.count <= 3
+        action { dst.count = src.count + 1; }
+    }
+    transition Running -> Done {
+        on tick
+        guard src.count >= 3
+    }
+
+    verify NoDeadlock
+}
