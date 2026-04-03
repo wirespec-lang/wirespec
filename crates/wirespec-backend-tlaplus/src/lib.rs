@@ -81,7 +81,8 @@ mod tests {
         assert!(output.spec.contains("NoDeadlock"));
         assert!(output.spec.contains("===="));
 
-        assert!(output.config.contains("SPECIFICATION Spec"));
+        assert!(output.config.contains("INIT Init"));
+        assert!(output.config.contains("NEXT Next"));
         assert!(output.config.contains("Bound = 3"));
         assert!(output.config.contains("INVARIANT TypeOK"));
 
@@ -218,7 +219,8 @@ mod tests {
             }
         "#;
         let out = tla(src, 5);
-        assert!(out.config.contains("SPECIFICATION Spec"));
+        assert!(out.config.contains("INIT Init"));
+        assert!(out.config.contains("NEXT Next"));
         assert!(out.config.contains("Bound = 5"));
         assert!(out.config.contains("INVARIANT TypeOK"));
         assert!(out.config.contains("INVARIANT NoDeadlock"));
@@ -883,5 +885,304 @@ State 1: <Initial predicate>
         assert!(formatted.contains("FAIL"));
         assert!(formatted.contains("NoDeadlock"));
         assert!(formatted.contains("Init"));
+    }
+
+    // ── E2E model-checking tests via tla-checker ──────────────────────────
+
+    /// Parse wspec source, generate TLA+, then model-check it with tla-checker.
+    fn check_tla(src: &str, bound: u32) -> (tla_checker::checker::CheckResult, TlaplusOutput) {
+        use tla_checker::ast::Expr;
+        use tla_checker::checker::{CheckerConfig, check};
+        use tla_checker::config::{apply_config, parse_cfg};
+        use tla_checker::parser::parse as parse_tla;
+
+        let ast = parse(src).unwrap();
+        let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
+        assert!(!sem.state_machines.is_empty(), "no state machines found");
+        let output = generate_tlaplus(&sem.state_machines[0], Some(bound)).unwrap();
+
+        let mut spec = parse_tla(&output.spec)
+            .unwrap_or_else(|e| panic!("TLA+ parse error: {:?}\n\nSpec:\n{}", e, output.spec));
+        let cfg = parse_cfg(&output.config)
+            .unwrap_or_else(|e| panic!("cfg parse error: {:?}\n\nConfig:\n{}", e, output.config));
+
+        let mut domains = tla_checker::ast::Env::new();
+        let mut checker_config = CheckerConfig {
+            allow_deadlock: true,
+            quiet: true,
+            ..Default::default()
+        };
+
+        apply_config(
+            &cfg,
+            &mut spec,
+            &mut domains,
+            &mut checker_config,
+            &[],
+            &[],
+            false,
+        )
+        .unwrap_or_else(|e| {
+            panic!(
+                "apply_config failed: {}\n\nSpec:\n{}\n\nConfig:\n{}",
+                e, output.spec, output.config
+            )
+        });
+
+        // tla-checker's check_eventually already wraps properties in <>
+        // semantics, so we must unwrap Expr::Eventually here to avoid a
+        // "temporal operator <> cannot be evaluated" error at runtime.
+        spec.liveness_properties = spec
+            .liveness_properties
+            .into_iter()
+            .map(|p| match p {
+                Expr::Eventually(inner) => *inner,
+                other => other,
+            })
+            .collect();
+
+        let result = check(&spec, &domains, &checker_config);
+        (result, output)
+    }
+
+    #[test]
+    fn e2e_pathstate_nodeadlock_pass() {
+        let (result, output) = check_tla(
+            r#"
+            @verify(bound = 2)
+            state machine PathState {
+                state Init { path_id: u8 }
+                state Active { path_id: u8, rtt: u8 = 0 }
+                state Closed [terminal]
+                initial Init
+                transition Init -> Active {
+                    on activate(id: u8)
+                    action { dst.path_id = src.path_id; }
+                }
+                transition Active -> Closed { on close }
+                transition * -> Closed { on abort }
+                verify NoDeadlock
+            }
+        "#,
+            2,
+        );
+        eprintln!("TLA+:\n{}", output.spec);
+        assert!(
+            matches!(result, tla_checker::checker::CheckResult::Ok(_)),
+            "expected PASS, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn e2e_pathstate_allreachclosed_pass() {
+        let (result, _) = check_tla(
+            r#"
+            @verify(bound = 2)
+            state machine PathState {
+                state Init { path_id: u8 }
+                state Active { path_id: u8, rtt: u8 = 0 }
+                state Closed [terminal]
+                initial Init
+                transition Init -> Active {
+                    on activate(id: u8)
+                    action { dst.path_id = src.path_id; }
+                }
+                transition Active -> Closed { on close }
+                transition * -> Closed { on abort }
+                verify AllReachClosed
+            }
+        "#,
+            2,
+        );
+        assert!(
+            matches!(result, tla_checker::checker::CheckResult::Ok(_)),
+            "expected PASS for AllReachClosed, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn e2e_safety_property_pass() {
+        let (result, _) = check_tla(
+            r#"
+            @verify(bound = 2)
+            state machine S {
+                state A {}
+                state B {}
+                state Done [terminal]
+                initial A
+                transition A -> B { on go }
+                transition B -> Done { on finish }
+                transition * -> Done { on abort }
+                verify property BBeforeDone:
+                    in_state(B) -> not in_state(A)
+            }
+        "#,
+            2,
+        );
+        assert!(
+            matches!(result, tla_checker::checker::CheckResult::Ok(_)),
+            "expected PASS, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn e2e_liveness_leads_to_pass() {
+        let (result, _) = check_tla(
+            r#"
+            @verify(bound = 2)
+            state machine S {
+                state A {}
+                state B {}
+                state Done [terminal]
+                initial A
+                transition A -> B { on go }
+                transition B -> Done { on finish }
+                verify AllReachClosed
+            }
+        "#,
+            2,
+        );
+        assert!(
+            matches!(result, tla_checker::checker::CheckResult::Ok(_)),
+            "expected PASS for liveness, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn e2e_exclusive_guards_pass() {
+        let (result, _) = check_tla(
+            r#"
+            @verify(bound = 5)
+            state machine RetryMachine {
+                state Trying { count: u8 = 0 }
+                state Done [terminal]
+                initial Trying
+                transition Trying -> Trying {
+                    on retry
+                    guard src.count < 3
+                    action { dst.count = src.count + 1; }
+                }
+                transition Trying -> Done {
+                    on retry
+                    guard src.count >= 3
+                }
+                transition * -> Done { on cancel }
+                verify NoDeadlock
+            }
+        "#,
+            5,
+        );
+        assert!(
+            matches!(result, tla_checker::checker::CheckResult::Ok(_)),
+            "expected PASS for exclusive guards, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn e2e_overlapping_guards_fail() {
+        let (result, output) = check_tla(
+            r#"
+            @verify(bound = 5)
+            state machine OverlapMachine {
+                state Active { level: u8 = 0 }
+                state Done [terminal]
+                initial Active
+                transition Active -> Active {
+                    on adjust
+                    guard src.level < 3
+                    action { dst.level = src.level + 1; }
+                }
+                transition Active -> Done {
+                    on adjust
+                    guard src.level < 5
+                }
+                transition * -> Done { on quit }
+                verify NoDeadlock
+            }
+        "#,
+            5,
+        );
+        eprintln!("TLA+:\n{}", output.spec);
+        // GuardExclusive invariant should be violated (level=0,1,2 both guards true)
+        assert!(
+            matches!(
+                result,
+                tla_checker::checker::CheckResult::InvariantViolation(..)
+            ),
+            "expected invariant violation for overlapping guards, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn e2e_deadlock_fail_no_escape() {
+        let (result, output) = check_tla(
+            r#"
+            @verify(bound = 3)
+            state machine DeadlockMachine {
+                state Running { counter: u8 = 0 }
+                state Done [terminal]
+                initial Running
+                transition Running -> Running {
+                    on tick
+                    guard src.counter < 2
+                    action { dst.counter = src.counter + 1; }
+                }
+                transition Running -> Done {
+                    on finish
+                    guard src.counter >= 100
+                }
+                verify NoDeadlock
+            }
+        "#,
+            3,
+        );
+        eprintln!("TLA+:\n{}", output.spec);
+        // counter reaches 2, tick fails (2 < 2), finish fails (2 >= 100)
+        // NoDeadlock invariant: Running is not terminal and ENABLED(Next) is false
+        assert!(
+            matches!(
+                result,
+                tla_checker::checker::CheckResult::InvariantViolation(..)
+                    | tla_checker::checker::CheckResult::Deadlock(..)
+            ),
+            "expected deadlock/invariant violation, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn e2e_unreachable_terminal_fail() {
+        let (result, output) = check_tla(
+            r#"
+            @verify(bound = 2)
+            state machine LoopMachine {
+                state A { val: u8 = 0 }
+                state B { val: u8 = 0 }
+                state Done [terminal]
+                initial A
+                transition A -> B { on go action { dst.val = src.val; } }
+                transition B -> A { on back action { dst.val = src.val; } }
+                verify AllReachClosed
+            }
+        "#,
+            2,
+        );
+        eprintln!("TLA+:\n{}", output.spec);
+        // A -> B -> A -> B ... forever, never reaches Done
+        // AllReachClosed (liveness) should be violated
+        assert!(
+            matches!(
+                result,
+                tla_checker::checker::CheckResult::LivenessViolation(..)
+            ),
+            "expected liveness violation, got {:?}",
+            result
+        );
     }
 }

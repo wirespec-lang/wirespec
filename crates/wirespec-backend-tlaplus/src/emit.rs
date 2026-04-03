@@ -172,7 +172,13 @@ pub fn emit_config(sm: &SemanticStateMachine, bound: u32) -> String {
         .any(|v| matches!(v, SemanticVerifyDecl::AllReachClosed));
 
     let mut out = String::new();
-    out.push_str("SPECIFICATION Spec\n");
+    // Use INIT/NEXT instead of SPECIFICATION to avoid issues with
+    // model checkers that cannot evaluate temporal operators (WF/SF)
+    // inside the Spec definition during init-state computation.
+    // The Spec definition (with WF) is still emitted in the .tla file
+    // so parsers can extract fairness constraints for liveness checking.
+    out.push_str("INIT Init\n");
+    out.push_str("NEXT Next\n");
     out.push_str(&format!("CONSTANT Bound = {}\n\n", bound));
     out.push_str("INVARIANT TypeOK\n");
 
@@ -389,7 +395,7 @@ fn emit_init(out: &mut String, sm: &SemanticStateMachine) {
 
     out.push_str("Init ==\n");
 
-    // Fields without defaults need existential quantification
+    // Fields without defaults need quantification over their domains
     let unbound_fields: Vec<&SemanticStateField> = initial_state
         .fields
         .iter()
@@ -399,22 +405,22 @@ fn emit_init(out: &mut String, sm: &SemanticStateMachine) {
     if unbound_fields.is_empty() {
         out.push_str(&format!("    sm = Mk{}\n\n", initial_state.name));
     } else {
-        // \E field1 \in Domain1, field2 \in Domain2: sm = Mk...(field1, field2)
+        // Use sm \in {Mk(v1, v2) : v1 \in D1, v2 \in D2} form.
+        // This is equivalent to \E but is compatible with tla-checker's
+        // init state inference which recognises `sm \in <set>`.
+        let args: Vec<String> = unbound_fields
+            .iter()
+            .map(|f| format!("{}_v", f.name))
+            .collect();
         let quantifiers: Vec<String> = unbound_fields
             .iter()
             .map(|f| format!("{}_v \\in {}", f.name, type_to_tla_domain(&f.ty)))
             .collect();
-        let args: Vec<String> = initial_state
-            .fields
-            .iter()
-            .filter(|f| f.default_value.is_none())
-            .map(|f| format!("{}_v", f.name))
-            .collect();
-        out.push_str(&format!("    \\E {}:\n", quantifiers.join(", ")));
         out.push_str(&format!(
-            "        sm = Mk{}({})\n\n",
+            "    sm \\in {{Mk{}({}) : {}}}\n\n",
             initial_state.name,
-            args.join(", ")
+            args.join(", "),
+            quantifiers.join(", ")
         ));
     }
 }
@@ -604,6 +610,59 @@ fn emit_transitions(out: &mut String, sm: &SemanticStateMachine) {
     }
 }
 
+/// Check if any action targets a field that has a default value in the
+/// destination state. When this is true we must emit an inline record
+/// instead of using the Mk helper (which bakes in the default).
+fn actions_override_defaults(dst_state: &SemanticState, actions: &[SemanticAction]) -> bool {
+    actions.iter().any(|action| {
+        if let SemanticExpr::TransitionPeerRef { reference } = &action.target
+            && reference.peer == TransitionPeerKind::Dst
+            && let Some(field_name) = reference.path.first()
+            && let Some(field) = dst_state.fields.iter().find(|f| &f.name == field_name)
+        {
+            field.default_value.is_some()
+        } else {
+            false
+        }
+    })
+}
+
+/// Build an inline record literal for the destination state, using
+/// action values for assigned fields and defaults/NullVal for the rest.
+fn build_inline_record(
+    dst_state: &SemanticState,
+    all_fields: &[(String, SemanticType)],
+    actions: &[SemanticAction],
+) -> String {
+    let mut parts: Vec<String> = vec![format!("tag |-> \"{}\"", dst_state.name)];
+    for (fname, _) in all_fields {
+        // Check if there's an action that assigns to this field
+        let action = actions.iter().find(|a| {
+            if let SemanticExpr::TransitionPeerRef { reference } = &a.target {
+                reference.peer == TransitionPeerKind::Dst
+                    && reference.path.first().map(|p| p.as_str()) == Some(fname)
+            } else {
+                false
+            }
+        });
+
+        if let Some(action) = action {
+            parts.push(format!("{} |-> {}", fname, expr_to_tla(&action.value)));
+        } else if let Some(field) = dst_state.fields.iter().find(|f| &f.name == fname) {
+            // Field belongs to this state
+            if let Some(ref default) = field.default_value {
+                parts.push(format!("{} |-> {}", fname, literal_to_tla(default)));
+            } else {
+                parts.push(format!("{} |-> NullVal", fname));
+            }
+        } else {
+            // Field doesn't belong to this state
+            parts.push(format!("{} |-> NullVal", fname));
+        }
+    }
+    format!("[{}]", parts.join(", "))
+}
+
 /// Emit destination state construction for a transition.
 fn emit_dst_state(
     out: &mut String,
@@ -613,16 +672,22 @@ fn emit_dst_state(
 ) {
     let dst_state = sm.states.iter().find(|s| s.name == trans.dst_state_name);
     if let Some(dst) = dst_state {
-        let mk_args = build_mk_args(dst, &trans.actions);
-        if mk_args.is_empty() {
-            out.push_str(&format!("{}/\\ sm' = Mk{}\n", indent, dst.name));
+        if actions_override_defaults(dst, &trans.actions) {
+            let all_fields = collect_all_fields(sm);
+            let record = build_inline_record(dst, &all_fields, &trans.actions);
+            out.push_str(&format!("{}/\\ sm' = {}\n", indent, record));
         } else {
-            out.push_str(&format!(
-                "{}/\\ sm' = Mk{}({})\n",
-                indent,
-                dst.name,
-                mk_args.join(", ")
-            ));
+            let mk_args = build_mk_args(dst, &trans.actions);
+            if mk_args.is_empty() {
+                out.push_str(&format!("{}/\\ sm' = Mk{}\n", indent, dst.name));
+            } else {
+                out.push_str(&format!(
+                    "{}/\\ sm' = Mk{}({})\n",
+                    indent,
+                    dst.name,
+                    mk_args.join(", ")
+                ));
+            }
         }
     }
 }
@@ -636,16 +701,22 @@ fn emit_dst_state_with_indent(
 ) {
     let dst_state = sm.states.iter().find(|s| s.name == trans.dst_state_name);
     if let Some(dst) = dst_state {
-        let mk_args = build_mk_args(dst, &trans.actions);
-        if mk_args.is_empty() {
-            out.push_str(&format!("{}/\\ sm' = Mk{}\n", indent, dst.name));
+        if actions_override_defaults(dst, &trans.actions) {
+            let all_fields = collect_all_fields(sm);
+            let record = build_inline_record(dst, &all_fields, &trans.actions);
+            out.push_str(&format!("{}/\\ sm' = {}\n", indent, record));
         } else {
-            out.push_str(&format!(
-                "{}/\\ sm' = Mk{}({})\n",
-                indent,
-                dst.name,
-                mk_args.join(", ")
-            ));
+            let mk_args = build_mk_args(dst, &trans.actions);
+            if mk_args.is_empty() {
+                out.push_str(&format!("{}/\\ sm' = Mk{}\n", indent, dst.name));
+            } else {
+                out.push_str(&format!(
+                    "{}/\\ sm' = Mk{}({})\n",
+                    indent,
+                    dst.name,
+                    mk_args.join(", ")
+                ));
+            }
         }
     }
 }
