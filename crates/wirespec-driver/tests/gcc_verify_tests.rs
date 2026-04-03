@@ -359,6 +359,87 @@ fn gcc_verify_all() {
     }
 }
 
+fn write_and_gcc_sanitized(header: &str, source: &str, prefix: &str) -> (bool, String) {
+    let dir = std::path::PathBuf::from("/tmp/wirespec-verify-asan");
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let runtime_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../runtime");
+
+    let h_path = dir.join(format!("{prefix}.h"));
+    let c_path = dir.join(format!("{prefix}.c"));
+    std::fs::write(&h_path, header).unwrap();
+    std::fs::write(&c_path, source).unwrap();
+
+    let output = match std::process::Command::new("gcc")
+        .args([
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-std=c11",
+            "-fsanitize=address,undefined",
+            "-fno-sanitize-recover=all",
+            "-c", // compile to object, don't link
+            "-I",
+            &dir.to_string_lossy(),
+            "-I",
+            &runtime_dir.to_string_lossy(),
+        ])
+        .arg(&c_path)
+        .arg("-o")
+        .arg(dir.join(format!("{prefix}.o")).to_string_lossy().as_ref())
+        .output()
+    {
+        Ok(o) => o,
+        Err(e) => {
+            let msg = format!("gcc not found or failed to execute: {e}");
+            eprintln!("{msg}");
+            return (false, msg);
+        }
+    };
+
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    (output.status.success(), stderr)
+}
+
+#[test]
+fn gcc_asan_ubsan_verify_all() {
+    let cases = test_cases();
+    let mut pass_count = 0;
+    let mut fail_count = 0;
+    let mut failures: Vec<(String, String)> = Vec::new();
+
+    for tc in &cases {
+        let (header, source) = generate_c(tc.source, tc.prefix);
+        let (ok, stderr) = write_and_gcc_sanitized(&header, &source, tc.prefix);
+        if ok {
+            pass_count += 1;
+        } else {
+            fail_count += 1;
+            failures.push((tc.name.to_string(), stderr));
+        }
+    }
+
+    eprintln!("\n========================================");
+    eprintln!(
+        "ASAN/UBSAN SUMMARY: {} passed, {} failed out of {} total",
+        pass_count,
+        fail_count,
+        cases.len()
+    );
+    eprintln!("========================================\n");
+
+    if !failures.is_empty() {
+        for (name, err) in &failures {
+            eprintln!("ASAN/UBSAN FAIL: {name}\n{err}\n");
+        }
+        panic!(
+            "{} out of {} cases failed ASan/UBSan compilation",
+            fail_count,
+            cases.len()
+        );
+    }
+}
+
 #[test]
 fn indexed_delegate_no_todo() {
     let source = r#"
