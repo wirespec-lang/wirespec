@@ -461,6 +461,21 @@ fn test_cases() -> Vec<TestCase> {
                 }
             "#,
         },
+        TestCase {
+            name: "roundtrip_simple_packet",
+            prefix: "rs_roundtrip1",
+            source: "packet SimplePacket { a: u8, b: u16, c: u32, d: u64 }",
+        },
+        TestCase {
+            name: "roundtrip_le_packet",
+            prefix: "rs_roundtrip2",
+            source: "@endian little\npacket LePacket { x: u16, y: u32, z: u64 }",
+        },
+        TestCase {
+            name: "roundtrip_optional_field",
+            prefix: "rs_roundtrip3",
+            source: "packet OptPacket { flags: u8, extra: if flags & 0x01 { u16 }, data: bytes[remaining] }",
+        },
     ]
 }
 
