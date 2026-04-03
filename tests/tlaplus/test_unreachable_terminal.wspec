@@ -1,0 +1,16 @@
+// LoopMachine — cycles forever between A and B, never reaches terminal Done.
+// Expected: FAIL (AllReachClosed violated — infinite loop, terminal unreachable).
+
+@verify(bound=3)
+state machine LoopMachine {
+    state A {}
+    state B {}
+    state Done [terminal]
+
+    initial A
+
+    transition A -> B { on go }
+    transition B -> A { on back }
+
+    verify AllReachClosed
+}

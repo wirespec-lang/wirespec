@@ -1,0 +1,24 @@
+// DeadlockMachine — state B has a guarded transition that is never enabled.
+// The guard `src.count > 100` can never be true with bound=2 (domain 0..1),
+// so B is effectively a deadlock state for TLC.
+// Expected: FAIL (NoDeadlock violated — B is a deadlock state under bounded model).
+
+@verify(bound=2)
+state machine DeadlockMachine {
+    state A { count: u8 = 0 }
+    state B { count: u8 }
+    state Done [terminal]
+
+    initial A
+
+    transition A -> B {
+        on go
+        action { dst.count = src.count; }
+    }
+    transition B -> Done {
+        on escape
+        guard src.count > 100
+    }
+
+    verify NoDeadlock
+}

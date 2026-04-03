@@ -1,0 +1,17 @@
+// UnsafeMachine — can leave Done state via revive, violating finality.
+// Done is NOT marked [terminal] so sema allows the outgoing transition,
+// but the verify property asserts it should be final.
+// Expected: FAIL (DoneIsFinal violated — Done -> Active transition exists).
+
+@verify(bound=2)
+state machine UnsafeMachine {
+    state Active {}
+    state Done {}
+
+    initial Active
+
+    transition Active -> Done { on finish }
+    transition Done -> Active { on revive }
+
+    verify property DoneIsFinal: in_state(Done) -> [] in_state(Done)
+}
