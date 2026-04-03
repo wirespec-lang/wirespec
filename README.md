@@ -2,7 +2,7 @@
 
 **Type-safe protocol description language for network binary formats.**
 
-Declaratively describe your binary protocol and get safe, zero-allocation C and Rust parsers/serializers — no hand-written byte manipulation, no buffer overreads, no endianness bugs.
+Declaratively describe your binary protocol and get safe, zero-allocation C and Rust parsers/serializers — no hand-written byte manipulation, no buffer overreads, no endianness bugs. State machines are verified with TLA+ model checking.
 
 ## Quick Example
 
@@ -35,15 +35,48 @@ cargo build --release
 ## Usage
 
 ```bash
-wirespec compile <input.wspec> -t <c|rust> -o <dir>  # compile
+wirespec compile <input.wspec> -t <c|rust> -o <dir>  # compile to C or Rust
 wirespec check <input.wspec>                          # type-check only
+wirespec verify <input.wspec> -o <dir>                # generate TLA+ spec
+wirespec verify <input.wspec> --run-tlc               # run TLC model checker
 ```
 
-Options: `-I <dir>` (include path), `--recursive` (emit dependencies), `--fuzz` (libFuzzer harness, C only).
+Options: `-I <dir>` (include path), `--recursive` (emit dependencies), `--fuzz` (libFuzzer harness, C only), `--bound N` (TLA+ model checking bound).
 
-## Protocol Examples
+## State Machine Verification
 
-QUIC, TLS 1.3, MQTT, BLE, IPv4, TCP, Ethernet, V2X (ASN.1/UPER) — all defined and tested in `examples/`.
+Define state machines with guards, actions, and delegates. wirespec statically verifies them and generates TLA+ specs for model checking.
+
+```
+@verify(bound = 3)
+state machine PathState {
+    state Init       { path_id: u8 }
+    state Active     { path_id: u8, rtt: u8 = 0 }
+    state Closed [terminal]
+    initial Init
+
+    transition Init -> Active {
+        on activate(id: u8)
+        action { dst.path_id = src.path_id; }
+    }
+    transition Active -> Closed { on close }
+    transition * -> Closed { on abort }
+
+    verify NoDeadlock
+    verify AllReachClosed
+    verify property AbandonIsFinal:
+        in_state(Closing) -> [] not in_state(Active)
+}
+```
+
+```bash
+wirespec verify path.wspec --run-tlc
+# PASS: All properties verified for PathState (bound = 3)
+```
+
+**Static analysis (compile-time):** deadlock-free terminal states (S2), delegate acyclicity (S4), structural reachability (S5), exhaustive transitions (S6), wildcard priority (S7).
+
+**Model checking (TLA+):** NoDeadlock, AllReachClosed (liveness), user-defined safety/liveness properties, guard mutual exclusivity.
 
 ## ASN.1 Integration
 
@@ -64,19 +97,24 @@ cargo run --features asn1 -- compile its.wspec -t rust -o build/
 # Outputs: build/etsi_its_cdd.rs (rasn types) + build/its.rs (wirespec codec)
 ```
 
-Generated Rust code decodes ASN.1 payloads automatically — `pkt.cam` is a fully typed struct, not raw bytes.
+Supported encodings: UPER, BER, DER, APER, OER, COER. C backend transparently treats ASN.1 fields as raw bytes.
 
-## Documentation
+## Protocol Examples
 
-Full language guide, reference, and cookbook: [docs.wirespec.org](https://docs.wirespec.org)
+QUIC, TLS 1.3, MQTT, BLE, IPv4, TCP, Ethernet, V2X (ASN.1/UPER) — all defined and tested in `examples/`.
+
+## Editor Support
+
+VS Code extension with syntax highlighting, completion, hover, and diagnostics: [wirespec-language-tools](https://github.com/wirespec-lang/wirespec-language-tools)
 
 ## Roadmap
 
 | Version | Feature |
 |---------|---------|
-| v0.1.0 | Wire formats, state machines, C/Rust codegen |
-| v0.2.0 | ASN.1 / rasn integration |
-| v0.3.0 | TLA+ bounded verification |
+| ~~v0.1.0~~ | Wire formats, state machines, C/Rust codegen |
+| ~~v0.2.0~~ | ASN.1 / rasn integration |
+| ~~v0.3.0~~ | TLA+ bounded verification |
+| v0.4.0 | Delegate SM TLA+ support, crates.io publish |
 
 ## License
 
