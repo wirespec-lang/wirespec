@@ -529,6 +529,40 @@ fn codegen_state_machine_with_guard() {
     );
 }
 
+// ── Endianness codegen tests ──
+
+#[test]
+fn codegen_little_endian_module() {
+    let src = "@endian little\npacket LittleEndianPacket { x: u16, y: u32 }";
+    let (_, source) = generate_c(src);
+    assert!(
+        source.contains("read_u16le"),
+        "should use read_u16le with @endian little, got:\n{}",
+        source
+    );
+    assert!(
+        source.contains("read_u32le"),
+        "should use read_u32le with @endian little, got:\n{}",
+        source
+    );
+}
+
+#[test]
+fn codegen_big_endian_module() {
+    let src = "@endian big\npacket BigEndianPacket { x: u16, y: u32 }";
+    let (_, source) = generate_c(src);
+    assert!(
+        source.contains("read_u16be"),
+        "should use read_u16be with @endian big, got:\n{}",
+        source
+    );
+    assert!(
+        source.contains("read_u32be"),
+        "should use read_u32be with @endian big, got:\n{}",
+        source
+    );
+}
+
 // ── Enum endianness propagation tests ──
 
 #[test]

@@ -335,3 +335,222 @@ fn cli_compile_wire_extension() {
     assert!(out_dir.path().join("proto.h").exists());
     assert!(out_dir.path().join("proto.c").exists());
 }
+
+// ── Crash Resilience Tests ──
+
+#[test]
+fn cli_compile_empty_file() {
+    let dir = TempDir::new().unwrap();
+    let out_dir = TempDir::new().unwrap();
+    write_file(&dir, "empty.wspec", "");
+    let input = dir.path().join("empty.wspec");
+
+    // Should not panic regardless of exit code
+    let output = wirespec_bin()
+        .args([
+            "compile",
+            input.to_str().unwrap(),
+            "-o",
+            out_dir.path().to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    // We only care that the process didn't crash/panic
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("panicked"),
+        "should not panic on empty file: {stderr}"
+    );
+}
+
+#[test]
+fn cli_compile_binary_file() {
+    let dir = TempDir::new().unwrap();
+    let out_dir = TempDir::new().unwrap();
+    let bin_path = dir.path().join("binary.wspec");
+    fs::write(&bin_path, [0xFF_u8, 0x00, 0xFE]).unwrap();
+
+    let output = wirespec_bin()
+        .args([
+            "compile",
+            bin_path.to_str().unwrap(),
+            "-o",
+            out_dir.path().to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("panicked"),
+        "should not panic on binary file: {stderr}"
+    );
+    assert!(
+        !output.status.success(),
+        "binary file should not compile successfully"
+    );
+}
+
+#[test]
+fn cli_verify_no_state_machine() {
+    let dir = TempDir::new().unwrap();
+    write_file(&dir, "no_sm.wspec", "packet P { x: u8 }");
+    let input = dir.path().join("no_sm.wspec");
+
+    let output = wirespec_bin()
+        .args(["verify", input.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("no state machines"),
+        "should report no state machines: {stderr}"
+    );
+}
+
+#[test]
+fn cli_compile_syntax_error_shows_message() {
+    let dir = TempDir::new().unwrap();
+    let out_dir = TempDir::new().unwrap();
+    write_file(&dir, "bad.wspec", "packet { broken");
+    let input = dir.path().join("bad.wspec");
+
+    let output = wirespec_bin()
+        .args([
+            "compile",
+            input.to_str().unwrap(),
+            "-o",
+            out_dir.path().to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("error"),
+        "should report an error in stderr: {stderr}"
+    );
+}
+
+// ── Verify Command Tests ──
+
+#[test]
+fn cli_verify_generates_tla_files() {
+    let dir = TempDir::new().unwrap();
+    let out_dir = TempDir::new().unwrap();
+    write_file(
+        &dir,
+        "sm.wspec",
+        r#"
+        state machine S {
+            state A {}
+            state B [terminal]
+            initial A
+            transition A -> B { on go }
+            verify NoDeadlock
+        }
+        "#,
+    );
+    let input = dir.path().join("sm.wspec");
+
+    let output = wirespec_bin()
+        .args([
+            "verify",
+            input.to_str().unwrap(),
+            "-o",
+            out_dir.path().to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "verify should succeed: {stderr}");
+    assert!(
+        out_dir.path().join("S.tla").exists(),
+        "should produce .tla file"
+    );
+    assert!(
+        out_dir.path().join("S.cfg").exists(),
+        "should produce .cfg file"
+    );
+}
+
+#[test]
+fn cli_verify_bound_option() {
+    let dir = TempDir::new().unwrap();
+    let out_dir = TempDir::new().unwrap();
+    write_file(
+        &dir,
+        "sm.wspec",
+        r#"
+        state machine S {
+            state A {}
+            state B [terminal]
+            initial A
+            transition A -> B { on go }
+            verify NoDeadlock
+        }
+        "#,
+    );
+    let input = dir.path().join("sm.wspec");
+
+    let output = wirespec_bin()
+        .args([
+            "verify",
+            input.to_str().unwrap(),
+            "-o",
+            out_dir.path().to_str().unwrap(),
+            "--bound",
+            "5",
+        ])
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "verify with --bound should succeed: {stderr}"
+    );
+
+    let cfg_content = fs::read_to_string(out_dir.path().join("S.cfg")).unwrap();
+    assert!(
+        cfg_content.contains("5"),
+        "cfg should contain bound value 5: {cfg_content}"
+    );
+}
+
+#[test]
+fn cli_verify_nonexistent_file() {
+    let output = wirespec_bin()
+        .args(["verify", "/nonexistent/path/missing.wspec"])
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "verify of nonexistent file should fail"
+    );
+}
+
+#[test]
+fn cli_verify_no_sm_error() {
+    let dir = TempDir::new().unwrap();
+    write_file(&dir, "pkt.wspec", "packet P { x: u8 }");
+    let input = dir.path().join("pkt.wspec");
+
+    let output = wirespec_bin()
+        .args(["verify", input.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("no state machines"),
+        "should report no state machines: {stderr}"
+    );
+}

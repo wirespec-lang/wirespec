@@ -1162,3 +1162,75 @@ fn error_duplicate_delegate_in_transition() {
     }"#;
     assert!(parse(src).is_err(), "duplicate delegate should fail");
 }
+
+// ══════════════════════════════════════════════════════════════════════
+// Fuzz / boundary tests for crash resilience
+// ══════════════════════════════════════════════════════════════════════
+
+#[test]
+fn fuzz_random_bytes_no_panic() {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    for seed in 0..1000u64 {
+        let mut hasher = DefaultHasher::new();
+        seed.hash(&mut hasher);
+        let hash = hasher.finish();
+        let len = (hash % 1024) as usize;
+        let bytes: Vec<u8> = (0..len)
+            .map(|i| ((hash >> (i % 8)) ^ (i as u64)) as u8)
+            .collect();
+        let input = String::from_utf8_lossy(&bytes).to_string();
+        let _ = wirespec_syntax::parse(&input);
+    }
+}
+
+#[test]
+fn fuzz_mutated_valid_wspec_no_panic() {
+    let valid = "packet Foo { x: u8, y: u16, data: bytes[remaining] }";
+    let bytes = valid.as_bytes();
+    for i in 0..100 {
+        let mut mutated = bytes.to_vec();
+        let pos = i % mutated.len();
+        mutated[pos] = (mutated[pos].wrapping_add(i as u8)) % 128;
+        let input = String::from_utf8_lossy(&mutated).to_string();
+        let _ = wirespec_syntax::parse(&input);
+    }
+}
+
+#[test]
+fn fuzz_deeply_nested_expression_no_stackoverflow() {
+    // Use a thread with a larger stack to avoid stack overflow in the test
+    // harness; the important thing is that the parser doesn't panic.
+    let handle = std::thread::Builder::new()
+        .stack_size(8 * 1024 * 1024) // 8 MB stack
+        .spawn(|| {
+            let depth = 200;
+            let mut expr = "a".to_string();
+            for _ in 0..depth {
+                expr = format!("({expr} + 1)");
+            }
+            let input = format!("packet P {{ x: u8, require {expr} }}");
+            let _ = wirespec_syntax::parse(&input);
+        })
+        .unwrap();
+    handle
+        .join()
+        .expect("parser should not panic on deeply nested expression");
+}
+
+#[test]
+fn fuzz_very_long_identifier_no_panic() {
+    let long_name = "a".repeat(10000);
+    let input = format!("packet {long_name} {{ x: u8 }}");
+    let _ = wirespec_syntax::parse(&input);
+}
+
+#[test]
+fn fuzz_many_fields_no_panic() {
+    let fields: String = (0..1000)
+        .map(|i| format!("field_{i}: u8"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let input = format!("packet BigPacket {{ {fields} }}");
+    let _ = wirespec_syntax::parse(&input);
+}
