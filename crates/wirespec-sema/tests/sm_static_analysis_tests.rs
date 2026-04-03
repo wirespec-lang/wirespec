@@ -421,3 +421,186 @@ fn error_s1_mixed_guard_and_guardless() {
         ErrorKind::SmDuplicateTransition,
     );
 }
+
+// ── Verify Declaration Lowering ──
+
+use wirespec_sema::ir::{SemanticVerifyDecl, SemanticVerifyFormula};
+
+fn get_sm(src: &str) -> wirespec_sema::ir::SemanticStateMachine {
+    let ast = parse(src).unwrap();
+    let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
+    assert!(
+        !sem.state_machines.is_empty(),
+        "expected at least one state machine"
+    );
+    sem.state_machines.into_iter().next().unwrap()
+}
+
+#[test]
+fn sema_verify_builtin_lowering() {
+    let sm = get_sm(
+        r#"
+        state machine S {
+            state A {}
+            state B [terminal]
+            initial A
+            transition A -> B { on go }
+            verify NoDeadlock
+        }
+    "#,
+    );
+    assert!(
+        !sm.verify_declarations.is_empty(),
+        "verify_declarations should be non-empty"
+    );
+    assert_eq!(sm.verify_declarations[0], SemanticVerifyDecl::NoDeadlock);
+}
+
+#[test]
+fn sema_verify_bound_annotation() {
+    let sm = get_sm(
+        r#"
+        @verify(bound=4)
+        state machine S {
+            state A {}
+            state B [terminal]
+            initial A
+            transition A -> B { on go }
+        }
+    "#,
+    );
+    assert_eq!(sm.verify_bound, Some(4));
+}
+
+#[test]
+fn sema_verify_safety_formula() {
+    let sm = get_sm(
+        r#"
+        state machine S {
+            state A {}
+            state B [terminal]
+            initial A
+            transition A -> B { on go }
+            verify property P: in_state(A) -> not in_state(B)
+        }
+    "#,
+    );
+    assert_eq!(sm.verify_declarations.len(), 1);
+    match &sm.verify_declarations[0] {
+        SemanticVerifyDecl::Property { name, formula } => {
+            assert_eq!(name, "P");
+            assert!(matches!(formula, SemanticVerifyFormula::Implies { .. }));
+        }
+        other => panic!("expected Property, got {:?}", other),
+    }
+}
+
+#[test]
+fn sema_verify_liveness_formula() {
+    let sm = get_sm(
+        r#"
+        state machine S {
+            state A {}
+            state B [terminal]
+            initial A
+            transition A -> B { on go }
+            verify property P: in_state(A) ~> in_state(B)
+        }
+    "#,
+    );
+    assert_eq!(sm.verify_declarations.len(), 1);
+    match &sm.verify_declarations[0] {
+        SemanticVerifyDecl::Property { name, formula } => {
+            assert_eq!(name, "P");
+            assert!(matches!(formula, SemanticVerifyFormula::LeadsTo { .. }));
+        }
+        other => panic!("expected Property, got {:?}", other),
+    }
+}
+
+#[test]
+fn sema_verify_allreachclosed() {
+    let sm = get_sm(
+        r#"
+        state machine S {
+            state A {}
+            state B [terminal]
+            initial A
+            transition A -> B { on go }
+            verify AllReachClosed
+        }
+    "#,
+    );
+    assert_eq!(sm.verify_declarations.len(), 1);
+    assert_eq!(
+        sm.verify_declarations[0],
+        SemanticVerifyDecl::AllReachClosed
+    );
+}
+
+#[test]
+fn sema_verify_empty_declarations() {
+    let sm = get_sm(
+        r#"
+        state machine S {
+            state A {}
+            state B [terminal]
+            initial A
+            transition A -> B { on go }
+        }
+    "#,
+    );
+    assert!(
+        sm.verify_declarations.is_empty(),
+        "SM without verify should have empty verify_declarations"
+    );
+}
+
+#[test]
+fn sema_verify_bound_default() {
+    let sm = get_sm(
+        r#"
+        state machine S {
+            state A {}
+            state B [terminal]
+            initial A
+            transition A -> B { on go }
+        }
+    "#,
+    );
+    assert_eq!(
+        sm.verify_bound, None,
+        "SM without @verify annotation should have verify_bound = None"
+    );
+}
+
+#[test]
+fn sema_verify_multiple_properties() {
+    let sm = get_sm(
+        r#"
+        state machine S {
+            state A {}
+            state B [terminal]
+            initial A
+            transition A -> B { on go }
+            verify NoDeadlock
+            verify AllReachClosed
+            verify property Safety: in_state(A) -> not in_state(B)
+        }
+    "#,
+    );
+    assert_eq!(
+        sm.verify_declarations.len(),
+        3,
+        "should have 3 verify declarations"
+    );
+    assert_eq!(sm.verify_declarations[0], SemanticVerifyDecl::NoDeadlock);
+    assert_eq!(
+        sm.verify_declarations[1],
+        SemanticVerifyDecl::AllReachClosed
+    );
+    assert!(matches!(
+        &sm.verify_declarations[2],
+        SemanticVerifyDecl::Property { name, .. } if name == "Safety"
+    ));
+}
