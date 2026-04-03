@@ -1,5 +1,6 @@
 // crates/wirespec-backend-tlaplus/src/lib.rs
 pub mod emit;
+pub mod tlc_result;
 
 use wirespec_sema::ir::SemanticStateMachine;
 
@@ -785,5 +786,102 @@ mod tests {
             out.config.contains("PROPERTY Reach"),
             "cfg should include Reach property"
         );
+    }
+
+    // ── TLC result parser tests ────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_tlc_pass() {
+        use tlc_result::*;
+        let output = r#"
+Model checking completed. No error found.
+42 states generated, 12 distinct states found.
+        "#;
+        match parse_tlc_output(output) {
+            TlcResult::Pass {
+                states_explored,
+                distinct_states,
+            } => {
+                assert_eq!(states_explored, Some(42));
+                assert_eq!(distinct_states, Some(12));
+            }
+            other => panic!("expected Pass, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_tlc_invariant_violation() {
+        use tlc_result::*;
+        let output = r#"
+Error: Invariant NoDeadlock is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ sm = [tag |-> "Init", path_id |-> 0, rtt |-> "@@null"]
+State 2: <Action>
+/\ sm = [tag |-> "Active", path_id |-> 0, rtt |-> 0]
+State 3: Stuttering
+        "#;
+        match parse_tlc_output(output) {
+            TlcResult::Fail {
+                violated_property,
+                counterexample,
+            } => {
+                assert_eq!(violated_property, "NoDeadlock");
+                assert!(counterexample.len() >= 2);
+                assert_eq!(counterexample[0].state_tag.as_deref(), Some("Init"));
+            }
+            other => panic!("expected Fail, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_nullval_hidden() {
+        use tlc_result::*;
+        let output = r#"
+Error: Invariant NoDeadlock is violated.
+State 1: <Initial predicate>
+/\ sm = [tag |-> "Init", path_id |-> 0, rtt |-> "@@null", cwnd |-> "@@null"]
+        "#;
+        let result = parse_tlc_output(output);
+        if let TlcResult::Fail { counterexample, .. } = result {
+            let step = &counterexample[0];
+            // NullVal fields should be filtered out
+            assert!(
+                !step.fields.iter().any(|(_, v)| v.contains("@@null")),
+                "NullVal fields should be hidden: {:?}",
+                step.fields
+            );
+        }
+    }
+
+    #[test]
+    fn test_format_pass() {
+        use tlc_result::*;
+        let result = TlcResult::Pass {
+            states_explored: Some(42),
+            distinct_states: Some(12),
+        };
+        let formatted = format_result(&result, "PathState", 2);
+        assert!(formatted.contains("PASS"));
+        assert!(formatted.contains("PathState"));
+        assert!(formatted.contains("42"));
+    }
+
+    #[test]
+    fn test_format_fail() {
+        use tlc_result::*;
+        let result = TlcResult::Fail {
+            violated_property: "NoDeadlock".to_string(),
+            counterexample: vec![TlcStep {
+                step_number: 1,
+                state_tag: Some("Init".to_string()),
+                fields: vec![("path_id".to_string(), "0".to_string())],
+                is_stuttering: false,
+            }],
+        };
+        let formatted = format_result(&result, "PathState", 2);
+        assert!(formatted.contains("FAIL"));
+        assert!(formatted.contains("NoDeadlock"));
+        assert!(formatted.contains("Init"));
     }
 }
