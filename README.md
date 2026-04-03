@@ -74,9 +74,9 @@ wirespec verify path.wspec --run-tlc
 # PASS: All properties verified for PathState (bound = 3)
 ```
 
-**Static analysis (compile-time):** deadlock-free terminal states (S2), delegate acyclicity (S4), structural reachability (S5), exhaustive transitions (S6), wildcard priority (S7).
+**Static analysis (compile-time):** terminal state irreversibility, delegate acyclicity, structural reachability, exhaustive transitions, wildcard priority.
 
-**Model checking (TLA+):** NoDeadlock, AllReachClosed (liveness), user-defined safety/liveness properties, guard mutual exclusivity.
+**Model checking (TLA+):** deadlock freedom, liveness (all paths reach terminal), user-defined safety/liveness properties, guard mutual exclusivity.
 
 ## ASN.1 Integration
 
