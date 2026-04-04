@@ -1,9 +1,17 @@
-use tower_lsp::lsp_types::Position;
+use tower_lsp::lsp_types::{Position, Range};
 
 /// Convert byte offset to LSP Position (0-indexed).
 pub fn offset_to_position(source: &str, offset: usize) -> Position {
     let (line, col) = wirespec_sema::error::offset_to_line_col(source, offset);
     Position::new((line - 1) as u32, (col - 1) as u32)
+}
+
+/// Convert a wirespec Span to an LSP Range.
+pub fn span_to_range(source: &str, span: &wirespec_syntax::span::Span) -> Range {
+    let start = offset_to_position(source, span.offset as usize);
+    let end_offset = (span.offset + span.len) as usize;
+    let end = offset_to_position(source, end_offset.min(source.len()));
+    Range::new(start, end)
 }
 
 /// Convert LSP Position to byte offset.

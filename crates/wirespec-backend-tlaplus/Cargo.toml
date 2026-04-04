@@ -3,11 +3,15 @@ name = "wirespec-backend-tlaplus"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
 description = "TLA+ code generation backend for wirespec state machines"
 
 [dependencies]
-wirespec-sema = { path = "../wirespec-sema" }
+wirespec-sema = { version = "0.3.0", path = "../wirespec-sema" }
 
 [dev-dependencies]
-wirespec-syntax = { path = "../wirespec-syntax" }
+wirespec-syntax = { version = "0.3.0", path = "../wirespec-syntax" }
 tla-checker = "0.3"

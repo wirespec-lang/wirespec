@@ -3,7 +3,11 @@ name = "wirespec-sema"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
 description = "Semantic analysis and Semantic IR for wirespec"
 
 [dependencies]
-wirespec-syntax = { path = "../wirespec-syntax" }
+wirespec-syntax = { version = "0.3.0", path = "../wirespec-syntax" }

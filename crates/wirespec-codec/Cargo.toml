@@ -3,9 +3,13 @@ name = "wirespec-codec"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
 description = "Backend-neutral Codec IR for wirespec"
 
 [dependencies]
-wirespec-layout = { path = "../wirespec-layout" }
-wirespec-sema = { path = "../wirespec-sema" }
-wirespec-syntax = { path = "../wirespec-syntax" }
+wirespec-layout = { version = "0.3.0", path = "../wirespec-layout" }
+wirespec-sema = { version = "0.3.0", path = "../wirespec-sema" }
+wirespec-syntax = { version = "0.3.0", path = "../wirespec-syntax" }

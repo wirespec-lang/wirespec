@@ -3,8 +3,12 @@ name = "wirespec-layout"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
 description = "Layout IR for wirespec"
 
 [dependencies]
-wirespec-sema = { path = "../wirespec-sema" }
-wirespec-syntax = { path = "../wirespec-syntax" }
+wirespec-sema = { version = "0.3.0", path = "../wirespec-sema" }
+wirespec-syntax = { version = "0.3.0", path = "../wirespec-syntax" }
