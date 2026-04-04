@@ -16,4 +16,5 @@ pub use driver::{CompileRequest, CompileResult, CompiledModule, compile};
 pub use pipeline::{
     Asn1ModuleInfo, Asn1ModuleMap, ExternalType, ExternalTypeKind, ExternalTypes, compile_module,
 };
+#[doc(hidden)]
 pub mod cli;

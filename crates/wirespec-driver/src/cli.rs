@@ -803,7 +803,7 @@ fn print_usage() {
     eprintln!("Usage: wirespec <command> [options]");
     eprintln!();
     eprintln!("Commands:");
-    eprintln!("  compile    Compile .wspec/.wspec files to C or Rust");
+    eprintln!("  compile    Compile .wspec files to C or Rust");
     eprintln!("  check      Parse and type-check a file (no code generation)");
     eprintln!("  verify     Generate TLA+ and verify state machines");
     eprintln!();

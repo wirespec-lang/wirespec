@@ -9,6 +9,7 @@ keywords = ["protocol", "binary", "parser", "codegen", "tla"]
 categories = ["compilers", "encoding", "parser-implementations"]
 description = "Type-safe protocol description language — compiler, verifier, and LSP"
 readme = "README.md"
+include = ["src/", "LICENCE", "README.md"]
 
 [[bin]]
 name = "wirespec"

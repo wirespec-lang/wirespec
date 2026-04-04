@@ -1,11 +1,16 @@
 // Integration tests for the wirespec CLI binary.
 
 use std::fs;
+use std::path::PathBuf;
 use std::process::Command;
 use tempfile::TempDir;
 
 fn wirespec_bin() -> Command {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_wirespec"));
+    // The wirespec binary is built from the root crate, not wirespec-driver.
+    // Walk up from CARGO_MANIFEST_DIR (crates/wirespec-driver) to the workspace root.
+    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.push("../../target/debug/wirespec");
+    let mut cmd = Command::new(path);
     cmd.env("RUST_BACKTRACE", "1");
     cmd
 }

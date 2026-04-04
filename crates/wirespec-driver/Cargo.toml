@@ -10,10 +10,6 @@ categories.workspace = true
 description = "Compilation driver and CLI for wirespec"
 readme = "README.md"
 
-[[bin]]
-name = "wirespec"
-path = "src/bin/wirespec.rs"
-
 [features]
 asn1 = ["dep:rasn-compiler"]
 

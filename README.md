@@ -28,6 +28,14 @@ wirespec compile udp.wspec -t rust -o build/  # generates .rs
 ## Install
 
 ```bash
+cargo install wirespec
+```
+
+Or build from source:
+
+```bash
+git clone https://github.com/wirespec-lang/wirespec
+cd wirespec
 cargo build --release
 # Binary: target/release/wirespec
 ```
