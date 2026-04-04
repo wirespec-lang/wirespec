@@ -1,6 +1,6 @@
 use tower_lsp::lsp_types::*;
 
-use crate::position::offset_to_position;
+use crate::position::{offset_to_position, span_to_range};
 
 pub fn compute_diagnostics(
     text: &str,
@@ -10,7 +10,7 @@ pub fn compute_diagnostics(
     let ast = match wirespec_syntax::parse(text) {
         Ok(ast) => ast,
         Err(e) => {
-            let range = span_to_range(text, e.span.as_ref());
+            let range = optional_span_to_range(text, e.span.as_ref());
             diagnostics.push(Diagnostic {
                 range,
                 severity: Some(DiagnosticSeverity::ERROR),
@@ -29,7 +29,7 @@ pub fn compute_diagnostics(
     ) {
         Ok(sem) => {
             for warning in &sem.warnings {
-                let range = span_to_range(text, warning.span.as_ref());
+                let range = optional_span_to_range(text, warning.span.as_ref());
                 diagnostics.push(Diagnostic {
                     range,
                     severity: Some(DiagnosticSeverity::WARNING),
@@ -40,7 +40,7 @@ pub fn compute_diagnostics(
             }
         }
         Err(e) => {
-            let range = span_to_range(text, e.span.as_ref());
+            let range = optional_span_to_range(text, e.span.as_ref());
             diagnostics.push(Diagnostic {
                 range,
                 severity: Some(DiagnosticSeverity::ERROR),
@@ -54,12 +54,14 @@ pub fn compute_diagnostics(
     (Some(ast), diagnostics)
 }
 
-fn span_to_range(text: &str, span: Option<&wirespec_syntax::span::Span>) -> Range {
+/// Convert an optional span to a Range, falling back to the start of the file.
+fn optional_span_to_range(text: &str, span: Option<&wirespec_syntax::span::Span>) -> Range {
     if let Some(span) = span {
-        let start = offset_to_position(text, span.offset as usize);
-        let end = Position::new(start.line, start.character + span.len.max(1));
-        Range::new(start, end)
+        span_to_range(text, span)
     } else {
-        Range::new(Position::new(0, 0), Position::new(0, 0))
+        Range::new(
+            offset_to_position(text, 0),
+            offset_to_position(text, 0),
+        )
     }
 }

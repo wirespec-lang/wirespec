@@ -1,5 +1,8 @@
 use tower_lsp::lsp_types::*;
-use wirespec_syntax::ast::AstTopItem;
+use wirespec_syntax::span::Span;
+
+use crate::ast_helpers::extract_item_info;
+use crate::position::{offset_to_position, span_to_range};
 
 /// Find the definition range of the type name under the cursor.
 ///
@@ -15,25 +18,30 @@ pub fn find_definition(source: &str, position: Position) -> Option<Range> {
     let ast = wirespec_syntax::parse(source).ok()?;
 
     for item in &ast.items {
-        let (name, span) = match item {
-            AstTopItem::Packet(p) => (&p.name, &p.span),
-            AstTopItem::Frame(f) => (&f.name, &f.span),
-            AstTopItem::Capsule(c) => (&c.name, &c.span),
-            AstTopItem::Enum(e) => (&e.name, &e.span),
-            AstTopItem::Flags(f) => (&f.name, &f.span),
-            AstTopItem::Const(c) => (&c.name, &c.span),
-            AstTopItem::Type(t) => (&t.name, &t.span),
-            AstTopItem::StateMachine(sm) => (&sm.name, &sm.span),
-            AstTopItem::ContinuationVarInt(v) => (&v.name, &v.span),
-            _ => continue,
+        let info = match extract_item_info(item) {
+            Some(i) => i,
+            None => continue,
         };
-        if name == word
-            && let Some(span) = span
+        if info.name == word
+            && let Some(span) = &info.span
         {
-            let start = crate::position::offset_to_position(source, span.offset as usize);
-            let end = Position::new(start.line, start.character + span.len);
-            return Some(Range::new(start, end));
+            return find_name_range(source, span, &info.name);
         }
     }
     None
+}
+
+/// Find the range of a named definition (skips the keyword to locate the name).
+fn find_name_range(source: &str, item_span: &Span, name: &str) -> Option<Range> {
+    let start_offset = item_span.offset as usize;
+    let search_area = &source[start_offset..];
+    if let Some(relative_pos) = search_area.find(name) {
+        let name_offset = start_offset + relative_pos;
+        let name_start = offset_to_position(source, name_offset);
+        let name_end = offset_to_position(source, name_offset + name.len());
+        Some(Range::new(name_start, name_end))
+    } else {
+        // Fallback to the full keyword span
+        Some(span_to_range(source, item_span))
+    }
 }
