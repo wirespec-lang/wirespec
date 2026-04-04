@@ -27,7 +27,18 @@ pub fn compute_diagnostics(
         wirespec_sema::ComplianceProfile::default(),
         &Default::default(),
     ) {
-        Ok(_) => {}
+        Ok(sem) => {
+            for warning in &sem.warnings {
+                let range = span_to_range(text, warning.span.as_ref());
+                diagnostics.push(Diagnostic {
+                    range,
+                    severity: Some(DiagnosticSeverity::WARNING),
+                    source: Some("wirespec".into()),
+                    message: warning.msg.clone(),
+                    ..Default::default()
+                });
+            }
+        }
         Err(e) => {
             let range = span_to_range(text, e.span.as_ref());
             diagnostics.push(Diagnostic {
