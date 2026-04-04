@@ -59,9 +59,6 @@ fn optional_span_to_range(text: &str, span: Option<&wirespec_syntax::span::Span>
     if let Some(span) = span {
         span_to_range(text, span)
     } else {
-        Range::new(
-            offset_to_position(text, 0),
-            offset_to_position(text, 0),
-        )
+        Range::new(offset_to_position(text, 0), offset_to_position(text, 0))
     }
 }

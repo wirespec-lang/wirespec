@@ -28,8 +28,7 @@ pub fn compute_document_symbols(source: &str) -> Vec<DocumentSymbol> {
             // `range` covers the keyword span (best we can do without a closing-brace span).
             let range = span_to_range(source, span);
             // `selection_range` points at the name identifier itself.
-            let selection_range = find_name_range(source, span, &info.name)
-                .unwrap_or(range);
+            let selection_range = find_name_range(source, span, &info.name).unwrap_or(range);
 
             #[allow(deprecated)]
             symbols.push(DocumentSymbol {
