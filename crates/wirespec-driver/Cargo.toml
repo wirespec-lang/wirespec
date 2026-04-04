@@ -22,6 +22,7 @@ wirespec-backend-c = { path = "../wirespec-backend-c" }
 wirespec-backend-rust = { path = "../wirespec-backend-rust" }
 wirespec-backend-tlaplus = { path = "../wirespec-backend-tlaplus" }
 rasn-compiler = { version = "0.16", optional = true }
+tla-checker = "0.3"
 
 [dev-dependencies]
 tempfile = "3"
