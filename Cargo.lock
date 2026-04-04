@@ -1856,6 +1856,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 
 [[package]]
+name = "wirespec"
+version = "0.3.0"
+dependencies = [
+ "wirespec-driver",
+]
+
+[[package]]
 name = "wirespec-backend-api"
 version = "0.3.0"
 dependencies = [

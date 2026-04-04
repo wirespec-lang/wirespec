@@ -1,3 +1,22 @@
+[package]
+name = "wirespec"
+version = "0.3.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/wirespec-lang/wirespec"
+homepage = "https://docs.wirespec.org"
+keywords = ["protocol", "binary", "parser", "codegen", "tla"]
+categories = ["compilers", "encoding", "parser-implementations"]
+description = "Type-safe protocol description language — compiler, verifier, and LSP"
+readme = "README.md"
+
+[[bin]]
+name = "wirespec"
+path = "src/main.rs"
+
+[dependencies]
+wirespec-driver = { version = "0.3.0", path = "crates/wirespec-driver" }
+
 [workspace]
 resolver = "2"
 members = [
