@@ -539,7 +539,12 @@ fn cmd_verify(args: &[String]) {
                 eprintln!("  wrote {}", tla_path.display());
                 eprintln!("  wrote {}", cfg_path.display());
 
-                // Run TLC if requested
+                // Run built-in model checker (default)
+                if !run_tlc {
+                    run_builtin_check(&output_tla.spec, &output_tla.config, &sm.name, bound);
+                }
+
+                // Run external TLC if requested
                 if run_tlc {
                     run_tlc_check(&tla_path, &cfg_path, &tlc_path);
                 }
@@ -548,6 +553,172 @@ fn cmd_verify(args: &[String]) {
                 eprintln!("error: {e}");
                 process::exit(1);
             }
+        }
+    }
+}
+
+fn run_builtin_check(tla_spec: &str, tla_config: &str, sm_name: &str, bound: u32) {
+    use tla_checker::ast::{Env, Expr};
+    use tla_checker::checker::{CheckResult, CheckerConfig, check};
+    use tla_checker::config::{apply_config, parse_cfg};
+    use tla_checker::parser::parse as parse_tla;
+
+    // Parse TLA+ spec
+    let mut spec = match parse_tla(tla_spec) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("  error: TLA+ parse error: {:?}", e);
+            process::exit(1);
+        }
+    };
+
+    // Parse config
+    let cfg = match parse_cfg(tla_config) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("  error: TLA+ config error: {:?}", e);
+            process::exit(1);
+        }
+    };
+
+    // Apply config to spec
+    let mut domains = Env::new();
+    let mut checker_config = CheckerConfig {
+        allow_deadlock: true, // terminal states have no transitions
+        quiet: true,
+        ..Default::default()
+    };
+
+    if let Err(e) = apply_config(
+        &cfg,
+        &mut spec,
+        &mut domains,
+        &mut checker_config,
+        &[],
+        &[],
+        false,
+    ) {
+        eprintln!("  error: config apply error: {}", e);
+        process::exit(1);
+    }
+
+    // Unwrap Expr::Eventually wrappers on liveness properties — tla-checker's
+    // check already wraps properties in <> semantics, so double-wrapping
+    // would cause a "temporal operator <> cannot be evaluated" error.
+    spec.liveness_properties = spec
+        .liveness_properties
+        .into_iter()
+        .map(|p| match p {
+            Expr::Eventually(inner) => *inner,
+            other => other,
+        })
+        .collect();
+
+    // Run model checker
+    eprintln!("  checking {} (bound = {})...", sm_name, bound);
+    let result = check(&spec, &domains, &checker_config);
+
+    // Report results
+    match &result {
+        CheckResult::Ok(stats) => {
+            eprintln!(
+                "  ok: {} verified ({} states, {} transitions)",
+                sm_name, stats.states_explored, stats.transitions
+            );
+        }
+        CheckResult::InvariantViolation(ce, _) => {
+            let inv_name = spec
+                .invariant_names
+                .get(ce.violated_invariant)
+                .and_then(|n| n.as_ref())
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| format!("#{}", ce.violated_invariant));
+            eprintln!("  FAIL: invariant '{}' violated for {}", inv_name, sm_name);
+            for (i, state) in ce.trace.iter().enumerate() {
+                let action = ce
+                    .actions
+                    .get(i)
+                    .and_then(|a| a.as_ref())
+                    .map(|a| format!(" ({})", a))
+                    .unwrap_or_default();
+                let vars: Vec<String> = spec
+                    .vars
+                    .iter()
+                    .zip(state.values.iter())
+                    .map(|(name, val)| format!("{} = {:?}", name, val))
+                    .collect();
+                eprintln!("    step {}{}: {}", i + 1, action, vars.join(", "));
+            }
+            process::exit(1);
+        }
+        CheckResult::LivenessViolation(lv, _) => {
+            eprintln!(
+                "  FAIL: liveness property '{}' violated for {}",
+                lv.property, sm_name
+            );
+            eprintln!("    prefix ({} states):", lv.prefix.len());
+            for (i, state) in lv.prefix.iter().enumerate() {
+                eprintln!("      step {}: {:?}", i + 1, state);
+            }
+            eprintln!("    cycle ({} states):", lv.cycle.len());
+            for (i, state) in lv.cycle.iter().enumerate() {
+                eprintln!("      step {}: {:?}", i + 1, state);
+            }
+            process::exit(1);
+        }
+        CheckResult::Deadlock(states, _, _) => {
+            eprintln!("  FAIL: deadlock detected for {}", sm_name);
+            if let Some(last) = states.last() {
+                eprintln!("    final state: {:?}", last);
+            }
+            process::exit(1);
+        }
+        CheckResult::InitError(e) => {
+            eprintln!("  error: Init evaluation error: {:?}", e);
+            process::exit(1);
+        }
+        CheckResult::NextError(e, _, _) => {
+            eprintln!("  error: Next evaluation error: {:?}", e);
+            process::exit(1);
+        }
+        CheckResult::InvariantError(e, _, _) => {
+            eprintln!("  error: Invariant evaluation error: {:?}", e);
+            process::exit(1);
+        }
+        CheckResult::AssumeViolation(idx) => {
+            eprintln!("  error: ASSUME violation (index {})", idx);
+            process::exit(1);
+        }
+        CheckResult::AssumeError(idx, e) => {
+            eprintln!("  error: ASSUME evaluation error (index {}): {:?}", idx, e);
+            process::exit(1);
+        }
+        CheckResult::MaxStatesExceeded(stats) => {
+            eprintln!(
+                "  error: max states exceeded ({} explored) for {}",
+                stats.states_explored, sm_name
+            );
+            process::exit(1);
+        }
+        CheckResult::MaxDepthExceeded(stats) => {
+            eprintln!(
+                "  error: max depth exceeded ({} explored) for {}",
+                stats.states_explored, sm_name
+            );
+            process::exit(1);
+        }
+        CheckResult::NoInitialStates => {
+            eprintln!("  error: no initial states for {}", sm_name);
+            process::exit(1);
+        }
+        CheckResult::MissingConstants(names) => {
+            let names: Vec<&str> = names.iter().map(|n| n.as_ref()).collect();
+            eprintln!(
+                "  error: missing constants for {}: {}",
+                sm_name,
+                names.join(", ")
+            );
+            process::exit(1);
         }
     }
 }
@@ -614,12 +785,12 @@ fn run_tlc_check(tla_path: &std::path::Path, cfg_path: &std::path::Path, tlc_jar
 fn print_verify_usage() {
     eprintln!("Usage: wirespec verify <input.wspec> [options]");
     eprintln!();
-    eprintln!("Generate TLA+ spec from state machines and optionally run TLC.");
+    eprintln!("Generate TLA+ spec from state machines and verify with built-in model checker.");
     eprintln!();
     eprintln!("Options:");
     eprintln!("  -o, --output <dir>       Output directory (default: temp dir)");
     eprintln!("  --bound <N>              Value domain bound (default: 3)");
-    eprintln!("  --run-tlc                Run TLC model checker on generated spec");
+    eprintln!("  --run-tlc                Use external TLC (Java) instead of built-in checker");
     eprintln!(
         "  --tlc-path <path>        Path to tla2tools.jar (default: $TLC_JAR or tla2tools.jar)"
     );

@@ -1908,6 +1908,7 @@ version = "0.1.0"
 dependencies = [
  "rasn-compiler",
  "tempfile",
+ "tla-checker",
  "wirespec-backend-api",
  "wirespec-backend-c",
  "wirespec-backend-rust",
