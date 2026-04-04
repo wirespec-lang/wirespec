@@ -8,6 +8,7 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 description = "Backend-neutral Codec IR for wirespec"
+readme = "README.md"
 
 [dependencies]
 wirespec-layout = { version = "0.3.0", path = "../wirespec-layout" }

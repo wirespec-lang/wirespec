@@ -8,6 +8,7 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 description = "Rust backend for wirespec"
+readme = "README.md"
 
 [dependencies]
 wirespec-backend-api = { version = "0.3.0", path = "../wirespec-backend-api" }

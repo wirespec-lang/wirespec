@@ -8,3 +8,4 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 description = "Runtime support for wirespec-generated Rust code"
+readme = "README.md"

@@ -8,6 +8,7 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 description = "Compilation driver and CLI for wirespec"
+readme = "README.md"
 
 [[bin]]
 name = "wirespec"

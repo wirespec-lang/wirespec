@@ -8,3 +8,4 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 description = "Parser and AST for the wirespec protocol description language"
+readme = "README.md"

@@ -8,6 +8,7 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 description = "Language Server Protocol server for wirespec"
+readme = "README.md"
 
 [lib]
 name = "wirespec_lsp"

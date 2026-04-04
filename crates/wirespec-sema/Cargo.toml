@@ -8,6 +8,7 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 description = "Semantic analysis and Semantic IR for wirespec"
+readme = "README.md"
 
 [dependencies]
 wirespec-syntax = { version = "0.3.0", path = "../wirespec-syntax" }

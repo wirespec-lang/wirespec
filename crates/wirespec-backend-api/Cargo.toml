@@ -8,6 +8,7 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 description = "Backend trait and common lowering contracts for wirespec"
+readme = "README.md"
 
 [dependencies]
 wirespec-codec = { version = "0.3.0", path = "../wirespec-codec" }

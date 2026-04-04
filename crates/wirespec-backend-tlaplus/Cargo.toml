@@ -8,6 +8,7 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 description = "TLA+ code generation backend for wirespec state machines"
+readme = "README.md"
 
 [dependencies]
 wirespec-sema = { version = "0.3.0", path = "../wirespec-sema" }
