@@ -41,6 +41,7 @@ impl LanguageServer for Backend {
                     ..Default::default()
                 }),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
+                definition_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
             ..Default::default()
@@ -125,6 +126,23 @@ impl LanguageServer for Backend {
         let source = source.clone();
         drop(docs);
         Ok(crate::hover::compute_hover(&source, position))
+    }
+
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+        let docs = self.documents.lock().unwrap();
+        let Some(source) = docs.get(&uri) else {
+            return Ok(None);
+        };
+        let source = source.clone();
+        drop(docs);
+
+        let range = crate::goto_definition::find_definition(&source, position);
+        Ok(range.map(|r| GotoDefinitionResponse::Scalar(Location { uri, range: r })))
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
