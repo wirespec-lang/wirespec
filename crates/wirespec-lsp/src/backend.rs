@@ -42,6 +42,7 @@ impl LanguageServer for Backend {
                 }),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
+                document_symbol_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
             ..Default::default()
@@ -143,6 +144,22 @@ impl LanguageServer for Backend {
 
         let range = crate::goto_definition::find_definition(&source, position);
         Ok(range.map(|r| GotoDefinitionResponse::Scalar(Location { uri, range: r })))
+    }
+
+    async fn document_symbol(
+        &self,
+        params: DocumentSymbolParams,
+    ) -> Result<Option<DocumentSymbolResponse>> {
+        let uri = params.text_document.uri;
+        let docs = self.documents.lock().unwrap();
+        let Some(source) = docs.get(&uri) else {
+            return Ok(None);
+        };
+        let source = source.clone();
+        drop(docs);
+
+        let symbols = crate::document_symbols::compute_document_symbols(&source);
+        Ok(Some(DocumentSymbolResponse::Nested(symbols)))
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
