@@ -78,13 +78,8 @@ fn semantic_type_to_wire_type_simple(ty: &wirespec_sema::types::SemanticType) ->
         },
         _ => {
             // After sema validation, non-integer underlying types are rejected,
-            // so this branch should be unreachable.
-            debug_assert!(
-                false,
-                "unexpected non-primitive enum underlying type: {:?}",
-                ty
-            );
-            WireType::U8
+            // so this branch is truly unreachable.
+            unreachable!("unexpected non-primitive enum underlying type: {:?}", ty)
         }
     }
 }
@@ -1980,7 +1975,8 @@ fn sm_expr_to_rust_mode(
             let b = sm_expr_to_rust_mode(base, sm_states, SmExprMode::Borrow);
             let s = sm_expr_to_rust_mode(start, sm_states, SmExprMode::Value);
             let e = sm_expr_to_rust_mode(end, sm_states, SmExprMode::Value);
-            let slice = format!("{b}[({s}) as usize..({e}) as usize]");
+            let slice =
+                format!("{b}.get(({s}) as usize..({e}) as usize).ok_or(Error::InvalidState)?");
             match mode {
                 SmExprMode::Value => format!("({slice}).to_vec()"),
                 SmExprMode::Borrow => format!("&({slice})"),

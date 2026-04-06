@@ -515,24 +515,90 @@ pub fn emit_frame_parse_body(out: &mut String, frame: &CodecFrame, prefix: &str,
     // Store raw tag value
     out.push_str(&format!("{indent}{struct_prefix}frame_type = _tag_val;\n"));
 
-    // Switch on tag value
-    out.push_str(&format!("{indent}switch (_tag_val) {{\n"));
-    let mut has_wildcard = false;
+    // Switch on tag value.
+    // Large-range variants (>4096 values) cannot be expanded as individual
+    // case labels.  Collect them separately so they can be handled inside the
+    // single `default:` block via if-guards, avoiding duplicate `default:`
+    // labels which are illegal in C.
+    let mut large_range_deferred: Vec<(i64, i64, String)> = Vec::new();
+    let mut wildcard_variant: Option<&CodecVariantScope> = None;
     for variant in &frame.variants {
         if matches!(variant.pattern, VariantPattern::Wildcard) {
-            has_wildcard = true;
+            wildcard_variant = Some(variant);
         }
-        emit_variant_case(out, variant, frame, prefix, indent, struct_prefix);
     }
-    if !has_wildcard {
-        out.push_str(&format!("{indent}    default:\n"));
+
+    out.push_str(&format!("{indent}switch (_tag_val) {{\n"));
+    for variant in &frame.variants {
+        if matches!(variant.pattern, VariantPattern::Wildcard) {
+            // Wildcard is emitted as part of the default: block below.
+            continue;
+        }
+        if let Some(deferred) =
+            emit_variant_case(out, variant, frame, prefix, indent, struct_prefix)
+        {
+            large_range_deferred.push(deferred);
+        }
+    }
+
+    // Emit a single default: block that handles large-range variants (via
+    // if-guards) followed by the wildcard body or an invalid-tag error.
+    out.push_str(&format!("{indent}    default:\n"));
+    let def_indent = format!("{indent}        ");
+    for (lo, hi, body) in large_range_deferred {
         out.push_str(&format!(
-            "{indent}        return WIRESPEC_ERR_INVALID_TAG;\n"
+            "{def_indent}if (_tag_val >= {lo} && _tag_val <= {hi}) {{\n"
         ));
+        // body already ends with `break;\n`
+        out.push_str(&body);
+        out.push_str(&format!("{def_indent}}}\n"));
+    }
+    if let Some(wv) = wildcard_variant {
+        emit_variant_case_body(out, wv, frame, prefix, &def_indent, struct_prefix);
+    } else {
+        out.push_str(&format!("{def_indent}return WIRESPEC_ERR_INVALID_TAG;\n"));
     }
     out.push_str(&format!("{indent}}}\n"));
 }
 
+/// Emit the body of a variant case (tag assignment + field parsing + break),
+/// writing into `out` at `inner_indent`.  Does not emit a `case` or `default:`
+/// label — the caller is responsible for the label.
+fn emit_variant_case_body(
+    out: &mut String,
+    variant: &CodecVariantScope,
+    frame: &CodecFrame,
+    prefix: &str,
+    inner_indent: &str,
+    struct_prefix: &str,
+) {
+    let tag_val = c_frame_tag_value(prefix, &frame.name, &variant.name);
+    let vname = to_snake_case(&variant.name);
+    let variant_prefix = format!("{struct_prefix}value.{vname}.");
+    let header_field_names = vec![frame.tag.field_name.clone()];
+    let expr_ctx = ExprContext::CapsuleVariantParse {
+        variant_prefix: variant_prefix.clone(),
+        header_field_names,
+    };
+
+    out.push_str(&format!("{inner_indent}{struct_prefix}tag = {tag_val};\n"));
+    emit_parse_items_with_ctx(
+        out,
+        &variant.fields,
+        &variant.items,
+        prefix,
+        inner_indent,
+        &variant_prefix,
+        &expr_ctx,
+    );
+    out.push_str(&format!("{inner_indent}break;\n"));
+}
+
+/// Emit a switch case for a frame variant.  Wildcard variants are handled by
+/// the caller (skipped here).  Returns `Some((lo, hi, body))` for large-range
+/// variants that cannot be expanded as individual case labels; the caller must
+/// embed the body inside the `default:` block via an if-guard.  Returns `None`
+/// for exact-value and small-range variants (emitted directly into `out`).
 fn emit_variant_case(
     out: &mut String,
     variant: &CodecVariantScope,
@@ -540,66 +606,44 @@ fn emit_variant_case(
     prefix: &str,
     indent: &str,
     struct_prefix: &str,
-) {
-    let tag_val = c_frame_tag_value(prefix, &frame.name, &variant.name);
-    let vname = to_snake_case(&variant.name);
+) -> Option<(i64, i64, String)> {
     let inner_indent = format!("{indent}        ");
-    let mut large_range_guard: Option<(i64, i64)> = None;
 
     match &variant.pattern {
         VariantPattern::Exact { value } => {
             out.push_str(&format!("{indent}    case {value}:\n"));
+            emit_variant_case_body(out, variant, frame, prefix, &inner_indent, struct_prefix);
+            None
         }
         VariantPattern::RangeInclusive { start, end } => {
             let count = end.saturating_sub(*start).saturating_add(1);
             if count > 4096 {
-                // Too many cases for switch expansion; fall through to
-                // default and use an if-range guard instead.
-                large_range_guard = Some((*start, *end));
-                out.push_str(&format!("{indent}    default:\n"));
+                // Too many values to expand as case labels.  Return the body
+                // so the caller can embed it in the default: block with an
+                // if-guard, avoiding a duplicate `default:` label.
+                let mut body = String::new();
+                emit_variant_case_body(
+                    &mut body,
+                    variant,
+                    frame,
+                    prefix,
+                    &inner_indent,
+                    struct_prefix,
+                );
+                Some((*start, *end, body))
             } else {
                 for v in *start..=*end {
                     out.push_str(&format!("{indent}    case {v}:\n"));
                 }
+                emit_variant_case_body(out, variant, frame, prefix, &inner_indent, struct_prefix);
+                None
             }
         }
         VariantPattern::Wildcard => {
-            out.push_str(&format!("{indent}    default:\n"));
+            // Wildcard is handled entirely by the caller; nothing emitted here.
+            None
         }
     }
-
-    // For large ranges emitted as `default:`, add an if-guard so that only
-    // the intended range is matched.
-    if let Some((lo, hi)) = large_range_guard {
-        out.push_str(&format!(
-            "{inner_indent}if (!(_tag_val >= {lo} && _tag_val <= {hi})) return WIRESPEC_ERR_INVALID_TAG;\n"
-        ));
-    }
-
-    out.push_str(&format!("{inner_indent}{struct_prefix}tag = {tag_val};\n"));
-
-    // Parse variant fields into the union member
-    let variant_prefix = format!("{struct_prefix}value.{vname}.");
-
-    // Build ExprContext: frame tag field uses `out->` prefix,
-    // variant-local fields use `out->value.{variant}.` prefix.
-    let header_field_names = vec![frame.tag.field_name.clone()];
-    let expr_ctx = ExprContext::CapsuleVariantParse {
-        variant_prefix: variant_prefix.clone(),
-        header_field_names,
-    };
-
-    emit_parse_items_with_ctx(
-        out,
-        &variant.fields,
-        &variant.items,
-        prefix,
-        &inner_indent,
-        &variant_prefix,
-        &expr_ctx,
-    );
-
-    out.push_str(&format!("{inner_indent}break;\n"));
 }
 
 /// Emit parse for capsule (header fields + sub-cursor dispatch).
@@ -666,10 +710,23 @@ pub fn emit_capsule_parse_body(
         format!("{struct_prefix}{}", capsule.tag.field_name)
     };
 
-    // Switch on tag
+    // Switch on tag.
+    // Large-range variants and the wildcard are handled in a single default:
+    // block to avoid duplicate `default:` labels, which are illegal in C.
+    let mut large_range_deferred: Vec<(i64, i64, String)> = Vec::new();
+    let mut wildcard_variant: Option<&CodecVariantScope> = None;
+    for variant in &capsule.variants {
+        if matches!(variant.pattern, VariantPattern::Wildcard) {
+            wildcard_variant = Some(variant);
+        }
+    }
+
     out.push_str(&format!("{indent}switch ({tag_switch_expr}) {{\n"));
     for variant in &capsule.variants {
-        emit_capsule_variant_case(
+        if matches!(variant.pattern, VariantPattern::Wildcard) {
+            continue;
+        }
+        if let Some(deferred) = emit_capsule_variant_case(
             out,
             variant,
             capsule,
@@ -677,7 +734,27 @@ pub fn emit_capsule_parse_body(
             indent,
             struct_prefix,
             &tag_switch_expr,
-        );
+        ) {
+            large_range_deferred.push(deferred);
+        }
+    }
+
+    // Emit a single default: block covering large-range variants (via
+    // if-guards) and optionally a wildcard variant.
+    out.push_str(&format!("{indent}    default:\n"));
+    let def_indent = format!("{indent}        ");
+    for (lo, hi, body) in large_range_deferred {
+        out.push_str(&format!(
+            "{def_indent}if ({tag_switch_expr} >= {lo} && {tag_switch_expr} <= {hi}) {{\n"
+        ));
+        // body already ends with `break;\n`
+        out.push_str(&body);
+        out.push_str(&format!("{def_indent}}}\n"));
+    }
+    if let Some(wv) = wildcard_variant {
+        emit_capsule_variant_case_body(out, wv, capsule, prefix, &def_indent, struct_prefix);
+    } else {
+        out.push_str(&format!("{def_indent}return WIRESPEC_ERR_INVALID_TAG;\n"));
     }
     out.push_str(&format!("{indent}}}\n"));
 
@@ -687,57 +764,19 @@ pub fn emit_capsule_parse_body(
     ));
 }
 
-fn emit_capsule_variant_case(
+/// Emit the body of a capsule variant case (tag assignment + item parsing +
+/// break), writing into `out` at `inner_indent`.  Does not emit any label.
+fn emit_capsule_variant_case_body(
     out: &mut String,
     variant: &CodecVariantScope,
     capsule: &CodecCapsule,
     prefix: &str,
-    indent: &str,
+    inner_indent: &str,
     struct_prefix: &str,
-    tag_switch_expr: &str,
 ) {
     let tag_val = c_frame_tag_value(prefix, &capsule.name, &variant.name);
     let vname = to_snake_case(&variant.name);
-    let inner_indent = format!("{indent}        ");
-    let mut large_range_guard: Option<(i64, i64)> = None;
-
-    match &variant.pattern {
-        VariantPattern::Exact { value } => {
-            out.push_str(&format!("{indent}    case {value}:\n"));
-        }
-        VariantPattern::RangeInclusive { start, end } => {
-            let count = end.saturating_sub(*start).saturating_add(1);
-            if count > 4096 {
-                // Too many cases for switch expansion; fall through to
-                // default and use an if-range guard instead.
-                large_range_guard = Some((*start, *end));
-                out.push_str(&format!("{indent}    default:\n"));
-            } else {
-                for v in *start..=*end {
-                    out.push_str(&format!("{indent}    case {v}:\n"));
-                }
-            }
-        }
-        VariantPattern::Wildcard => {
-            out.push_str(&format!("{indent}    default:\n"));
-        }
-    }
-
-    // For large ranges emitted as `default:`, add an if-guard so that only
-    // the intended range is matched.
-    if let Some((lo, hi)) = large_range_guard {
-        out.push_str(&format!(
-            "{inner_indent}if (!({tag_switch_expr} >= {lo} && {tag_switch_expr} <= {hi})) return WIRESPEC_ERR_INVALID_TAG;\n"
-        ));
-    }
-
-    out.push_str(&format!("{inner_indent}{struct_prefix}tag = {tag_val};\n"));
-
-    // Parse variant fields from sub-cursor
     let variant_prefix = format!("{struct_prefix}value.{vname}.");
-
-    // Build ExprContext that resolves header fields to `out->` and
-    // variant-local fields to `out->value.{variant}.`
     let header_field_names: Vec<String> = capsule
         .header_fields
         .iter()
@@ -748,6 +787,8 @@ fn emit_capsule_variant_case(
         header_field_names,
     };
 
+    out.push_str(&format!("{inner_indent}{struct_prefix}tag = {tag_val};\n"));
+
     for item in &variant.items {
         match item {
             CodecItem::Field { field_id } => {
@@ -757,7 +798,7 @@ fn emit_capsule_variant_case(
                         f,
                         &variant.fields,
                         prefix,
-                        &inner_indent,
+                        inner_indent,
                         &variant_prefix,
                         &expr_ctx,
                     );
@@ -780,6 +821,71 @@ fn emit_capsule_variant_case(
     }
 
     out.push_str(&format!("{inner_indent}break;\n"));
+}
+
+/// Emit a switch case for a capsule variant.  Wildcard variants are skipped
+/// (handled by the caller in the default: block).  Returns `Some((lo, hi,
+/// body))` for large-range variants; the caller must embed the body in the
+/// default: block via an if-guard to avoid a duplicate `default:` label.
+fn emit_capsule_variant_case(
+    out: &mut String,
+    variant: &CodecVariantScope,
+    capsule: &CodecCapsule,
+    prefix: &str,
+    indent: &str,
+    struct_prefix: &str,
+    _tag_switch_expr: &str,
+) -> Option<(i64, i64, String)> {
+    let inner_indent = format!("{indent}        ");
+
+    match &variant.pattern {
+        VariantPattern::Exact { value } => {
+            out.push_str(&format!("{indent}    case {value}:\n"));
+            emit_capsule_variant_case_body(
+                out,
+                variant,
+                capsule,
+                prefix,
+                &inner_indent,
+                struct_prefix,
+            );
+            None
+        }
+        VariantPattern::RangeInclusive { start, end } => {
+            let count = end.saturating_sub(*start).saturating_add(1);
+            if count > 4096 {
+                // Too many values to expand as case labels.  Return the body
+                // so the caller can embed it in the default: block.
+                let mut body = String::new();
+                emit_capsule_variant_case_body(
+                    &mut body,
+                    variant,
+                    capsule,
+                    prefix,
+                    &inner_indent,
+                    struct_prefix,
+                );
+                Some((*start, *end, body))
+            } else {
+                for v in *start..=*end {
+                    out.push_str(&format!("{indent}    case {v}:\n"));
+                }
+                emit_capsule_variant_case_body(
+                    out,
+                    variant,
+                    capsule,
+                    prefix,
+                    &inner_indent,
+                    struct_prefix,
+                );
+                None
+            }
+        }
+        VariantPattern::Wildcard => {
+            // Wildcard is handled by the caller; nothing emitted here.
+            None
+        }
+    }
 }
 
 /// Like emit_field_parse but uses `&sub` cursor for capsule payload variants.

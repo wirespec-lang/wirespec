@@ -429,7 +429,7 @@ pub fn internet_checksum_compute(data: &mut [u8], cksum_offset: usize) {
 
 /// Compute CRC-32 while treating `skip_offset..skip_offset+skip_len` as zeros.
 fn raw_crc32_with_skip(data: &[u8], poly: u32, skip_offset: usize, skip_len: usize) -> u32 {
-    let skip_end = skip_offset + skip_len;
+    let skip_end = skip_offset.saturating_add(skip_len);
     let mut crc: u32 = 0xFFFF_FFFF;
     for (i, &byte) in data.iter().enumerate() {
         let b = if i >= skip_offset && i < skip_end {
@@ -451,7 +451,7 @@ fn raw_crc32_with_skip(data: &[u8], poly: u32, skip_offset: usize, skip_len: usi
 
 /// Compute Fletcher-16 while treating `skip_offset..skip_offset+skip_len` as zeros.
 fn raw_fletcher16_with_skip(data: &[u8], skip_offset: usize, skip_len: usize) -> u16 {
-    let skip_end = skip_offset + skip_len;
+    let skip_end = skip_offset.saturating_add(skip_len);
     let mut sum1: u16 = 0;
     let mut sum2: u16 = 0;
     for (i, &byte) in data.iter().enumerate() {
