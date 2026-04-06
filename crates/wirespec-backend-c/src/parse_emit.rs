@@ -544,6 +544,7 @@ fn emit_variant_case(
     let tag_val = c_frame_tag_value(prefix, &frame.name, &variant.name);
     let vname = to_snake_case(&variant.name);
     let inner_indent = format!("{indent}        ");
+    let mut large_range_guard: Option<(i64, i64)> = None;
 
     match &variant.pattern {
         VariantPattern::Exact { value } => {
@@ -552,17 +553,27 @@ fn emit_variant_case(
         VariantPattern::RangeInclusive { start, end } => {
             let count = end.saturating_sub(*start).saturating_add(1);
             if count > 4096 {
-                panic!(
-                    "range pattern {start}..={end} too large ({count} values) for switch expansion"
-                );
-            }
-            for v in *start..=*end {
-                out.push_str(&format!("{indent}    case {v}:\n"));
+                // Too many cases for switch expansion; fall through to
+                // default and use an if-range guard instead.
+                large_range_guard = Some((*start, *end));
+                out.push_str(&format!("{indent}    default:\n"));
+            } else {
+                for v in *start..=*end {
+                    out.push_str(&format!("{indent}    case {v}:\n"));
+                }
             }
         }
         VariantPattern::Wildcard => {
             out.push_str(&format!("{indent}    default:\n"));
         }
+    }
+
+    // For large ranges emitted as `default:`, add an if-guard so that only
+    // the intended range is matched.
+    if let Some((lo, hi)) = large_range_guard {
+        out.push_str(&format!(
+            "{inner_indent}if (!(_tag_val >= {lo} && _tag_val <= {hi})) return WIRESPEC_ERR_INVALID_TAG;\n"
+        ));
     }
 
     out.push_str(&format!("{inner_indent}{struct_prefix}tag = {tag_val};\n"));
@@ -658,7 +669,15 @@ pub fn emit_capsule_parse_body(
     // Switch on tag
     out.push_str(&format!("{indent}switch ({tag_switch_expr}) {{\n"));
     for variant in &capsule.variants {
-        emit_capsule_variant_case(out, variant, capsule, prefix, indent, struct_prefix);
+        emit_capsule_variant_case(
+            out,
+            variant,
+            capsule,
+            prefix,
+            indent,
+            struct_prefix,
+            &tag_switch_expr,
+        );
     }
     out.push_str(&format!("{indent}}}\n"));
 
@@ -675,10 +694,12 @@ fn emit_capsule_variant_case(
     prefix: &str,
     indent: &str,
     struct_prefix: &str,
+    tag_switch_expr: &str,
 ) {
     let tag_val = c_frame_tag_value(prefix, &capsule.name, &variant.name);
     let vname = to_snake_case(&variant.name);
     let inner_indent = format!("{indent}        ");
+    let mut large_range_guard: Option<(i64, i64)> = None;
 
     match &variant.pattern {
         VariantPattern::Exact { value } => {
@@ -687,17 +708,27 @@ fn emit_capsule_variant_case(
         VariantPattern::RangeInclusive { start, end } => {
             let count = end.saturating_sub(*start).saturating_add(1);
             if count > 4096 {
-                panic!(
-                    "range pattern {start}..={end} too large ({count} values) for switch expansion"
-                );
-            }
-            for v in *start..=*end {
-                out.push_str(&format!("{indent}    case {v}:\n"));
+                // Too many cases for switch expansion; fall through to
+                // default and use an if-range guard instead.
+                large_range_guard = Some((*start, *end));
+                out.push_str(&format!("{indent}    default:\n"));
+            } else {
+                for v in *start..=*end {
+                    out.push_str(&format!("{indent}    case {v}:\n"));
+                }
             }
         }
         VariantPattern::Wildcard => {
             out.push_str(&format!("{indent}    default:\n"));
         }
+    }
+
+    // For large ranges emitted as `default:`, add an if-guard so that only
+    // the intended range is matched.
+    if let Some((lo, hi)) = large_range_guard {
+        out.push_str(&format!(
+            "{inner_indent}if (!({tag_switch_expr} >= {lo} && {tag_switch_expr} <= {hi})) return WIRESPEC_ERR_INVALID_TAG;\n"
+        ));
     }
 
     out.push_str(&format!("{inner_indent}{struct_prefix}tag = {tag_val};\n"));

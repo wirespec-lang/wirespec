@@ -496,13 +496,17 @@ fn emit_packet(
     );
     out.push_str("}\n\n");
 
-    out.push_str(&format!("impl{lt} Default for {type_name}{lt} {{\n"));
-    out.push_str("    fn default() -> Self {\n");
-    out.push_str("        Self {\n");
-    emit_default_struct_items(out, &packet.fields, &packet.items, "            ");
-    out.push_str("        }\n");
-    out.push_str("    }\n");
-    out.push_str("}\n\n");
+    // Skip Default impl when any field uses ASN.1 (no sensible default).
+    let has_asn1_field = packet.fields.iter().any(|f| f.asn1_hint.is_some());
+    if !has_asn1_field {
+        out.push_str(&format!("impl{lt} Default for {type_name}{lt} {{\n"));
+        out.push_str("    fn default() -> Self {\n");
+        out.push_str("        Self {\n");
+        emit_default_struct_items(out, &packet.fields, &packet.items, "            ");
+        out.push_str("        }\n");
+        out.push_str("    }\n");
+        out.push_str("}\n\n");
+    }
 
     // Impl block
     out.push_str(&format!("impl{lt} {type_name}{lt} {{\n"));
@@ -764,7 +768,14 @@ fn emit_frame(
     }
     out.push_str("}\n\n");
 
-    emit_default_enum_impl(out, &type_name, lt, &frame.variants);
+    // Skip Default impl when any variant field uses ASN.1 (no sensible default).
+    let frame_has_asn1 = frame
+        .variants
+        .iter()
+        .any(|v| v.fields.iter().any(|f| f.asn1_hint.is_some()));
+    if !frame_has_asn1 {
+        emit_default_enum_impl(out, &type_name, lt, &frame.variants);
+    }
 
     // Create a resolved frame for parse/serialize
     let resolved_frame = CodecFrame {
@@ -858,22 +869,30 @@ fn emit_capsule(
     }
     out.push_str("}\n\n");
 
-    out.push_str(&format!("impl{lt} Default for {type_name}{lt} {{\n"));
-    out.push_str("    fn default() -> Self {\n");
-    out.push_str("        Self {\n");
-    emit_default_struct_items(
-        out,
-        &capsule.header_fields,
-        &capsule.header_items,
-        "            ",
-    );
-    out.push_str("            payload: Default::default(),\n");
-    out.push_str("        }\n");
-    out.push_str("    }\n");
-    out.push_str("}\n\n");
+    // Skip Default impl when any field uses ASN.1 (no sensible default).
+    let capsule_has_asn1 = capsule.header_fields.iter().any(|f| f.asn1_hint.is_some())
+        || capsule
+            .variants
+            .iter()
+            .any(|v| v.fields.iter().any(|f| f.asn1_hint.is_some()));
+    if !capsule_has_asn1 {
+        out.push_str(&format!("impl{lt} Default for {type_name}{lt} {{\n"));
+        out.push_str("    fn default() -> Self {\n");
+        out.push_str("        Self {\n");
+        emit_default_struct_items(
+            out,
+            &capsule.header_fields,
+            &capsule.header_items,
+            "            ",
+        );
+        out.push_str("            payload: Default::default(),\n");
+        out.push_str("        }\n");
+        out.push_str("    }\n");
+        out.push_str("}\n\n");
 
-    let payload_type_name = format!("{type_name}Payload");
-    emit_default_enum_impl(out, &payload_type_name, lt, &capsule.variants);
+        let payload_type_name = format!("{type_name}Payload");
+        emit_default_enum_impl(out, &payload_type_name, lt, &capsule.variants);
+    }
 
     // Create resolved capsule for parse/serialize
     let resolved_capsule = CodecCapsule {
@@ -1655,7 +1674,7 @@ fn emit_state_machine(
                             "                    let _idx = ({index_expr}) as usize;\n"
                         ));
                         out.push_str(&format!(
-                            "                    let _old = std::mem::discriminant(&{child_field_name}[_idx]);\n"
+                            "                    let _old = std::mem::discriminant({child_field_name}.get(_idx).ok_or(Error::InvalidState)?);\n"
                         ));
                         if delegate_requires_runtime_error {
                             out.push_str("                    return Err(Error::InvalidState);\n");
@@ -1669,11 +1688,11 @@ fn emit_state_machine(
                             );
                             out.push_str("                    };\n");
                             out.push_str(&format!(
-                                "                    {child_field_name}[_idx].dispatch(&_child_event)?;\n"
+                                "                    {child_field_name}.get_mut(_idx).ok_or(Error::InvalidState)?.dispatch(&_child_event)?;\n"
                             ));
                         } else {
                             out.push_str(&format!(
-                                "                    {child_field_name}[_idx].dispatch({delegate_event_param})?;\n"
+                                "                    {child_field_name}.get_mut(_idx).ok_or(Error::InvalidState)?.dispatch({delegate_event_param})?;\n"
                             ));
                         }
                     } else {
@@ -1880,10 +1899,11 @@ fn sm_expr_to_rust_mode(
         SemanticExpr::Subscript { base, index } => {
             let b = sm_expr_to_rust_mode(base, sm_states, SmExprMode::Borrow);
             let i = sm_expr_to_rust_mode(index, sm_states, SmExprMode::Value);
-            let access = format!("{b}[({i}) as usize]");
+            let idx_expr = format!("({i}) as usize");
+            let get_expr = format!("{b}.get({idx_expr}).ok_or(Error::InvalidState)?");
             match mode {
-                SmExprMode::Value => format!("({access}).clone()"),
-                SmExprMode::Borrow => format!("&({access})"),
+                SmExprMode::Value => format!("({get_expr}).clone()"),
+                SmExprMode::Borrow => get_expr,
             }
         }
         SemanticExpr::Coalesce { expr, default } => {
@@ -2040,10 +2060,18 @@ fn emit_post_construction_actions(
         let value_expr = sm_expr_to_rust_ctx(&action.value, sm_states);
         let assigned_expr = match action.op.as_str() {
             "=" => value_expr,
-            "+=" => format!("{field_name}[_idx].clone() + {value_expr}"),
-            "-=" => format!("{field_name}[_idx].clone() - {value_expr}"),
-            "*=" => format!("{field_name}[_idx].clone() * {value_expr}"),
-            "/=" => format!("{field_name}[_idx].clone() / {value_expr}"),
+            "+=" => {
+                format!("{field_name}.get(_idx).ok_or(Error::InvalidState)?.clone() + {value_expr}")
+            }
+            "-=" => {
+                format!("{field_name}.get(_idx).ok_or(Error::InvalidState)?.clone() - {value_expr}")
+            }
+            "*=" => {
+                format!("{field_name}.get(_idx).ok_or(Error::InvalidState)?.clone() * {value_expr}")
+            }
+            "/=" => {
+                format!("{field_name}.get(_idx).ok_or(Error::InvalidState)?.clone() / {value_expr}")
+            }
             _ => value_expr,
         };
 
@@ -2054,7 +2082,7 @@ fn emit_post_construction_actions(
             "                    let _idx = ({index_expr}) as usize;\n"
         ));
         out.push_str(&format!(
-            "                    {field_name}[_idx] = {assigned_expr};\n"
+            "                    *{field_name}.get_mut(_idx).ok_or(Error::InvalidState)? = {assigned_expr};\n"
         ));
         out.push_str("                }\n");
     }
