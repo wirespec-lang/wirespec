@@ -1,0 +1,65 @@
+name: Publish to crates.io
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  publish:
+    name: Publish crates
+    runs-on: ubuntu-latest
+    environment: crates-io
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build and test
+        run: |
+          cargo build --workspace
+          cargo test --workspace
+
+      - name: Publish crates (dependency order)
+        run: |
+          CRATES=(
+            wirespec-syntax
+            wirespec-rt
+            wirespec-sema
+            wirespec-layout
+            wirespec-codec
+            wirespec-backend-api
+            wirespec-backend-c
+            wirespec-backend-rust
+            wirespec-backend-tlaplus
+            wirespec-lsp
+            wirespec-driver
+          )
+          for crate in "${CRATES[@]}"; do
+            echo "::group::Publishing $crate"
+            cargo publish -p "$crate" || echo "::warning::$crate may already be published"
+            echo "::endgroup::"
+            echo "Waiting for crates.io index update..."
+            sleep 30
+          done
+
+          echo "::group::Publishing wirespec (root)"
+          cargo publish || echo "::warning::wirespec may already be published"
+          echo "::endgroup::"
