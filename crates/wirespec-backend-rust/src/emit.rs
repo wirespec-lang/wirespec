@@ -17,6 +17,7 @@ const MAX_ARRAY_ELEMENTS: u32 = 256;
 /// Resolve enum fields: change strategy from Struct to Primitive and set
 /// wire_type to the enum's underlying primitive type. This allows the
 /// standard primitive read/write codegen path to handle enum fields.
+/// Also resolves enum types in array element specs.
 fn resolve_enum_fields(fields: &[CodecField], enums: &[SemanticEnum]) -> Vec<CodecField> {
     fields
         .iter()
@@ -36,6 +37,21 @@ fn resolve_enum_fields(fields: &[CodecField], enums: &[SemanticEnum]) -> Vec<Cod
                 {
                     f2.endianness = *endianness;
                 }
+                return f2;
+            }
+            // Also resolve enum types in array element specs
+            if f.strategy == FieldStrategy::Array
+                && let Some(ref arr) = f.array_spec
+                && let WireType::Enum(ref name) = arr.element_wire_type
+                && let Some(e) = enums.iter().find(|e| &e.name == name)
+            {
+                let underlying_wt = semantic_type_to_wire_type_simple(&e.underlying_type);
+                let mut f2 = f.clone();
+                let mut arr2 = arr.clone();
+                arr2.element_wire_type = underlying_wt;
+                arr2.element_strategy = FieldStrategy::Primitive;
+                arr2.element_ref_type_name = None;
+                f2.array_spec = Some(arr2);
                 return f2;
             }
             f.clone()
@@ -60,7 +76,16 @@ fn semantic_type_to_wire_type_simple(ty: &wirespec_sema::types::SemanticType) ->
             PrimitiveWireType::Bool => WireType::Bool,
             PrimitiveWireType::Bit => WireType::Bit,
         },
-        _ => WireType::U8, // fallback for unexpected types
+        _ => {
+            // After sema validation, non-integer underlying types are rejected,
+            // so this branch should be unreachable.
+            debug_assert!(
+                false,
+                "unexpected non-primitive enum underlying type: {:?}",
+                ty
+            );
+            WireType::U8
+        }
     }
 }
 

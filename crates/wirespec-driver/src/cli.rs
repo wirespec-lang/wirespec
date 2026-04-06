@@ -275,6 +275,10 @@ fn emit_module(
     }
 }
 
+// TODO: ASN.1 preprocessing currently only scans the entry .wspec file for
+// `extern asn1` declarations. Imported modules that also reference ASN.1 files
+// are not discovered here. Fixing this would require either a multi-pass
+// pipeline or moving ASN.1 discovery into the main compilation loop.
 fn preprocess_asn1(
     input: &std::path::Path,
     include_paths: &[PathBuf],
@@ -447,7 +451,7 @@ fn cmd_verify(args: &[String]) {
     let mut output = None;
     let mut run_tlc = false;
     let mut tlc_path = std::env::var("TLC_JAR").unwrap_or_else(|_| "tla2tools.jar".to_string());
-    let mut bound: u32 = 3;
+    let mut bound: Option<u32> = None;
     let mut i = 0;
 
     while i < args.len() {
@@ -465,7 +469,10 @@ fn cmd_verify(args: &[String]) {
             }
             "--bound" => {
                 i += 1;
-                bound = args[i].parse().unwrap_or(3);
+                bound = Some(args[i].parse().unwrap_or_else(|_| {
+                    eprintln!("error: invalid value for --bound: '{}'", args[i]);
+                    process::exit(1);
+                }));
             }
             "--help" | "-h" => {
                 print_verify_usage();
@@ -523,7 +530,7 @@ fn cmd_verify(args: &[String]) {
 
     // Generate TLA+ for each state machine
     for sm in &sem.state_machines {
-        let result = wirespec_backend_tlaplus::generate_tlaplus(sm, Some(bound));
+        let result = wirespec_backend_tlaplus::generate_tlaplus(sm, bound);
         match result {
             Ok(output_tla) => {
                 let tla_path = out_dir.join(format!("{}.tla", sm.name));
@@ -541,7 +548,13 @@ fn cmd_verify(args: &[String]) {
 
                 // Run built-in model checker (default)
                 if !run_tlc {
-                    run_builtin_check(&output_tla.spec, &output_tla.config, &sm.name, bound);
+                    let effective_bound = bound.or(sm.verify_bound).unwrap_or(3);
+                    run_builtin_check(
+                        &output_tla.spec,
+                        &output_tla.config,
+                        &sm.name,
+                        effective_bound,
+                    );
                 }
 
                 // Run external TLC if requested

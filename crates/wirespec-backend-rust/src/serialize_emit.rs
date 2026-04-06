@@ -360,6 +360,9 @@ fn emit_field_serialized_len(
         FieldStrategy::BytesLength | FieldStrategy::BytesRemaining | FieldStrategy::BytesLor => {
             if let Some(ref hint) = f.asn1_hint {
                 out.push_str(&format!(
+                    // TODO: unwrap_or(0) silently returns 0 on ASN.1 encode failure in the
+                    // generated serialized_len() code. Changing this requires adjusting the
+                    // generated API to propagate errors from serialized_len().
                     "{indent}len += {}::encode(&{field_ref}).map(|b| b.len()).unwrap_or(0);\n",
                     hint.encoding
                 ));
@@ -832,6 +835,9 @@ fn emit_variant_field_serialized_len(
         FieldStrategy::BytesLength | FieldStrategy::BytesRemaining | FieldStrategy::BytesLor => {
             if let Some(ref hint) = f.asn1_hint {
                 out.push_str(&format!(
+                    // TODO: unwrap_or(0) silently returns 0 on ASN.1 encode failure in the
+                    // generated serialized_len() code. Changing this requires adjusting the
+                    // generated API to propagate errors from serialized_len().
                     "{indent}len += {}::encode({field_name}).map(|b| b.len()).unwrap_or(0);\n",
                     hint.encoding
                 ));

@@ -63,11 +63,6 @@ impl Analyzer {
         self.external_types = ext.clone();
     }
 
-    #[allow(dead_code)]
-    fn emit(&mut self, err: SemaError) {
-        self.errors.push(err);
-    }
-
     fn first_error(&mut self) -> SemaResult<()> {
         if self.errors.is_empty() {
             Ok(())
@@ -416,6 +411,17 @@ impl Analyzer {
 
     fn lower_enum_decl(&mut self, e: &AstEnumDecl, is_flags: bool) -> SemaResult<SemanticEnum> {
         let underlying_type = self.resolve_named_type(&e.underlying_type, e.span)?;
+        // Validate that enum underlying type is an integer primitive
+        if !is_integer_underlying(&underlying_type) {
+            return Err(SemaError::new(
+                ErrorKind::InvalidEnumUnderlying,
+                format!(
+                    "enum '{}' underlying type '{}' must be an integer primitive (u8, u16, u32, u64, i8, i16, i32, i64)",
+                    e.name, e.underlying_type
+                ),
+            )
+            .with_span(e.span));
+        }
         let enum_id = format!("enum:{}", e.name);
         // Check for duplicate member names
         let mut seen_names = std::collections::HashSet::new();
@@ -480,6 +486,17 @@ impl Analyzer {
 
     fn lower_flags_decl(&mut self, f: &AstFlagsDecl) -> SemaResult<SemanticEnum> {
         let underlying_type = self.resolve_named_type(&f.underlying_type, f.span)?;
+        // Validate that flags underlying type is an integer primitive
+        if !is_integer_underlying(&underlying_type) {
+            return Err(SemaError::new(
+                ErrorKind::InvalidEnumUnderlying,
+                format!(
+                    "flags '{}' underlying type '{}' must be an integer primitive (u8, u16, u32, u64, i8, i16, i32, i64)",
+                    f.name, f.underlying_type
+                ),
+            )
+            .with_span(f.span));
+        }
         let enum_id = format!("enum:{}", f.name);
         // Check for duplicate member names
         let mut seen_names = std::collections::HashSet::new();
@@ -2548,6 +2565,25 @@ fn unaryop_to_string(op: &UnaryOp) -> String {
         UnaryOp::Neg => "-",
     }
     .to_string()
+}
+
+/// Check if a SemanticType is an integer primitive suitable as an enum/flags underlying type.
+fn is_integer_underlying(ty: &SemanticType) -> bool {
+    matches!(
+        ty,
+        SemanticType::Primitive {
+            wire: PrimitiveWireType::U8
+                | PrimitiveWireType::U16
+                | PrimitiveWireType::U24
+                | PrimitiveWireType::U32
+                | PrimitiveWireType::U64
+                | PrimitiveWireType::I8
+                | PrimitiveWireType::I16
+                | PrimitiveWireType::I32
+                | PrimitiveWireType::I64,
+            ..
+        }
+    )
 }
 
 fn extract_derive_traits(annotations: &[AstAnnotation]) -> Vec<DeriveTrait> {

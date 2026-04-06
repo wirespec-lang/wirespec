@@ -16,6 +16,11 @@ impl Backend {
             documents: Mutex::new(HashMap::new()),
         }
     }
+
+    /// Lock the documents map, recovering from a poisoned mutex.
+    fn lock_documents(&self) -> std::sync::MutexGuard<'_, HashMap<Url, String>> {
+        self.documents.lock().unwrap_or_else(|e| e.into_inner())
+    }
 }
 
 #[tower_lsp::async_trait]
@@ -62,10 +67,7 @@ impl LanguageServer for Backend {
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri.clone();
         let text = params.text_document.text.clone();
-        self.documents
-            .lock()
-            .unwrap()
-            .insert(uri.clone(), text.clone());
+        self.lock_documents().insert(uri.clone(), text.clone());
         let (_ast, diags) = crate::diagnostics::compute_diagnostics(&text);
         self.client.publish_diagnostics(uri, diags, None).await;
     }
@@ -73,9 +75,7 @@ impl LanguageServer for Backend {
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         if let Some(change) = params.content_changes.into_iter().last() {
             let uri = params.text_document.uri.clone();
-            self.documents
-                .lock()
-                .unwrap()
+            self.lock_documents()
                 .insert(uri.clone(), change.text.clone());
             let (_ast, diags) = crate::diagnostics::compute_diagnostics(&change.text);
             self.client.publish_diagnostics(uri, diags, None).await;
@@ -87,7 +87,7 @@ impl LanguageServer for Backend {
         params: SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>> {
         let uri = params.text_document.uri;
-        let docs = self.documents.lock().unwrap();
+        let docs = self.lock_documents();
         let Some(source) = docs.get(&uri) else {
             return Ok(None);
         };
@@ -107,7 +107,7 @@ impl LanguageServer for Backend {
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
-        let docs = self.documents.lock().unwrap();
+        let docs = self.lock_documents();
         let Some(source) = docs.get(&uri) else {
             return Ok(None);
         };
@@ -120,7 +120,7 @@ impl LanguageServer for Backend {
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
-        let docs = self.documents.lock().unwrap();
+        let docs = self.lock_documents();
         let Some(source) = docs.get(&uri) else {
             return Ok(None);
         };
@@ -135,7 +135,7 @@ impl LanguageServer for Backend {
     ) -> Result<Option<GotoDefinitionResponse>> {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
-        let docs = self.documents.lock().unwrap();
+        let docs = self.lock_documents();
         let Some(source) = docs.get(&uri) else {
             return Ok(None);
         };
@@ -151,7 +151,7 @@ impl LanguageServer for Backend {
         params: DocumentSymbolParams,
     ) -> Result<Option<DocumentSymbolResponse>> {
         let uri = params.text_document.uri;
-        let docs = self.documents.lock().unwrap();
+        let docs = self.lock_documents();
         let Some(source) = docs.get(&uri) else {
             return Ok(None);
         };
@@ -163,10 +163,7 @@ impl LanguageServer for Backend {
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
-        self.documents
-            .lock()
-            .unwrap()
-            .remove(&params.text_document.uri);
+        self.lock_documents().remove(&params.text_document.uri);
         self.client
             .publish_diagnostics(params.text_document.uri, vec![], None)
             .await;

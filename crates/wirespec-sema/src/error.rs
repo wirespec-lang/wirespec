@@ -27,6 +27,7 @@ pub enum ErrorKind {
     ReservedIdentifier,
     UndefinedAsn1Type,
     UnsupportedAsn1Encoding,
+    InvalidEnumUnderlying,
 }
 
 #[derive(Debug, Clone)]
