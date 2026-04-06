@@ -34,14 +34,14 @@ jobs:
 
       - name: Build and test
         run: |
-          cargo build --workspace
-          cargo test --workspace
+          cargo build --workspace --locked
+          cargo test --workspace --locked
 
       - name: Authenticate with crates.io
         uses: rust-lang/crates-io-auth-action@v1
         id: auth
 
       - name: Publish crates
-        run: cargo publish --workspace
+        run: cargo publish --workspace --locked
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
