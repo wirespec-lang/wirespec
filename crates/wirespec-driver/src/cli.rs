@@ -458,6 +458,10 @@ fn cmd_verify(args: &[String]) {
         match args[i].as_str() {
             "-o" | "--output" => {
                 i += 1;
+                if i >= args.len() {
+                    eprintln!("error: -o requires a directory argument");
+                    process::exit(1);
+                }
                 output = Some(PathBuf::from(&args[i]));
             }
             "--run-tlc" => {
@@ -465,10 +469,18 @@ fn cmd_verify(args: &[String]) {
             }
             "--tlc-path" => {
                 i += 1;
+                if i >= args.len() {
+                    eprintln!("error: --tlc-path requires an argument");
+                    process::exit(1);
+                }
                 tlc_path = args[i].clone();
             }
             "--bound" => {
                 i += 1;
+                if i >= args.len() {
+                    eprintln!("error: --bound requires a numeric argument");
+                    process::exit(1);
+                }
                 bound = Some(args[i].parse().unwrap_or_else(|_| {
                     eprintln!("error: invalid value for --bound: '{}'", args[i]);
                     process::exit(1);
