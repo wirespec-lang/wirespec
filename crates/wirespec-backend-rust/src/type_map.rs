@@ -115,6 +115,9 @@ pub fn rust_read_expr(
                 format!("{cursor}.read_u64be()?")
             }
         }
+        WireType::Bool => {
+            format!("({cursor}.read_u8()? != 0)")
+        }
         _ => {
             let read_method = cursor_read_method(wt, endianness);
             format!("{cursor}.{read_method}()?")
@@ -166,6 +169,9 @@ pub fn rust_write_expr(
                 format!("{writer}.write_u64be({value_expr})?")
             }
         }
+        WireType::Bool => {
+            format!("{writer}.write_u8(if {value_expr} {{ 1u8 }} else {{ 0u8 }})?")
+        }
         _ => {
             let write_method = writer_write_method(wt, endianness);
             format!("{writer}.{write_method}({value_expr})?")
@@ -181,6 +187,8 @@ pub fn bitgroup_read_method(total_bits: u16, endianness: Endianness) -> &'static
         (9..=16, Endianness::Big) => "read_u16be",
         (17..=32, Endianness::Little) => "read_u32le",
         (17..=32, Endianness::Big) => "read_u32be",
+        (33..=64, Endianness::Little) => "read_u64le",
+        (33..=64, Endianness::Big) => "read_u64be",
         _ => unreachable!("unexpected bitgroup size for read: {}", total_bits),
     }
 }
@@ -193,6 +201,8 @@ pub fn bitgroup_write_method(total_bits: u16, endianness: Endianness) -> &'stati
         (9..=16, Endianness::Big) => "write_u16be",
         (17..=32, Endianness::Little) => "write_u32le",
         (17..=32, Endianness::Big) => "write_u32be",
+        (33..=64, Endianness::Little) => "write_u64le",
+        (33..=64, Endianness::Big) => "write_u64be",
         _ => unreachable!("unexpected bitgroup size for write: {}", total_bits),
     }
 }

@@ -147,22 +147,26 @@ fn emit_types_in_dependency_order(out: &mut String, module: &CodecModule, prefix
         d.retain(|n| all_names.contains(n));
     }
 
-    // Topological sort (Kahn's algorithm)
+    // Topological sort using Kahn's algorithm with O(V+E) complexity.
+    //
+    // Build a reverse adjacency list: for each dependency D, record which
+    // types depend on D (i.e. "dependents of D").  This avoids scanning all
+    // deps for every dequeued node.
     let mut in_degree: HashMap<String, usize> = HashMap::new();
+    let mut dependents: HashMap<String, Vec<String>> = HashMap::new();
     for (name, _) in &types {
         in_degree.insert(name.clone(), 0);
     }
-    for d in deps.values() {
-        for dep in d {
-            if let Some(count) = in_degree.get_mut(dep) {
-                // dep is depended on by someone, but that doesn't change in_degree
-                let _ = count;
-            }
-        }
-    }
-    // in_degree[x] = number of types that x depends on (that are in this module)
     for (name, d) in &deps {
+        // in_degree[name] = how many in-module types `name` depends on
         *in_degree.get_mut(name).unwrap() = d.len();
+        // For each dependency, record `name` as a dependent
+        for dep in d {
+            dependents
+                .entry(dep.clone())
+                .or_default()
+                .push(name.clone());
+        }
     }
 
     let mut queue: VecDeque<String> = VecDeque::new();
@@ -173,15 +177,17 @@ fn emit_types_in_dependency_order(out: &mut String, module: &CodecModule, prefix
     }
 
     let mut ordered: Vec<String> = Vec::new();
+    let mut ordered_set: HashSet<String> = HashSet::new();
     while let Some(name) = queue.pop_front() {
         ordered.push(name.clone());
-        // For each type that depends on `name`, decrease its in_degree
-        for (other_name, other_deps) in &deps {
-            if other_deps.contains(&name) {
-                let deg = in_degree.get_mut(other_name).unwrap();
+        ordered_set.insert(name.clone());
+        // Decrease in_degree only for types that depend on `name`
+        if let Some(rev) = dependents.get(&name) {
+            for dependent in rev {
+                let deg = in_degree.get_mut(dependent).unwrap();
                 *deg -= 1;
                 if *deg == 0 {
-                    queue.push_back(other_name.clone());
+                    queue.push_back(dependent.clone());
                 }
             }
         }
@@ -189,7 +195,7 @@ fn emit_types_in_dependency_order(out: &mut String, module: &CodecModule, prefix
 
     // Append any remaining types (cycles or missing)
     for (name, _) in &types {
-        if !ordered.contains(name) {
+        if !ordered_set.contains(name) {
             ordered.push(name.clone());
         }
     }

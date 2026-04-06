@@ -801,6 +801,8 @@ fn emit_guard(out: &mut String, guard: &SemanticExpr, ctx: &SmExprContext, inden
 fn emit_action(out: &mut String, action: &SemanticAction, ctx: &SmExprContext, indent: &str) {
     match &action.value {
         SemanticExpr::Fill { value, count } => {
+            // TODO: unchecked array indexing — C lacks a clean bounds-check
+            // equivalent without changing the generated API.
             let target_c = crate::expr::sema_expr_to_c(&action.target, ctx);
             let value_c = crate::expr::sema_expr_to_c(value, ctx);
             let count_c = crate::expr::sema_expr_to_c(count, ctx);
@@ -921,6 +923,8 @@ fn emit_delegate(
 
         if is_indexed {
             // Indexed delegate: src.field[index] <- ev
+            // TODO: unchecked array indexing — C lacks a clean bounds-check
+            // equivalent without changing the generated API.
             let index_expr = if let SemanticExpr::Subscript { index, .. } = &delegate.target {
                 crate::expr::sema_expr_to_c(index, _ctx)
             } else {

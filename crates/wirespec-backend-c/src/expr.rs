@@ -288,6 +288,8 @@ pub fn sema_expr_to_c(expr: &SemanticExpr, ctx: &SmExprContext) -> String {
             let o = sema_expr_to_c(operand, ctx);
             format!("({op}{o})")
         }
+        // TODO: unchecked array indexing — C lacks a clean bounds-check
+        // equivalent without changing the generated API.
         SemanticExpr::Subscript { base, index } => {
             let b = sema_expr_to_c(base, ctx);
             let i = sema_expr_to_c(index, ctx);

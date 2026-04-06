@@ -34,7 +34,6 @@ impl std::error::Error for CodecError {}
 pub fn lower(layout: &LayoutModule) -> Result<CodecModule, CodecError> {
     let ctx = LowerCtx {
         varints: &layout.varints,
-        module_endianness: layout.module_endianness,
     };
 
     let mut packets = Vec::new();
@@ -72,8 +71,6 @@ pub fn lower(layout: &LayoutModule) -> Result<CodecModule, CodecError> {
 
 struct LowerCtx<'a> {
     varints: &'a [SemanticVarInt],
-    #[allow(dead_code)]
-    module_endianness: Endianness,
 }
 
 impl LowerCtx<'_> {

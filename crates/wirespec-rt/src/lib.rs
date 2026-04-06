@@ -69,7 +69,8 @@ impl<'a> Cursor<'a> {
     }
 
     fn require(&self, n: usize) -> Result<()> {
-        if self.pos + n > self.data.len() {
+        let end = self.pos.checked_add(n).ok_or(Error::ShortBuffer)?;
+        if end > self.data.len() {
             Err(Error::ShortBuffer)
         } else {
             Ok(())
@@ -239,7 +240,8 @@ impl<'a> Writer<'a> {
     }
 
     fn require(&self, n: usize) -> Result<()> {
-        if self.pos + n > self.buf.len() {
+        let end = self.pos.checked_add(n).ok_or(Error::ShortBuffer)?;
+        if end > self.buf.len() {
             Err(Error::ShortBuffer)
         } else {
             Ok(())
@@ -396,18 +398,72 @@ fn ones_complement_sum(data: &[u8]) -> u16 {
 }
 
 /// Internet checksum (RFC 1071) verification: returns one's complement sum.
+///
+/// This function does not panic; it operates on the full `data` slice.
 pub fn internet_checksum(data: &[u8]) -> u16 {
     ones_complement_sum(data)
 }
 
 /// Internet checksum compute: zero the field, compute, patch in-place.
+///
+/// # Panics
+///
+/// Panics if `cksum_offset + 2` overflows or exceeds `data.len()`.
 pub fn internet_checksum_compute(data: &mut [u8], cksum_offset: usize) {
-    data[cksum_offset] = 0;
-    data[cksum_offset + 1] = 0;
+    let cksum_end = cksum_offset
+        .checked_add(2)
+        .expect("checksum offset overflow");
+    let field = data
+        .get_mut(cksum_offset..cksum_end)
+        .expect("checksum offset out of bounds");
+    field[0] = 0;
+    field[1] = 0;
     let val = ones_complement_sum(data);
     let bytes = val.to_be_bytes();
-    data[cksum_offset] = bytes[0];
-    data[cksum_offset + 1] = bytes[1];
+    let field = data
+        .get_mut(cksum_offset..cksum_end)
+        .expect("checksum offset out of bounds");
+    field[0] = bytes[0];
+    field[1] = bytes[1];
+}
+
+/// Compute CRC-32 while treating `skip_offset..skip_offset+skip_len` as zeros.
+fn raw_crc32_with_skip(data: &[u8], poly: u32, skip_offset: usize, skip_len: usize) -> u32 {
+    let skip_end = skip_offset.saturating_add(skip_len);
+    let mut crc: u32 = 0xFFFF_FFFF;
+    for (i, &byte) in data.iter().enumerate() {
+        let b = if i >= skip_offset && i < skip_end {
+            0
+        } else {
+            byte
+        };
+        crc ^= b as u32;
+        for _ in 0..8 {
+            if crc & 1 != 0 {
+                crc = (crc >> 1) ^ poly;
+            } else {
+                crc >>= 1;
+            }
+        }
+    }
+    !crc
+}
+
+/// Compute Fletcher-16 while treating `skip_offset..skip_offset+skip_len` as zeros.
+fn raw_fletcher16_with_skip(data: &[u8], skip_offset: usize, skip_len: usize) -> u16 {
+    let skip_end = skip_offset.saturating_add(skip_len);
+    let mut sum1: u16 = 0;
+    let mut sum2: u16 = 0;
+    for (i, &byte) in data.iter().enumerate() {
+        let b = if i >= skip_offset && i < skip_end {
+            0
+        } else {
+            byte
+        };
+        sum1 = (sum1 + b as u16) % 255;
+        sum2 = (sum2 + sum1) % 255;
+    }
+    (sum2 << 8) | sum1
 }
 
 fn raw_crc32(data: &[u8], poly: u32) -> u32 {
@@ -425,39 +481,75 @@ fn raw_crc32(data: &[u8], poly: u32) -> u32 {
     !crc
 }
 
-/// CRC-32 (IEEE 802.3) verify: recompute skipping checksum field.
+/// CRC-32 (IEEE 802.3) verify: recompute skipping checksum field (no allocation).
+///
+/// # Panics
+///
+/// Panics if `cksum_offset + width` overflows or exceeds `data.len()`.
 pub fn crc32_verify(data: &[u8], cksum_offset: usize, width: usize) -> u32 {
-    let mut buf = data.to_vec();
-    for i in 0..width {
-        buf[cksum_offset + i] = 0;
-    }
-    raw_crc32(&buf, 0xEDB8_8320)
+    assert!(
+        data.get(
+            cksum_offset
+                ..cksum_offset
+                    .checked_add(width)
+                    .expect("checksum offset overflow")
+        )
+        .is_some(),
+        "checksum offset out of bounds"
+    );
+    raw_crc32_with_skip(data, 0xEDB8_8320, cksum_offset, width)
 }
 
 /// CRC-32 compute: zero checksum field, compute.
+///
+/// # Panics
+///
+/// Panics if `cksum_offset + 4` overflows or exceeds `data.len()`.
 pub fn crc32_compute(data: &mut [u8], cksum_offset: usize) -> u32 {
     let width = 4;
-    for i in 0..width {
-        data[cksum_offset + i] = 0;
-    }
+    let cksum_end = cksum_offset
+        .checked_add(width)
+        .expect("checksum offset overflow");
+    let field = data
+        .get_mut(cksum_offset..cksum_end)
+        .expect("checksum offset out of bounds");
+    field.fill(0);
     raw_crc32(data, 0xEDB8_8320)
 }
 
-/// CRC-32C (Castagnoli) verify.
+/// CRC-32C (Castagnoli) verify (no allocation).
+///
+/// # Panics
+///
+/// Panics if `cksum_offset + width` overflows or exceeds `data.len()`.
 pub fn crc32c_verify(data: &[u8], cksum_offset: usize, width: usize) -> u32 {
-    let mut buf = data.to_vec();
-    for i in 0..width {
-        buf[cksum_offset + i] = 0;
-    }
-    raw_crc32(&buf, 0x82F6_3B78)
+    assert!(
+        data.get(
+            cksum_offset
+                ..cksum_offset
+                    .checked_add(width)
+                    .expect("checksum offset overflow")
+        )
+        .is_some(),
+        "checksum offset out of bounds"
+    );
+    raw_crc32_with_skip(data, 0x82F6_3B78, cksum_offset, width)
 }
 
 /// CRC-32C compute.
+///
+/// # Panics
+///
+/// Panics if `cksum_offset + 4` overflows or exceeds `data.len()`.
 pub fn crc32c_compute(data: &mut [u8], cksum_offset: usize) -> u32 {
     let width = 4;
-    for i in 0..width {
-        data[cksum_offset + i] = 0;
-    }
+    let cksum_end = cksum_offset
+        .checked_add(width)
+        .expect("checksum offset overflow");
+    let field = data
+        .get_mut(cksum_offset..cksum_end)
+        .expect("checksum offset out of bounds");
+    field.fill(0);
     raw_crc32(data, 0x82F6_3B78)
 }
 
@@ -471,20 +563,38 @@ fn raw_fletcher16(data: &[u8]) -> u16 {
     (sum2 << 8) | sum1
 }
 
-/// Fletcher-16 verify: recompute skipping checksum field.
+/// Fletcher-16 verify: recompute skipping checksum field (no allocation).
+///
+/// # Panics
+///
+/// Panics if `cksum_offset + width` overflows or exceeds `data.len()`.
 pub fn fletcher16_verify(data: &[u8], cksum_offset: usize, width: usize) -> u16 {
-    let mut buf = data.to_vec();
-    for i in 0..width {
-        buf[cksum_offset + i] = 0;
-    }
-    raw_fletcher16(&buf)
+    assert!(
+        data.get(
+            cksum_offset
+                ..cksum_offset
+                    .checked_add(width)
+                    .expect("checksum offset overflow")
+        )
+        .is_some(),
+        "checksum offset out of bounds"
+    );
+    raw_fletcher16_with_skip(data, cksum_offset, width)
 }
 
 /// Fletcher-16 compute.
+///
+/// # Panics
+///
+/// Panics if `cksum_offset + 2` overflows or exceeds `data.len()`.
 pub fn fletcher16_compute(data: &mut [u8], cksum_offset: usize) -> u16 {
     let width = 2;
-    for i in 0..width {
-        data[cksum_offset + i] = 0;
-    }
+    let cksum_end = cksum_offset
+        .checked_add(width)
+        .expect("checksum offset overflow");
+    let field = data
+        .get_mut(cksum_offset..cksum_end)
+        .expect("checksum offset out of bounds");
+    field.fill(0);
     raw_fletcher16(data)
 }

@@ -40,6 +40,9 @@ fn rust_parse_expr(
                 format!("{cursor_var}.read_u64be()?")
             }
         }
+        WireType::Bool => {
+            format!("({cursor_var}.read_u8()? != 0)")
+        }
         _ => {
             let read_method = cursor_read_method(wt, endianness);
             format!("{cursor_var}.{read_method}()?")
@@ -196,12 +199,25 @@ fn emit_field_parse(
                                         "{indent}let {field_name} = if {cond_str} {{ Some({cursor_var}.read_bytes({size})?) }} else {{ None }};\n"
                                     ));
                                 }
-                                BytesSpec::Remaining => {
+                                BytesSpec::Length { expr } => {
+                                    let len_expr = crate::expr::expr_to_rust_with_field_aliases(
+                                        expr,
+                                        &ExprContext::Parse,
+                                        field_aliases,
+                                    );
                                     out.push_str(&format!(
-                                        "{indent}let {field_name} = if {cond_str} {{ Some({cursor_var}.read_remaining()) }} else {{ None }};\n"
+                                        "{indent}let {field_name} = if {cond_str} {{ Some({cursor_var}.read_bytes({len_expr} as usize)?) }} else {{ None }};\n"
                                     ));
                                 }
-                                _ => {
+                                BytesSpec::LengthOrRemaining { expr } => {
+                                    let value_id = get_value_ref_id(expr);
+                                    let length_name =
+                                        rust_ident(crate::expr::extract_field_name(&value_id));
+                                    out.push_str(&format!(
+                                        "{indent}let {field_name} = if {cond_str} {{ Some(if let Some(l) = {length_name} {{ {cursor_var}.read_bytes(l as usize)? }} else {{ {cursor_var}.read_remaining() }}) }} else {{ None }};\n"
+                                    ));
+                                }
+                                BytesSpec::Remaining => {
                                     out.push_str(&format!(
                                         "{indent}let {field_name} = if {cond_str} {{ Some({cursor_var}.read_remaining()) }} else {{ None }};\n"
                                     ));
