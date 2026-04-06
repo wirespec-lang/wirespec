@@ -37,29 +37,11 @@ jobs:
           cargo build --workspace
           cargo test --workspace
 
-      - name: Publish crates (dependency order)
-        run: |
-          CRATES=(
-            wirespec-syntax
-            wirespec-rt
-            wirespec-sema
-            wirespec-layout
-            wirespec-codec
-            wirespec-backend-api
-            wirespec-backend-c
-            wirespec-backend-rust
-            wirespec-backend-tlaplus
-            wirespec-lsp
-            wirespec-driver
-          )
-          for crate in "${CRATES[@]}"; do
-            echo "::group::Publishing $crate"
-            cargo publish -p "$crate" || echo "::warning::$crate may already be published"
-            echo "::endgroup::"
-            echo "Waiting for crates.io index update..."
-            sleep 30
-          done
+      - name: Authenticate with crates.io
+        uses: rust-lang/crates-io-auth-action@v1
+        id: auth
 
-          echo "::group::Publishing wirespec (root)"
-          cargo publish || echo "::warning::wirespec may already be published"
-          echo "::endgroup::"
+      - name: Publish crates
+        run: cargo publish --workspace
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
