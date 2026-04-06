@@ -559,3 +559,104 @@ fn cli_verify_no_sm_error() {
         "should report no state machines: {stderr}"
     );
 }
+
+// ── Verify argument error tests ──
+
+#[test]
+fn test_cli_verify_bound_missing_value() {
+    // --bound with no value after it should exit with error
+    let dir = TempDir::new().unwrap();
+    write_file(
+        &dir,
+        "sm.wspec",
+        r#"
+        state machine S {
+            state A {}
+            state B [terminal]
+            initial A
+            transition A -> B { on go }
+            verify NoDeadlock
+        }
+        "#,
+    );
+    let input = dir.path().join("sm.wspec");
+
+    let output = wirespec_bin()
+        .args(["verify", input.to_str().unwrap(), "--bound"])
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "verify with --bound but no value should fail"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("error"), "should report an error: {stderr}");
+}
+
+#[test]
+fn test_cli_verify_output_missing_value() {
+    // -o with no value after it should exit with error
+    let dir = TempDir::new().unwrap();
+    write_file(
+        &dir,
+        "sm.wspec",
+        r#"
+        state machine S {
+            state A {}
+            state B [terminal]
+            initial A
+            transition A -> B { on go }
+            verify NoDeadlock
+        }
+        "#,
+    );
+    let input = dir.path().join("sm.wspec");
+
+    let output = wirespec_bin()
+        .args(["verify", input.to_str().unwrap(), "-o"])
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "verify with -o but no value should fail"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("error"), "should report an error: {stderr}");
+}
+
+#[test]
+fn test_cli_verify_bound_invalid_value() {
+    // --bound abc (non-numeric) should exit with error
+    let dir = TempDir::new().unwrap();
+    write_file(
+        &dir,
+        "sm.wspec",
+        r#"
+        state machine S {
+            state A {}
+            state B [terminal]
+            initial A
+            transition A -> B { on go }
+            verify NoDeadlock
+        }
+        "#,
+    );
+    let input = dir.path().join("sm.wspec");
+
+    let output = wirespec_bin()
+        .args(["verify", input.to_str().unwrap(), "--bound", "abc"])
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "verify with --bound abc should fail"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("invalid value for --bound"),
+        "should report invalid value for --bound: {stderr}"
+    );
+}

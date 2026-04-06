@@ -726,15 +726,9 @@ pub fn emit_capsule_parse_body(
         if matches!(variant.pattern, VariantPattern::Wildcard) {
             continue;
         }
-        if let Some(deferred) = emit_capsule_variant_case(
-            out,
-            variant,
-            capsule,
-            prefix,
-            indent,
-            struct_prefix,
-            &tag_switch_expr,
-        ) {
+        if let Some(deferred) =
+            emit_capsule_variant_case(out, variant, capsule, prefix, indent, struct_prefix)
+        {
             large_range_deferred.push(deferred);
         }
     }
@@ -834,7 +828,6 @@ fn emit_capsule_variant_case(
     prefix: &str,
     indent: &str,
     struct_prefix: &str,
-    _tag_switch_expr: &str,
 ) -> Option<(i64, i64, String)> {
     let inner_indent = format!("{indent}        ");
 

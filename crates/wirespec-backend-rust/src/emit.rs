@@ -1819,13 +1819,6 @@ fn emit_state_machine(
     out.push_str("}\n\n");
 }
 
-/// Convert a SemanticExpr from the state machine context to Rust code.
-/// In SM context, TransitionPeerRef is used for src/dst/event-param fields.
-#[allow(dead_code)]
-fn sm_expr_to_rust(expr: &SemanticExpr) -> String {
-    sm_expr_to_rust_ctx(expr, &[])
-}
-
 /// Convert a SemanticExpr with access to SM state definitions for InState/All lookups.
 fn sm_expr_to_rust_ctx(expr: &SemanticExpr, sm_states: &[SemanticState]) -> String {
     sm_expr_to_rust_mode(expr, sm_states, SmExprMode::Value)

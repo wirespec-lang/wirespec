@@ -416,7 +416,7 @@ impl Analyzer {
             return Err(SemaError::new(
                 ErrorKind::InvalidEnumUnderlying,
                 format!(
-                    "enum '{}' underlying type '{}' must be an integer primitive (u8, u16, u32, u64, i8, i16, i32, i64)",
+                    "enum '{}' underlying type '{}' must be an integer primitive (u8, u16, u24, u32, u64, i8, i16, i32, i64)",
                     e.name, e.underlying_type
                 ),
             )
@@ -491,7 +491,7 @@ impl Analyzer {
             return Err(SemaError::new(
                 ErrorKind::InvalidEnumUnderlying,
                 format!(
-                    "flags '{}' underlying type '{}' must be an integer primitive (u8, u16, u32, u64, i8, i16, i32, i64)",
+                    "flags '{}' underlying type '{}' must be an integer primitive (u8, u16, u24, u32, u64, i8, i16, i32, i64)",
                     f.name, f.underlying_type
                 ),
             )

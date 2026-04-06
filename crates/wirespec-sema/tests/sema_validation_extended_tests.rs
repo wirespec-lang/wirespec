@@ -187,3 +187,32 @@ fn error_undefined_type_in_array_element_nested() {
         ErrorKind::UndefinedType,
     );
 }
+
+// ── InvalidEnumUnderlying tests ──
+
+#[test]
+fn test_enum_bool_underlying_rejected() {
+    // bool is not an integer primitive, so it must be rejected as enum underlying type
+    expect_error("enum Foo: bool { A = 0 }", ErrorKind::InvalidEnumUnderlying);
+}
+
+#[test]
+fn test_enum_bytes_underlying_rejected() {
+    // bytes is not a registered primitive type name, so it fails with UndefinedType
+    expect_error("enum Foo: bytes { A = 0 }", ErrorKind::UndefinedType);
+}
+
+#[test]
+fn test_flags_bool_underlying_rejected() {
+    // bool is not an integer primitive, so it must be rejected as flags underlying type
+    expect_error(
+        "flags Foo: bool { A = 1 }",
+        ErrorKind::InvalidEnumUnderlying,
+    );
+}
+
+#[test]
+fn test_enum_u24_underlying_accepted() {
+    // u24 is a valid integer primitive and should be accepted as enum underlying type
+    expect_ok("enum Foo: u24 { A = 0 }");
+}
