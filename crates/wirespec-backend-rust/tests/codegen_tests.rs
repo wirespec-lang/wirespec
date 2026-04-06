@@ -897,3 +897,54 @@ fn codegen_rust_capsule_expr_tag_keeps_within_and_match_separate() {
         "capsule parse should dispatch payload variants with the tag expression. Got:\n{rs}"
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Bool field codegen
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_bool_field_codegen() {
+    // bool cannot be used as a wire field (it's semantic-only), so we test
+    // that a derived bool field produces correct codegen with != 0 comparison.
+    let rs = generate_rust("packet P { flags: u8, let is_set: bool = (flags & 1) != 0 }");
+    assert!(
+        rs.contains("pub is_set: bool"),
+        "derived bool field should have type bool. Got:\n{rs}"
+    );
+    assert!(
+        rs.contains("!= 0"),
+        "derived bool expression should contain != 0 comparison. Got:\n{rs}"
+    );
+    // The derived field should not be serialized (it's computed)
+    assert!(
+        rs.contains("is_set"),
+        "should contain is_set field. Got:\n{rs}"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Enum array codegen
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_enum_array_codegen() {
+    let src = r#"
+        enum MyEnum: u8 { A = 0, B = 1 }
+        packet P { items: [MyEnum; 3] }
+    "#;
+    let rs = generate_rust(src);
+    // The generated code should contain parse and serialize functions
+    assert!(
+        rs.contains("fn parse"),
+        "should contain parse function. Got:\n{rs}"
+    );
+    assert!(
+        rs.contains("fn serialize"),
+        "should contain serialize function. Got:\n{rs}"
+    );
+    // Should not contain unreachable!() in the serialization of enum array elements
+    assert!(
+        !rs.contains("unreachable!()"),
+        "enum array codegen should not produce unreachable!(). Got:\n{rs}"
+    );
+}

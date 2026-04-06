@@ -817,3 +817,53 @@ fn codegen_fill_array_within() {
     // Should create a sub-cursor bounded by length
     assert!(source.contains("wirespec_cursor_sub") || source.contains("_arr_sub"));
 }
+
+// ── Large range codegen tests ──
+
+#[test]
+fn test_large_range_no_panic() {
+    // A frame variant matching range 0..=10000 is too large for individual case
+    // labels (threshold is 4096).  The C backend should emit an if-guard with
+    // >= and <= comparisons instead of 10001 case labels, and must not panic.
+    let src = r#"
+        frame F = match tag: u16 {
+            0..=10000 => Big { x: u8 },
+            _ => Other { data: bytes[remaining] },
+        }
+    "#;
+    let (_, source) = generate_c(src);
+    // Should contain an if-guard with range check, not 10001 case labels
+    assert!(
+        source.contains(">=") && source.contains("<="),
+        "large range should use >= / <= if-guard instead of individual case labels. Got:\n{source}"
+    );
+    // Should NOT contain case 5000 (middle of range), proving it didn't expand
+    assert!(
+        !source.contains("case 5000:"),
+        "large range should not expand to individual case labels. Got:\n{source}"
+    );
+}
+
+#[test]
+fn test_large_range_with_wildcard() {
+    // A frame with both a large range variant AND a wildcard variant should
+    // merge the large-range if-guard and the wildcard body into a single
+    // default: block in the parse switch.  The parse function uses
+    // switch (_tag_val) while the serialize function uses switch (val->tag),
+    // so we count default: occurrences within the parse switch section.
+    let src = r#"
+        frame F = match tag: u16 {
+            0..=10000 => Big { x: u8 },
+            _ => Fallback { data: bytes[remaining] },
+        }
+    "#;
+    let (_, source) = generate_c(src);
+    // The parse function has a single switch(_tag_val) with a single default:
+    // block.  Verify the total count of "default:" in the source is reasonable
+    // (parse=1, serialize=1, serialized_len=1 = 3 total, not more).
+    let default_count = source.matches("default:").count();
+    assert_eq!(
+        default_count, 3,
+        "should have exactly 3 default: labels (parse, serialize, serialized_len), found {default_count}. Got:\n{source}"
+    );
+}
