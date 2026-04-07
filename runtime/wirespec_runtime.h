@@ -27,6 +27,7 @@ typedef enum {
     WIRESPEC_ERR_UNSUPPORTED,
     WIRESPEC_ERR_CAPACITY,
     WIRESPEC_ERR_CHECKSUM,
+    WIRESPEC_ERR_BOUNDS,
 } wirespec_result_t;
 
 /* Enum to string conversion */
@@ -46,6 +47,7 @@ static inline const char *wirespec_result_str(wirespec_result_t result)
         case WIRESPEC_ERR_UNSUPPORTED: return "ERR_UNSUPPORTED";
         case WIRESPEC_ERR_CAPACITY: return "ERR_CAPACITY";
         case WIRESPEC_ERR_CHECKSUM: return "ERR_CHECKSUM";
+        case WIRESPEC_ERR_BOUNDS: return "ERR_BOUNDS";
         default: return "UNKNOWN";
     }
 }

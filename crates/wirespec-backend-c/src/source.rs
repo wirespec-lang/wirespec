@@ -801,11 +801,13 @@ fn emit_guard(out: &mut String, guard: &SemanticExpr, ctx: &SmExprContext, inden
 fn emit_action(out: &mut String, action: &SemanticAction, ctx: &SmExprContext, indent: &str) {
     match &action.value {
         SemanticExpr::Fill { value, count } => {
-            // TODO: unchecked array indexing — C lacks a clean bounds-check
-            // equivalent without changing the generated API.
+            // Fill count is validated at compile time by sema — bounds check not needed here.
             let target_c = crate::expr::sema_expr_to_c(&action.target, ctx);
             let value_c = crate::expr::sema_expr_to_c(value, ctx);
             let count_c = crate::expr::sema_expr_to_c(count, ctx);
+            out.push_str(&format!(
+                "{indent}/* fill: count validated at compile time by sema */\n"
+            ));
             out.push_str(&format!(
                 "{indent}for (size_t _fi = 0; _fi < (size_t)({count_c}); _fi++) {{\n"
             ));
@@ -923,19 +925,50 @@ fn emit_delegate(
 
         if is_indexed {
             // Indexed delegate: src.field[index] <- ev
-            // TODO: unchecked array indexing — C lacks a clean bounds-check
-            // equivalent without changing the generated API.
             let index_expr = if let SemanticExpr::Subscript { index, .. } = &delegate.target {
                 crate::expr::sema_expr_to_c(index, _ctx)
             } else {
                 "0".to_string()
             };
+
+            // Extract the array size from the field's type for bounds checking.
+            let array_size: Option<i64> = sm
+                .states
+                .iter()
+                .find(|s| to_snake_case(&s.name) == src_state_snake)
+                .and_then(|state| state.fields.iter().find(|f| &f.name == field_name))
+                .and_then(|f| {
+                    if let wirespec_sema::types::SemanticType::Array {
+                        count_expr: Some(count),
+                        ..
+                    } = &f.ty
+                    {
+                        if let wirespec_sema::expr::SemanticExpr::Literal {
+                            value: wirespec_sema::expr::SemanticLiteral::Int(n),
+                        } = count.as_ref()
+                        {
+                            Some(*n)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                });
+
             let child_ref = format!("dst.{src_state_snake}.{field_snake}[_idx]");
 
             out.push_str(&format!("{indent}{{\n"));
             out.push_str(&format!(
                 "{indent}    size_t _idx = (size_t)({index_expr});\n"
             ));
+
+            // Emit bounds check before indexing into the array.
+            if let Some(size) = array_size {
+                out.push_str(&format!(
+                    "{indent}    if (_idx >= {size}) return WIRESPEC_ERR_BOUNDS;\n"
+                ));
+            }
             out.push_str(&format!(
                 "{indent}    {child_tag_type} _old_tag = {child_ref}.tag;\n"
             ));
@@ -1008,14 +1041,9 @@ fn emit_delegate(
             }
         }
     } else {
-        // Cannot resolve child SM type — emit documented comment
-        out.push_str(&format!(
-            "{indent}/* delegate: auto-copy + child dispatch */\n"
-        ));
-        out.push_str(&format!(
-            "{indent}/* TODO: child SM dispatch requires runtime type resolution */\n"
-        ));
-        out.push_str(&format!("{indent}dst = *sm; /* auto-copy (rule 2b) */\n"));
+        // This branch should be unreachable: sema guarantees child_sm_name is resolved
+        // for all delegate targets. If we reach here, it's a codegen bug.
+        unreachable!("child SM type not resolved — sema should guarantee this");
     }
 }
 
