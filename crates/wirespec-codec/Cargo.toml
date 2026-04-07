@@ -11,6 +11,6 @@ description = "Backend-neutral Codec IR for wirespec"
 readme = "README.md"
 
 [dependencies]
-wirespec-layout = { version = "0.4.0", path = "../wirespec-layout" }
-wirespec-sema = { version = "0.4.0", path = "../wirespec-sema" }
-wirespec-syntax = { version = "0.4.0", path = "../wirespec-syntax" }
+wirespec-layout = { version = "0.4.1", path = "../wirespec-layout" }
+wirespec-sema = { version = "0.4.1", path = "../wirespec-sema" }
+wirespec-syntax = { version = "0.4.1", path = "../wirespec-syntax" }
