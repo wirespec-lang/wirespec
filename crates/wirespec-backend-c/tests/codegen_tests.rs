@@ -867,3 +867,111 @@ fn test_large_range_with_wildcard() {
         "should have exactly 3 default: labels (parse, serialize, serialized_len), found {default_count}. Got:\n{source}"
     );
 }
+
+// ── Bounds checking / safety tests ──
+
+#[test]
+fn codegen_indexed_delegate_has_bounds_check() {
+    let src = r#"
+        state machine PathState {
+            state Active {}
+            state Closed [terminal]
+            initial Active
+            transition Active -> Closed { on close }
+        }
+
+        state machine Connection {
+            state Open { paths: [PathState; 2] }
+            state Done [terminal]
+            initial Open
+            transition Open -> Open {
+                on close_path(idx: u8, ev: u8)
+                delegate src.paths[idx] <- ev
+            }
+            transition Open -> Done { on shutdown }
+        }
+    "#;
+    let (_, source) = generate_c(src);
+
+    // The generated dispatch code should have a bounds check before indexing into
+    // the paths array, returning WIRESPEC_ERR_BOUNDS on out-of-range index.
+    assert!(
+        source.contains("WIRESPEC_ERR_BOUNDS"),
+        "indexed delegate should emit a bounds check using WIRESPEC_ERR_BOUNDS. Got:\n{source}"
+    );
+    assert!(
+        source.contains(">= 2"),
+        "bounds check should compare index against array size 2. Got:\n{source}"
+    );
+}
+
+#[test]
+fn codegen_fill_action_comment_documents_safety() {
+    let src = r#"
+        state machine PathState {
+            state Active {}
+            state Closed [terminal]
+            initial Active
+            transition Active -> Closed { on close }
+        }
+
+        state machine Conn {
+            state Init { paths: [PathState; 4] }
+            state Done [terminal]
+            initial Init
+            transition Init -> Init {
+                on reset
+                action { dst.paths = fill(PathState::Active, 4); }
+            }
+            transition Init -> Done { on shutdown }
+        }
+    "#;
+    let (_, source) = generate_c(src);
+
+    // Fill loop should contain a comment explaining that bounds are
+    // validated at compile time by sema
+    assert!(
+        source.contains("validated") || source.contains("compile time"),
+        "fill loop should have a safety comment about compile-time validation. Got:\n{source}"
+    );
+}
+
+#[test]
+fn codegen_subscript_expr_documents_bounds_at_call_site() {
+    // The SemanticExpr::Subscript in expr.rs generates bare array[index],
+    // but bounds checking is done at the call site in source.rs.
+    // Verify this is documented in the generated code via the indexed delegate
+    // bounds check (which IS a call site that uses subscript expressions).
+    let src = r#"
+        state machine PathState {
+            state Active {}
+            state Closed [terminal]
+            initial Active
+            transition Active -> Closed { on close }
+        }
+
+        state machine Connection {
+            state Open { paths: [PathState; 3] }
+            state Done [terminal]
+            initial Open
+            transition Open -> Open {
+                on close_path(idx: u8, ev: u8)
+                delegate src.paths[idx] <- ev
+            }
+            transition Open -> Done { on shutdown }
+        }
+    "#;
+    let (_, source) = generate_c(src);
+
+    // Verify that the bounds check appears BEFORE the array indexing
+    let bounds_pos = source.find("WIRESPEC_ERR_BOUNDS");
+    let index_pos = source.find("paths[_idx]");
+    assert!(
+        bounds_pos.is_some() && index_pos.is_some(),
+        "should have both bounds check and array indexing. Got:\n{source}"
+    );
+    assert!(
+        bounds_pos.unwrap() < index_pos.unwrap(),
+        "bounds check should appear before array indexing. Got:\n{source}"
+    );
+}

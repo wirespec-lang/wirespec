@@ -288,8 +288,9 @@ pub fn sema_expr_to_c(expr: &SemanticExpr, ctx: &SmExprContext) -> String {
             let o = sema_expr_to_c(operand, ctx);
             format!("({op}{o})")
         }
-        // TODO: unchecked array indexing — C lacks a clean bounds-check
-        // equivalent without changing the generated API.
+        // Subscript generates a bare array[index] expression. Bounds checking
+        // is done at the statement level in source.rs where these expressions
+        // are used (e.g., indexed delegates emit a >= check before indexing).
         SemanticExpr::Subscript { base, index } => {
             let b = sema_expr_to_c(base, ctx);
             let i = sema_expr_to_c(index, ctx);
