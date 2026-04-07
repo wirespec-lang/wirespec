@@ -18,7 +18,11 @@ fn to_pascal_case(s: &str) -> String {
 }
 
 /// Emit the complete .tla spec.
-pub fn emit_spec(sm: &SemanticStateMachine, _bound: u32) -> String {
+pub fn emit_spec(
+    sm: &SemanticStateMachine,
+    _bound: u32,
+    _all_sms: &[SemanticStateMachine],
+) -> String {
     let name = &sm.name;
     let mut out = String::new();
 
@@ -159,7 +163,11 @@ pub fn emit_spec(sm: &SemanticStateMachine, _bound: u32) -> String {
 }
 
 /// Emit the .cfg file.
-pub fn emit_config(sm: &SemanticStateMachine, bound: u32) -> String {
+pub fn emit_config(
+    sm: &SemanticStateMachine,
+    bound: u32,
+    _all_sms: &[SemanticStateMachine],
+) -> String {
     let has_terminals = sm.states.iter().any(|s| s.is_terminal);
     let has_verify_decls = !sm.verify_declarations.is_empty();
     let wants_nodeadlock = sm

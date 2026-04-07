@@ -13,26 +13,36 @@ pub struct TlaplusOutput {
 
 /// Generate TLA+ spec and config from a state machine.
 ///
+/// `all_sms` is the full list of state machines from the semantic module,
+/// needed to resolve delegate references to child state machines.
+///
 /// `cli_bound` is an optional override for the model-checking bound.
 /// Priority: cli_bound > @verify(bound=N) annotation > default (3).
 pub fn generate_tlaplus(
     sm: &SemanticStateMachine,
+    all_sms: &[SemanticStateMachine],
     cli_bound: Option<u32>,
 ) -> Result<TlaplusOutput, String> {
-    // Reject delegate SMs (Phase 1 limitation)
-    for t in &sm.transitions {
-        if t.delegate.is_some() {
-            return Err(format!(
-                "delegate is not yet supported in TLA+ generation (state machine '{}')",
-                sm.name
-            ));
+    // Reject nested delegates: if any child SM (referenced via delegate)
+    // itself has delegates, that's not supported.
+    for state in &sm.states {
+        for field in &state.fields {
+            if let Some(ref child_name) = field.child_sm_name
+                && let Some(child_sm) = all_sms.iter().find(|s| &s.name == child_name)
+            {
+                for ct in &child_sm.transitions {
+                    if ct.delegate.is_some() {
+                        return Err("nested delegates not supported in TLA+ generation".to_string());
+                    }
+                }
+            }
         }
     }
 
     let bound = cli_bound.or(sm.verify_bound).unwrap_or(3);
 
-    let spec = emit::emit_spec(sm, bound);
-    let config = emit::emit_config(sm, bound);
+    let spec = emit::emit_spec(sm, bound, all_sms);
+    let config = emit::emit_config(sm, bound, all_sms);
     Ok(TlaplusOutput { spec, config })
 }
 
@@ -48,7 +58,7 @@ mod tests {
     fn tla(src: &str, bound: u32) -> TlaplusOutput {
         let ast = parse(src).unwrap();
         let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
-        generate_tlaplus(&sem.state_machines[0], Some(bound)).unwrap()
+        generate_tlaplus(&sem.state_machines[0], &sem.state_machines, Some(bound)).unwrap()
     }
 
     // ── smoke / reject ───────────────────────────────────────────────────────
@@ -72,7 +82,8 @@ mod tests {
         let ast = parse(src).unwrap();
         let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
         assert_eq!(sem.state_machines.len(), 1);
-        let output = generate_tlaplus(&sem.state_machines[0], Some(3)).unwrap();
+        let output =
+            generate_tlaplus(&sem.state_machines[0], &sem.state_machines, Some(3)).unwrap();
 
         assert!(output.spec.contains("---- MODULE PathState ----"));
         assert!(output.spec.contains("VARIABLE sm"));
@@ -94,7 +105,7 @@ mod tests {
     }
 
     #[test]
-    fn reject_delegate_sm() {
+    fn test_delegate_simple_accepted() {
         let src = r#"
             state machine Child {
                 state A {}
@@ -115,9 +126,13 @@ mod tests {
         "#;
         let ast = parse(src).unwrap();
         let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
-        let result = generate_tlaplus(&sem.state_machines[1], Some(3));
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("delegate"));
+        // Parent is the second SM (index 1)
+        let result = generate_tlaplus(&sem.state_machines[1], &sem.state_machines, Some(3));
+        assert!(
+            result.is_ok(),
+            "delegate SM should be accepted, got: {:?}",
+            result.err()
+        );
     }
 
     // ── new tests ────────────────────────────────────────────────────────────
@@ -544,7 +559,7 @@ mod tests {
     fn tla_no_bound(src: &str) -> TlaplusOutput {
         let ast = parse(src).unwrap();
         let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
-        generate_tlaplus(&sem.state_machines[0], None).unwrap()
+        generate_tlaplus(&sem.state_machines[0], &sem.state_machines, None).unwrap()
     }
 
     #[test]
@@ -674,7 +689,7 @@ mod tests {
         "#;
         let ast = parse(src).unwrap();
         let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
-        let out = generate_tlaplus(&sem.state_machines[0], Some(10)).unwrap();
+        let out = generate_tlaplus(&sem.state_machines[0], &sem.state_machines, Some(10)).unwrap();
         assert!(
             out.config.contains("Bound = 10"),
             "CLI bound should override annotation bound"
@@ -899,7 +914,8 @@ State 1: <Initial predicate>
         let ast = parse(src).unwrap();
         let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
         assert!(!sem.state_machines.is_empty(), "no state machines found");
-        let output = generate_tlaplus(&sem.state_machines[0], Some(bound)).unwrap();
+        let output =
+            generate_tlaplus(&sem.state_machines[0], &sem.state_machines, Some(bound)).unwrap();
 
         let mut spec = parse_tla(&output.spec)
             .unwrap_or_else(|e| panic!("TLA+ parse error: {:?}\n\nSpec:\n{}", e, output.spec));
