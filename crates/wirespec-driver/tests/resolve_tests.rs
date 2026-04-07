@@ -2,6 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
 use wirespec_driver::resolve::*;
+use wirespec_syntax::ast::AstTopItem;
 
 fn write_file(dir: &TempDir, rel_path: &str, content: &str) -> PathBuf {
     let path = dir.path().join(rel_path);
@@ -168,4 +169,127 @@ fn resolve_no_exports_all_public() {
         "module ok\nimport lib.A\nimport lib.B\npacket P { x: u8 }",
     );
     assert!(resolve(&entry, &[dir.path().to_path_buf()]).is_ok());
+}
+
+/// Regression test: extern asn1 declarations in transitive dependencies must be
+/// discoverable by scanning all resolved modules, not just the entry file.
+#[test]
+fn resolve_discovers_extern_asn1_in_transitive_deps() {
+    let dir = TempDir::new().unwrap();
+
+    // Dependency module declares extern asn1
+    write_file(
+        &dir,
+        "types.wspec",
+        r#"module types
+extern asn1 "test.asn1" { SomeType }
+packet Wrapper { len: u16, data: asn1(SomeType, encoding: uper, length: len) }"#,
+    );
+
+    // Entry module imports from types but has no extern asn1 of its own
+    let entry = write_file(
+        &dir,
+        "main.wspec",
+        "module main\nimport types.Wrapper\npacket P { x: u8 }",
+    );
+
+    let modules = resolve(&entry, &[dir.path().to_path_buf()]).unwrap();
+    assert_eq!(modules.len(), 2);
+
+    // Collect all extern asn1 declarations from ALL resolved modules
+    let mut asn1_paths: Vec<String> = Vec::new();
+    for module in &modules {
+        for item in &module.ast.items {
+            if let AstTopItem::ExternAsn1(ext) = item {
+                asn1_paths.push(ext.path.clone());
+            }
+        }
+    }
+
+    // The extern asn1 from the dependency module must be found
+    assert_eq!(
+        asn1_paths.len(),
+        1,
+        "should discover extern asn1 from transitive dependency"
+    );
+    assert_eq!(asn1_paths[0], "test.asn1");
+}
+
+/// Verify extern asn1 is found when declared in the entry file (baseline).
+#[test]
+fn resolve_discovers_extern_asn1_in_entry() {
+    let dir = TempDir::new().unwrap();
+    let entry = write_file(
+        &dir,
+        "main.wspec",
+        r#"module main
+extern asn1 "local.asn1" { LocalType }
+packet P { len: u8, data: asn1(LocalType, encoding: uper, length: len) }"#,
+    );
+
+    let modules = resolve(&entry, &[]).unwrap();
+    assert_eq!(modules.len(), 1);
+
+    let mut asn1_paths: Vec<String> = Vec::new();
+    for module in &modules {
+        for item in &module.ast.items {
+            if let AstTopItem::ExternAsn1(ext) = item {
+                asn1_paths.push(ext.path.clone());
+            }
+        }
+    }
+
+    assert_eq!(asn1_paths.len(), 1);
+    assert_eq!(asn1_paths[0], "local.asn1");
+}
+
+/// Verify extern asn1 declarations from multiple modules are all discovered.
+#[test]
+fn resolve_discovers_extern_asn1_from_multiple_modules() {
+    let dir = TempDir::new().unwrap();
+
+    write_file(
+        &dir,
+        "dep_a.wspec",
+        r#"module dep_a
+extern asn1 "a.asn1" { TypeA }
+packet A { len: u8, data: asn1(TypeA, encoding: uper, length: len) }"#,
+    );
+
+    write_file(
+        &dir,
+        "dep_b.wspec",
+        r#"module dep_b
+extern asn1 "b.asn1" { TypeB }
+packet B { len: u8, data: asn1(TypeB, encoding: uper, length: len) }"#,
+    );
+
+    let entry = write_file(
+        &dir,
+        "main.wspec",
+        r#"module main
+import dep_a.A
+import dep_b.B
+packet P { x: u8 }"#,
+    );
+
+    let modules = resolve(&entry, &[dir.path().to_path_buf()]).unwrap();
+    assert_eq!(modules.len(), 3);
+
+    let mut asn1_paths: Vec<String> = Vec::new();
+    for module in &modules {
+        for item in &module.ast.items {
+            if let AstTopItem::ExternAsn1(ext) = item {
+                asn1_paths.push(ext.path.clone());
+            }
+        }
+    }
+
+    assert_eq!(
+        asn1_paths.len(),
+        2,
+        "should discover extern asn1 from both dependencies"
+    );
+    assert!(asn1_paths.contains(&"a.asn1".to_string()));
+    assert!(asn1_paths.contains(&"b.asn1".to_string()));
 }
