@@ -1264,6 +1264,48 @@ state machine Parent {
     }
 
     #[test]
+    fn test_delegate_child_state_changed() {
+        let src = r#"
+state machine Child {
+    state Idle {}
+    state Done [terminal]
+    initial Idle
+    transition Idle -> Done { on finish }
+}
+
+state machine Parent {
+    state Running { child: Child }
+    state Closed [terminal]
+    initial Running
+    transition Running -> Running {
+        on forward(ev: u8)
+        delegate src.child <- ev
+    }
+    transition Running -> Closed {
+        on child_state_changed
+        guard src.child in_state(Done)
+    }
+    verify NoDeadlock
+}
+"#;
+        let ast = parse(src).unwrap();
+        let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
+        let parent = sem
+            .state_machines
+            .iter()
+            .find(|s| s.name == "Parent")
+            .unwrap();
+        let output = generate_tlaplus(parent, &sem.state_machines, None).unwrap();
+        eprintln!("=== child_state_changed spec ===\n{}", output.spec);
+        // in_state guard should reference child field
+        assert!(
+            output.spec.contains("sm.child"),
+            "should reference sm.child: {}",
+            output.spec
+        );
+    }
+
+    #[test]
     fn e2e_unreachable_terminal_fail() {
         let (result, output) = check_tla(
             r#"

@@ -1171,8 +1171,18 @@ fn expr_to_tla(expr: &SemanticExpr) -> String {
             }
         }
         SemanticExpr::ValueRef { reference } => reference.value_id.clone(),
-        SemanticExpr::InState { state_name, .. } => {
-            format!("sm.tag = \"{}\"", state_name)
+        SemanticExpr::InState {
+            expr, state_name, ..
+        } => {
+            // Check if the inner expression refers to a child field
+            let field_ref = expr_to_tla(expr);
+            if field_ref.starts_with("sm.") && field_ref != "sm" {
+                // Child field: e.g., sm.child = "Done"
+                format!("{} = \"{}\"", field_ref, state_name)
+            } else {
+                // Parent state: sm.tag = "StateName"
+                format!("sm.tag = \"{}\"", state_name)
+            }
         }
         SemanticExpr::Coalesce { expr, default } => {
             let e = expr_to_tla(expr);
