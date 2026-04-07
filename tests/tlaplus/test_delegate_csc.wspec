@@ -1,0 +1,22 @@
+state machine Child {
+    state Idle {}
+    state Done [terminal]
+    initial Idle
+    transition Idle -> Done { on finish }
+}
+
+state machine Parent {
+    state Running { child: Child }
+    state Closed [terminal]
+    initial Running
+    transition Running -> Running {
+        on forward(ev: u8)
+        delegate src.child <- ev
+    }
+    transition Running -> Closed {
+        on child_state_changed
+        guard src.child in_state(Done)
+    }
+    verify NoDeadlock
+    verify AllReachClosed
+}

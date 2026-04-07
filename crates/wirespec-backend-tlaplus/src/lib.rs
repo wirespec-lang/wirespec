@@ -13,26 +13,36 @@ pub struct TlaplusOutput {
 
 /// Generate TLA+ spec and config from a state machine.
 ///
+/// `all_sms` is the full list of state machines from the semantic module,
+/// needed to resolve delegate references to child state machines.
+///
 /// `cli_bound` is an optional override for the model-checking bound.
 /// Priority: cli_bound > @verify(bound=N) annotation > default (3).
 pub fn generate_tlaplus(
     sm: &SemanticStateMachine,
+    all_sms: &[SemanticStateMachine],
     cli_bound: Option<u32>,
 ) -> Result<TlaplusOutput, String> {
-    // Reject delegate SMs (Phase 1 limitation)
-    for t in &sm.transitions {
-        if t.delegate.is_some() {
-            return Err(format!(
-                "delegate is not yet supported in TLA+ generation (state machine '{}')",
-                sm.name
-            ));
+    // Reject nested delegates: if any child SM (referenced via delegate)
+    // itself has delegates, that's not supported.
+    for state in &sm.states {
+        for field in &state.fields {
+            if let Some(ref child_name) = field.child_sm_name
+                && let Some(child_sm) = all_sms.iter().find(|s| &s.name == child_name)
+            {
+                for ct in &child_sm.transitions {
+                    if ct.delegate.is_some() {
+                        return Err("nested delegates not supported in TLA+ generation".to_string());
+                    }
+                }
+            }
         }
     }
 
     let bound = cli_bound.or(sm.verify_bound).unwrap_or(3);
 
-    let spec = emit::emit_spec(sm, bound);
-    let config = emit::emit_config(sm, bound);
+    let spec = emit::emit_spec(sm, bound, all_sms);
+    let config = emit::emit_config(sm, bound, all_sms);
     Ok(TlaplusOutput { spec, config })
 }
 
@@ -48,7 +58,7 @@ mod tests {
     fn tla(src: &str, bound: u32) -> TlaplusOutput {
         let ast = parse(src).unwrap();
         let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
-        generate_tlaplus(&sem.state_machines[0], Some(bound)).unwrap()
+        generate_tlaplus(&sem.state_machines[0], &sem.state_machines, Some(bound)).unwrap()
     }
 
     // ── smoke / reject ───────────────────────────────────────────────────────
@@ -72,7 +82,8 @@ mod tests {
         let ast = parse(src).unwrap();
         let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
         assert_eq!(sem.state_machines.len(), 1);
-        let output = generate_tlaplus(&sem.state_machines[0], Some(3)).unwrap();
+        let output =
+            generate_tlaplus(&sem.state_machines[0], &sem.state_machines, Some(3)).unwrap();
 
         assert!(output.spec.contains("---- MODULE PathState ----"));
         assert!(output.spec.contains("VARIABLE sm"));
@@ -94,7 +105,7 @@ mod tests {
     }
 
     #[test]
-    fn reject_delegate_sm() {
+    fn test_delegate_simple_accepted() {
         let src = r#"
             state machine Child {
                 state A {}
@@ -115,9 +126,13 @@ mod tests {
         "#;
         let ast = parse(src).unwrap();
         let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
-        let result = generate_tlaplus(&sem.state_machines[1], Some(3));
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("delegate"));
+        // Parent is the second SM (index 1)
+        let result = generate_tlaplus(&sem.state_machines[1], &sem.state_machines, Some(3));
+        assert!(
+            result.is_ok(),
+            "delegate SM should be accepted, got: {:?}",
+            result.err()
+        );
     }
 
     // ── new tests ────────────────────────────────────────────────────────────
@@ -544,7 +559,7 @@ mod tests {
     fn tla_no_bound(src: &str) -> TlaplusOutput {
         let ast = parse(src).unwrap();
         let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
-        generate_tlaplus(&sem.state_machines[0], None).unwrap()
+        generate_tlaplus(&sem.state_machines[0], &sem.state_machines, None).unwrap()
     }
 
     #[test]
@@ -674,7 +689,7 @@ mod tests {
         "#;
         let ast = parse(src).unwrap();
         let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
-        let out = generate_tlaplus(&sem.state_machines[0], Some(10)).unwrap();
+        let out = generate_tlaplus(&sem.state_machines[0], &sem.state_machines, Some(10)).unwrap();
         assert!(
             out.config.contains("Bound = 10"),
             "CLI bound should override annotation bound"
@@ -899,7 +914,8 @@ State 1: <Initial predicate>
         let ast = parse(src).unwrap();
         let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
         assert!(!sem.state_machines.is_empty(), "no state machines found");
-        let output = generate_tlaplus(&sem.state_machines[0], Some(bound)).unwrap();
+        let output =
+            generate_tlaplus(&sem.state_machines[0], &sem.state_machines, Some(bound)).unwrap();
 
         let mut spec = parse_tla(&output.spec)
             .unwrap_or_else(|e| panic!("TLA+ parse error: {:?}\n\nSpec:\n{}", e, output.spec));
@@ -1156,6 +1172,525 @@ State 1: <Initial predicate>
         );
     }
 
+    // ── delegate SM tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_delegate_child_state_in_spec() {
+        let src = r#"
+state machine Child {
+    state Idle {}
+    state Active {}
+    state Done [terminal]
+    initial Idle
+    transition Idle -> Active { on activate }
+    transition Active -> Done { on finish }
+}
+
+state machine Parent {
+    state Running { child: Child }
+    state Closed [terminal]
+    initial Running
+    transition Running -> Running {
+        on forward(ev: u8)
+        delegate src.child <- ev
+    }
+    transition Running -> Closed { on shutdown }
+}
+"#;
+        let ast = parse(src).unwrap();
+        let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
+        let parent = sem
+            .state_machines
+            .iter()
+            .find(|s| s.name == "Parent")
+            .unwrap();
+        let output = generate_tlaplus(parent, &sem.state_machines, None).unwrap();
+        eprintln!("=== delegate child state spec ===\n{}", output.spec);
+        assert!(
+            output.spec.contains("ChildStateTag"),
+            "should define ChildStateTag set: {}",
+            output.spec
+        );
+        assert!(
+            output.spec.contains("\"Idle\""),
+            "init should set child to Idle: {}",
+            output.spec
+        );
+    }
+
+    #[test]
+    fn test_delegate_dispatch_generated() {
+        let src = r#"
+state machine Child {
+    state Idle {}
+    state Active {}
+    state Done [terminal]
+    initial Idle
+    transition Idle -> Active { on activate }
+    transition Active -> Done { on finish }
+}
+
+state machine Parent {
+    state Running { child: Child }
+    state Closed [terminal]
+    initial Running
+    transition Running -> Running {
+        on forward(ev: u8)
+        delegate src.child <- ev
+    }
+    transition Running -> Closed { on shutdown }
+}
+"#;
+        let ast = parse(src).unwrap();
+        let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
+        let parent = sem
+            .state_machines
+            .iter()
+            .find(|s| s.name == "Parent")
+            .unwrap();
+        let output = generate_tlaplus(parent, &sem.state_machines, None).unwrap();
+        eprintln!("=== delegate dispatch spec ===\n{}", output.spec);
+        assert!(
+            output.spec.contains("ChildDispatch"),
+            "should generate ChildDispatch operator: {}",
+            output.spec
+        );
+        // The dispatch should map child states + event ordinals to new states
+        assert!(
+            output.spec.contains("CASE"),
+            "dispatch should use CASE: {}",
+            output.spec
+        );
+    }
+
+    #[test]
+    fn test_delegate_child_state_changed() {
+        let src = r#"
+state machine Child {
+    state Idle {}
+    state Done [terminal]
+    initial Idle
+    transition Idle -> Done { on finish }
+}
+
+state machine Parent {
+    state Running { child: Child }
+    state Closed [terminal]
+    initial Running
+    transition Running -> Running {
+        on forward(ev: u8)
+        delegate src.child <- ev
+    }
+    transition Running -> Closed {
+        on child_state_changed
+        guard src.child in_state(Done)
+    }
+    verify NoDeadlock
+}
+"#;
+        let ast = parse(src).unwrap();
+        let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
+        let parent = sem
+            .state_machines
+            .iter()
+            .find(|s| s.name == "Parent")
+            .unwrap();
+        let output = generate_tlaplus(parent, &sem.state_machines, None).unwrap();
+        eprintln!("=== child_state_changed spec ===\n{}", output.spec);
+        // in_state guard should reference child field
+        assert!(
+            output.spec.contains("sm.child"),
+            "should reference sm.child: {}",
+            output.spec
+        );
+    }
+
+    #[test]
+    fn test_delegate_indexed() {
+        let src = r#"
+state machine PathState {
+    state Active {}
+    state Closed [terminal]
+    initial Active
+    transition Active -> Closed { on close }
+}
+
+state machine Connection {
+    state Open { paths: [PathState; 2] }
+    state Done [terminal]
+    initial Open
+    transition Open -> Open {
+        on close_path(idx: u8, ev: u8)
+        delegate src.paths[idx] <- ev
+    }
+    transition Open -> Done { on shutdown }
+}
+"#;
+        let ast = parse(src).unwrap();
+        let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
+        let conn = sem
+            .state_machines
+            .iter()
+            .find(|s| s.name == "Connection")
+            .unwrap();
+        let output = generate_tlaplus(conn, &sem.state_machines, None).unwrap();
+        eprintln!("=== indexed delegate spec ===\n{}", output.spec);
+        assert!(
+            output.spec.contains("paths"),
+            "should have paths field: {}",
+            output.spec
+        );
+        assert!(
+            output.spec.contains("EXCEPT"),
+            "should use EXCEPT for update: {}",
+            output.spec
+        );
+    }
+
+    /// Like check_tla but targets a specific state machine by name.
+    fn check_tla_named(
+        src: &str,
+        sm_name: &str,
+        bound: u32,
+    ) -> (tla_checker::checker::CheckResult, TlaplusOutput) {
+        use tla_checker::ast::Expr;
+        use tla_checker::checker::{CheckerConfig, check};
+        use tla_checker::config::{apply_config, parse_cfg};
+        use tla_checker::parser::parse as parse_tla;
+
+        let ast = parse(src).unwrap();
+        let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
+        let target = sem
+            .state_machines
+            .iter()
+            .find(|s| s.name == sm_name)
+            .unwrap_or_else(|| panic!("state machine '{}' not found", sm_name));
+        let output = generate_tlaplus(target, &sem.state_machines, Some(bound)).unwrap();
+
+        let mut spec = parse_tla(&output.spec)
+            .unwrap_or_else(|e| panic!("TLA+ parse error: {:?}\n\nSpec:\n{}", e, output.spec));
+        let cfg = parse_cfg(&output.config)
+            .unwrap_or_else(|e| panic!("cfg parse error: {:?}\n\nConfig:\n{}", e, output.config));
+
+        let mut domains = tla_checker::ast::Env::new();
+        let mut checker_config = CheckerConfig {
+            allow_deadlock: true,
+            quiet: true,
+            ..Default::default()
+        };
+
+        apply_config(
+            &cfg,
+            &mut spec,
+            &mut domains,
+            &mut checker_config,
+            &[],
+            &[],
+            false,
+        )
+        .unwrap_or_else(|e| {
+            panic!(
+                "apply_config failed: {}\n\nSpec:\n{}\n\nConfig:\n{}",
+                e, output.spec, output.config
+            )
+        });
+
+        spec.liveness_properties = spec
+            .liveness_properties
+            .into_iter()
+            .map(|p| match p {
+                Expr::Eventually(inner) => *inner,
+                other => other,
+            })
+            .collect();
+
+        let result = check(&spec, &domains, &checker_config);
+        (result, output)
+    }
+
+    // ── E2E delegate SM verification tests ──────────────────────────────
+
+    #[test]
+    fn e2e_delegate_simple_verify() {
+        let src = r#"
+state machine Child {
+    state Idle {}
+    state Done [terminal]
+    initial Idle
+    transition Idle -> Done { on finish }
+}
+
+state machine Parent {
+    state Running { child: Child }
+    state Closed [terminal]
+    initial Running
+    transition Running -> Running {
+        on forward(ev: u8)
+        delegate src.child <- ev
+    }
+    transition Running -> Closed { on shutdown }
+    verify NoDeadlock
+}
+"#;
+        let (result, output) = check_tla_named(src, "Parent", 2);
+        eprintln!("=== delegate_simple TLA+ ===\n{}", output.spec);
+        eprintln!("=== delegate_simple CFG ===\n{}", output.config);
+        assert!(
+            matches!(result, tla_checker::checker::CheckResult::Ok(_)),
+            "delegate_simple NoDeadlock should pass, got {:?}\n\nSpec:\n{}",
+            result,
+            output.spec
+        );
+    }
+
+    #[test]
+    fn e2e_delegate_csc_verify() {
+        let src = r#"
+state machine Child {
+    state Idle {}
+    state Done [terminal]
+    initial Idle
+    transition Idle -> Done { on finish }
+}
+
+state machine Parent {
+    state Running { child: Child }
+    state Closed [terminal]
+    initial Running
+    transition Running -> Running {
+        on forward(ev: u8)
+        delegate src.child <- ev
+    }
+    transition Running -> Closed {
+        on child_state_changed
+        guard src.child in_state(Done)
+    }
+    verify NoDeadlock
+    verify AllReachClosed
+}
+"#;
+        let (result, output) = check_tla_named(src, "Parent", 2);
+        eprintln!("=== delegate_csc TLA+ ===\n{}", output.spec);
+        eprintln!("=== delegate_csc CFG ===\n{}", output.config);
+        assert!(
+            matches!(result, tla_checker::checker::CheckResult::Ok(_)),
+            "delegate_csc NoDeadlock + AllReachClosed should pass, got {:?}\n\nSpec:\n{}",
+            result,
+            output.spec
+        );
+    }
+
+    #[test]
+    fn e2e_delegate_indexed_verify() {
+        let src = r#"
+state machine PathState {
+    state Active {}
+    state Closed [terminal]
+    initial Active
+    transition Active -> Closed { on close }
+}
+
+state machine Connection {
+    state Open { paths: [PathState; 2] }
+    state Done [terminal]
+    initial Open
+    transition Open -> Open {
+        on close_path(idx: u8, ev: u8)
+        delegate src.paths[idx] <- ev
+    }
+    transition Open -> Done { on shutdown }
+    verify NoDeadlock
+}
+"#;
+        let (result, output) = check_tla_named(src, "Connection", 2);
+        eprintln!("=== delegate_indexed TLA+ ===\n{}", output.spec);
+        eprintln!("=== delegate_indexed CFG ===\n{}", output.config);
+        assert!(
+            matches!(result, tla_checker::checker::CheckResult::Ok(_)),
+            "delegate_indexed NoDeadlock should pass, got {:?}\n\nSpec:\n{}",
+            result,
+            output.spec
+        );
+    }
+
+    // ── delegate config generation tests ──────────────────────────────
+
+    #[test]
+    fn test_delegate_config_correct() {
+        // Generate config for a delegate SM and verify it has all expected directives
+        let src = r#"
+state machine Child {
+    state Idle {}
+    state Done [terminal]
+    initial Idle
+    transition Idle -> Done { on finish }
+}
+
+state machine Parent {
+    state Running { child: Child }
+    state Closed [terminal]
+    initial Running
+    transition Running -> Running {
+        on forward(ev: u8)
+        delegate src.child <- ev
+    }
+    transition Running -> Closed { on shutdown }
+    verify NoDeadlock
+}
+"#;
+        let ast = parse(src).unwrap();
+        let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
+        let parent = sem
+            .state_machines
+            .iter()
+            .find(|s| s.name == "Parent")
+            .unwrap();
+        let output = generate_tlaplus(parent, &sem.state_machines, Some(4)).unwrap();
+
+        assert!(
+            output.config.contains("INIT Init"),
+            "cfg should contain INIT Init: {}",
+            output.config
+        );
+        assert!(
+            output.config.contains("NEXT Next"),
+            "cfg should contain NEXT Next: {}",
+            output.config
+        );
+        assert!(
+            output.config.contains("CONSTANT Bound = 4"),
+            "cfg should contain CONSTANT Bound = 4: {}",
+            output.config
+        );
+        assert!(
+            output.config.contains("INVARIANT TypeOK"),
+            "cfg should contain INVARIANT TypeOK: {}",
+            output.config
+        );
+        assert!(
+            output.config.contains("INVARIANT NoDeadlock"),
+            "cfg should contain INVARIANT NoDeadlock: {}",
+            output.config
+        );
+    }
+
+    #[test]
+    fn test_delegate_csc_config_has_allreachclosed() {
+        // Config for delegate SM with AllReachClosed should include the property
+        let src = r#"
+state machine Child {
+    state Idle {}
+    state Done [terminal]
+    initial Idle
+    transition Idle -> Done { on finish }
+}
+
+state machine Parent {
+    state Running { child: Child }
+    state Closed [terminal]
+    initial Running
+    transition Running -> Running {
+        on forward(ev: u8)
+        delegate src.child <- ev
+    }
+    transition Running -> Closed {
+        on child_state_changed
+        guard src.child in_state(Done)
+    }
+    verify NoDeadlock
+    verify AllReachClosed
+}
+"#;
+        let ast = parse(src).unwrap();
+        let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
+        let parent = sem
+            .state_machines
+            .iter()
+            .find(|s| s.name == "Parent")
+            .unwrap();
+        let output = generate_tlaplus(parent, &sem.state_machines, Some(3)).unwrap();
+
+        assert!(
+            output.config.contains("INIT Init"),
+            "cfg should contain INIT Init"
+        );
+        assert!(
+            output.config.contains("NEXT Next"),
+            "cfg should contain NEXT Next"
+        );
+        assert!(
+            output.config.contains("CONSTANT Bound = 3"),
+            "cfg should contain CONSTANT Bound"
+        );
+        assert!(
+            output.config.contains("INVARIANT TypeOK"),
+            "cfg should contain INVARIANT TypeOK"
+        );
+        assert!(
+            output.config.contains("INVARIANT NoDeadlock"),
+            "cfg should contain INVARIANT NoDeadlock"
+        );
+        assert!(
+            output.config.contains("PROPERTY AllReachClosed"),
+            "cfg should contain PROPERTY AllReachClosed: {}",
+            output.config
+        );
+    }
+
+    #[test]
+    fn test_delegate_indexed_config_correct() {
+        // Config for indexed delegate SM
+        let src = r#"
+state machine PathState {
+    state Active {}
+    state Closed [terminal]
+    initial Active
+    transition Active -> Closed { on close }
+}
+
+state machine Connection {
+    state Open { paths: [PathState; 2] }
+    state Done [terminal]
+    initial Open
+    transition Open -> Open {
+        on close_path(idx: u8, ev: u8)
+        delegate src.paths[idx] <- ev
+    }
+    transition Open -> Done { on shutdown }
+    verify NoDeadlock
+}
+"#;
+        let ast = parse(src).unwrap();
+        let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
+        let conn = sem
+            .state_machines
+            .iter()
+            .find(|s| s.name == "Connection")
+            .unwrap();
+        let output = generate_tlaplus(conn, &sem.state_machines, Some(2)).unwrap();
+
+        assert!(
+            output.config.contains("INIT Init"),
+            "cfg should contain INIT Init"
+        );
+        assert!(
+            output.config.contains("NEXT Next"),
+            "cfg should contain NEXT Next"
+        );
+        assert!(
+            output.config.contains("CONSTANT Bound = 2"),
+            "cfg should contain CONSTANT Bound"
+        );
+        assert!(
+            output.config.contains("INVARIANT TypeOK"),
+            "cfg should contain INVARIANT TypeOK"
+        );
+        assert!(
+            output.config.contains("INVARIANT NoDeadlock"),
+            "cfg should contain INVARIANT NoDeadlock"
+        );
+    }
+
     #[test]
     fn e2e_unreachable_terminal_fail() {
         let (result, output) = check_tla(
@@ -1183,6 +1718,55 @@ State 1: <Initial predicate>
             ),
             "expected liveness violation, got {:?}",
             result
+        );
+    }
+
+    #[test]
+    fn test_nested_delegate_rejected() {
+        let src = r#"
+state machine Grandchild {
+    state A {}
+    state B [terminal]
+    initial A
+    transition A -> B { on go }
+}
+
+state machine Child {
+    state X { gc: Grandchild }
+    state Y [terminal]
+    initial X
+    transition X -> X {
+        on forward_gc(ev: u8)
+        delegate src.gc <- ev
+    }
+    transition X -> Y { on done }
+}
+
+state machine Parent {
+    state Running { child: Child }
+    state Closed [terminal]
+    initial Running
+    transition Running -> Running {
+        on forward(ev: u8)
+        delegate src.child <- ev
+    }
+    transition Running -> Closed { on shutdown }
+}
+"#;
+        let ast = parse(src).unwrap();
+        let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
+        let parent = sem
+            .state_machines
+            .iter()
+            .find(|s| s.name == "Parent")
+            .unwrap();
+        let result = generate_tlaplus(parent, &sem.state_machines, None);
+        assert!(result.is_err(), "nested delegates should be rejected");
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("nested delegate"),
+            "error should mention nested delegates: {}",
+            err
         );
     }
 }

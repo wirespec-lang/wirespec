@@ -1,0 +1,18 @@
+state machine PathState {
+    state Active {}
+    state Closed [terminal]
+    initial Active
+    transition Active -> Closed { on close }
+}
+
+state machine Connection {
+    state Open { paths: [PathState; 2] }
+    state Done [terminal]
+    initial Open
+    transition Open -> Open {
+        on close_path(idx: u8, ev: u8)
+        delegate src.paths[idx] <- ev
+    }
+    transition Open -> Done { on shutdown }
+    verify NoDeadlock
+}
