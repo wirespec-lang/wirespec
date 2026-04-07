@@ -1306,6 +1306,48 @@ state machine Parent {
     }
 
     #[test]
+    fn test_delegate_indexed() {
+        let src = r#"
+state machine PathState {
+    state Active {}
+    state Closed [terminal]
+    initial Active
+    transition Active -> Closed { on close }
+}
+
+state machine Connection {
+    state Open { paths: [PathState; 2] }
+    state Done [terminal]
+    initial Open
+    transition Open -> Open {
+        on close_path(idx: u8, ev: u8)
+        delegate src.paths[idx] <- ev
+    }
+    transition Open -> Done { on shutdown }
+}
+"#;
+        let ast = parse(src).unwrap();
+        let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
+        let conn = sem
+            .state_machines
+            .iter()
+            .find(|s| s.name == "Connection")
+            .unwrap();
+        let output = generate_tlaplus(conn, &sem.state_machines, None).unwrap();
+        eprintln!("=== indexed delegate spec ===\n{}", output.spec);
+        assert!(
+            output.spec.contains("paths"),
+            "should have paths field: {}",
+            output.spec
+        );
+        assert!(
+            output.spec.contains("EXCEPT"),
+            "should use EXCEPT for update: {}",
+            output.spec
+        );
+    }
+
+    #[test]
     fn e2e_unreachable_terminal_fail() {
         let (result, output) = check_tla(
             r#"
