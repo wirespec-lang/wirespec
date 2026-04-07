@@ -1041,14 +1041,9 @@ fn emit_delegate(
             }
         }
     } else {
-        // Cannot resolve child SM type — emit documented comment
-        out.push_str(&format!(
-            "{indent}/* delegate: auto-copy + child dispatch */\n"
-        ));
-        out.push_str(&format!(
-            "{indent}/* TODO: child SM dispatch requires runtime type resolution */\n"
-        ));
-        out.push_str(&format!("{indent}dst = *sm; /* auto-copy (rule 2b) */\n"));
+        // This branch should be unreachable: sema guarantees child_sm_name is resolved
+        // for all delegate targets. If we reach here, it's a codegen bug.
+        unreachable!("child SM type not resolved — sema should guarantee this");
     }
 }
 
