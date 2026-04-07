@@ -1513,6 +1513,184 @@ state machine Connection {
         );
     }
 
+    // ── delegate config generation tests ──────────────────────────────
+
+    #[test]
+    fn test_delegate_config_correct() {
+        // Generate config for a delegate SM and verify it has all expected directives
+        let src = r#"
+state machine Child {
+    state Idle {}
+    state Done [terminal]
+    initial Idle
+    transition Idle -> Done { on finish }
+}
+
+state machine Parent {
+    state Running { child: Child }
+    state Closed [terminal]
+    initial Running
+    transition Running -> Running {
+        on forward(ev: u8)
+        delegate src.child <- ev
+    }
+    transition Running -> Closed { on shutdown }
+    verify NoDeadlock
+}
+"#;
+        let ast = parse(src).unwrap();
+        let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
+        let parent = sem
+            .state_machines
+            .iter()
+            .find(|s| s.name == "Parent")
+            .unwrap();
+        let output = generate_tlaplus(parent, &sem.state_machines, Some(4)).unwrap();
+
+        assert!(
+            output.config.contains("INIT Init"),
+            "cfg should contain INIT Init: {}",
+            output.config
+        );
+        assert!(
+            output.config.contains("NEXT Next"),
+            "cfg should contain NEXT Next: {}",
+            output.config
+        );
+        assert!(
+            output.config.contains("CONSTANT Bound = 4"),
+            "cfg should contain CONSTANT Bound = 4: {}",
+            output.config
+        );
+        assert!(
+            output.config.contains("INVARIANT TypeOK"),
+            "cfg should contain INVARIANT TypeOK: {}",
+            output.config
+        );
+        assert!(
+            output.config.contains("INVARIANT NoDeadlock"),
+            "cfg should contain INVARIANT NoDeadlock: {}",
+            output.config
+        );
+    }
+
+    #[test]
+    fn test_delegate_csc_config_has_allreachclosed() {
+        // Config for delegate SM with AllReachClosed should include the property
+        let src = r#"
+state machine Child {
+    state Idle {}
+    state Done [terminal]
+    initial Idle
+    transition Idle -> Done { on finish }
+}
+
+state machine Parent {
+    state Running { child: Child }
+    state Closed [terminal]
+    initial Running
+    transition Running -> Running {
+        on forward(ev: u8)
+        delegate src.child <- ev
+    }
+    transition Running -> Closed {
+        on child_state_changed
+        guard src.child in_state(Done)
+    }
+    verify NoDeadlock
+    verify AllReachClosed
+}
+"#;
+        let ast = parse(src).unwrap();
+        let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
+        let parent = sem
+            .state_machines
+            .iter()
+            .find(|s| s.name == "Parent")
+            .unwrap();
+        let output = generate_tlaplus(parent, &sem.state_machines, Some(3)).unwrap();
+
+        assert!(
+            output.config.contains("INIT Init"),
+            "cfg should contain INIT Init"
+        );
+        assert!(
+            output.config.contains("NEXT Next"),
+            "cfg should contain NEXT Next"
+        );
+        assert!(
+            output.config.contains("CONSTANT Bound = 3"),
+            "cfg should contain CONSTANT Bound"
+        );
+        assert!(
+            output.config.contains("INVARIANT TypeOK"),
+            "cfg should contain INVARIANT TypeOK"
+        );
+        assert!(
+            output.config.contains("INVARIANT NoDeadlock"),
+            "cfg should contain INVARIANT NoDeadlock"
+        );
+        assert!(
+            output.config.contains("PROPERTY AllReachClosed"),
+            "cfg should contain PROPERTY AllReachClosed: {}",
+            output.config
+        );
+    }
+
+    #[test]
+    fn test_delegate_indexed_config_correct() {
+        // Config for indexed delegate SM
+        let src = r#"
+state machine PathState {
+    state Active {}
+    state Closed [terminal]
+    initial Active
+    transition Active -> Closed { on close }
+}
+
+state machine Connection {
+    state Open { paths: [PathState; 2] }
+    state Done [terminal]
+    initial Open
+    transition Open -> Open {
+        on close_path(idx: u8, ev: u8)
+        delegate src.paths[idx] <- ev
+    }
+    transition Open -> Done { on shutdown }
+    verify NoDeadlock
+}
+"#;
+        let ast = parse(src).unwrap();
+        let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
+        let conn = sem
+            .state_machines
+            .iter()
+            .find(|s| s.name == "Connection")
+            .unwrap();
+        let output = generate_tlaplus(conn, &sem.state_machines, Some(2)).unwrap();
+
+        assert!(
+            output.config.contains("INIT Init"),
+            "cfg should contain INIT Init"
+        );
+        assert!(
+            output.config.contains("NEXT Next"),
+            "cfg should contain NEXT Next"
+        );
+        assert!(
+            output.config.contains("CONSTANT Bound = 2"),
+            "cfg should contain CONSTANT Bound"
+        );
+        assert!(
+            output.config.contains("INVARIANT TypeOK"),
+            "cfg should contain INVARIANT TypeOK"
+        );
+        assert!(
+            output.config.contains("INVARIANT NoDeadlock"),
+            "cfg should contain INVARIANT NoDeadlock"
+        );
+    }
+
     #[test]
     fn e2e_unreachable_terminal_fail() {
         let (result, output) = check_tla(
