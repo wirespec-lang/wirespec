@@ -453,11 +453,11 @@ fn emit_type_ok(out: &mut String, fields: &[(String, SemanticType)], children: &
     for (name, ty) in fields {
         if let Some(child) = children.iter().find(|c| c.field_name == *name) {
             if child.is_array {
-                // Array of child state tags: validate each element
+                // Array of child state tags: validate each element (guard against NullVal)
                 let tag_set = format!("{}StateTag", child.child_sm.name);
                 out.push_str(&format!(
-                    "    /\\ \\A i \\in DOMAIN sm.{} : sm.{}[i] \\in {}\n",
-                    name, name, tag_set
+                    "    /\\ (sm.{f} = NullVal \\/ \\A i \\in DOMAIN sm.{f} : sm.{f}[i] \\in {ts})\n",
+                    f = name, ts = tag_set
                 ));
             } else {
                 let tag_set = format!("{}StateTag", child.child_sm.name);
@@ -786,8 +786,13 @@ fn emit_transitions(out: &mut String, sm: &SemanticStateMachine, children: &[Chi
                         ));
                         out.push_str("           IN /\\ new_child /= \"INVALID\"\n");
                         out.push_str(&format!(
-                            "              /\\ sm' = [sm EXCEPT !.{}[{}] = new_child]\n",
-                            fname, idx_var
+                            "              /\\ LET new_{f} == [sm.{f} EXCEPT ![{i}] = new_child]\n",
+                            f = fname,
+                            i = idx_var
+                        ));
+                        out.push_str(&format!(
+                            "                 IN sm' = [sm EXCEPT !.{} = new_{}]\n",
+                            fname, fname
                         ));
                     } else {
                         // Scalar child: existentially quantify over event

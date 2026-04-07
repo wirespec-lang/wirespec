@@ -1347,6 +1347,172 @@ state machine Connection {
         );
     }
 
+    /// Like check_tla but targets a specific state machine by name.
+    fn check_tla_named(
+        src: &str,
+        sm_name: &str,
+        bound: u32,
+    ) -> (tla_checker::checker::CheckResult, TlaplusOutput) {
+        use tla_checker::ast::Expr;
+        use tla_checker::checker::{CheckerConfig, check};
+        use tla_checker::config::{apply_config, parse_cfg};
+        use tla_checker::parser::parse as parse_tla;
+
+        let ast = parse(src).unwrap();
+        let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
+        let target = sem
+            .state_machines
+            .iter()
+            .find(|s| s.name == sm_name)
+            .unwrap_or_else(|| panic!("state machine '{}' not found", sm_name));
+        let output = generate_tlaplus(target, &sem.state_machines, Some(bound)).unwrap();
+
+        let mut spec = parse_tla(&output.spec)
+            .unwrap_or_else(|e| panic!("TLA+ parse error: {:?}\n\nSpec:\n{}", e, output.spec));
+        let cfg = parse_cfg(&output.config)
+            .unwrap_or_else(|e| panic!("cfg parse error: {:?}\n\nConfig:\n{}", e, output.config));
+
+        let mut domains = tla_checker::ast::Env::new();
+        let mut checker_config = CheckerConfig {
+            allow_deadlock: true,
+            quiet: true,
+            ..Default::default()
+        };
+
+        apply_config(
+            &cfg,
+            &mut spec,
+            &mut domains,
+            &mut checker_config,
+            &[],
+            &[],
+            false,
+        )
+        .unwrap_or_else(|e| {
+            panic!(
+                "apply_config failed: {}\n\nSpec:\n{}\n\nConfig:\n{}",
+                e, output.spec, output.config
+            )
+        });
+
+        spec.liveness_properties = spec
+            .liveness_properties
+            .into_iter()
+            .map(|p| match p {
+                Expr::Eventually(inner) => *inner,
+                other => other,
+            })
+            .collect();
+
+        let result = check(&spec, &domains, &checker_config);
+        (result, output)
+    }
+
+    // ── E2E delegate SM verification tests ──────────────────────────────
+
+    #[test]
+    fn e2e_delegate_simple_verify() {
+        let src = r#"
+state machine Child {
+    state Idle {}
+    state Done [terminal]
+    initial Idle
+    transition Idle -> Done { on finish }
+}
+
+state machine Parent {
+    state Running { child: Child }
+    state Closed [terminal]
+    initial Running
+    transition Running -> Running {
+        on forward(ev: u8)
+        delegate src.child <- ev
+    }
+    transition Running -> Closed { on shutdown }
+    verify NoDeadlock
+}
+"#;
+        let (result, output) = check_tla_named(src, "Parent", 2);
+        eprintln!("=== delegate_simple TLA+ ===\n{}", output.spec);
+        eprintln!("=== delegate_simple CFG ===\n{}", output.config);
+        assert!(
+            matches!(result, tla_checker::checker::CheckResult::Ok(_)),
+            "delegate_simple NoDeadlock should pass, got {:?}\n\nSpec:\n{}",
+            result,
+            output.spec
+        );
+    }
+
+    #[test]
+    fn e2e_delegate_csc_verify() {
+        let src = r#"
+state machine Child {
+    state Idle {}
+    state Done [terminal]
+    initial Idle
+    transition Idle -> Done { on finish }
+}
+
+state machine Parent {
+    state Running { child: Child }
+    state Closed [terminal]
+    initial Running
+    transition Running -> Running {
+        on forward(ev: u8)
+        delegate src.child <- ev
+    }
+    transition Running -> Closed {
+        on child_state_changed
+        guard src.child in_state(Done)
+    }
+    verify NoDeadlock
+    verify AllReachClosed
+}
+"#;
+        let (result, output) = check_tla_named(src, "Parent", 2);
+        eprintln!("=== delegate_csc TLA+ ===\n{}", output.spec);
+        eprintln!("=== delegate_csc CFG ===\n{}", output.config);
+        assert!(
+            matches!(result, tla_checker::checker::CheckResult::Ok(_)),
+            "delegate_csc NoDeadlock + AllReachClosed should pass, got {:?}\n\nSpec:\n{}",
+            result,
+            output.spec
+        );
+    }
+
+    #[test]
+    fn e2e_delegate_indexed_verify() {
+        let src = r#"
+state machine PathState {
+    state Active {}
+    state Closed [terminal]
+    initial Active
+    transition Active -> Closed { on close }
+}
+
+state machine Connection {
+    state Open { paths: [PathState; 2] }
+    state Done [terminal]
+    initial Open
+    transition Open -> Open {
+        on close_path(idx: u8, ev: u8)
+        delegate src.paths[idx] <- ev
+    }
+    transition Open -> Done { on shutdown }
+    verify NoDeadlock
+}
+"#;
+        let (result, output) = check_tla_named(src, "Connection", 2);
+        eprintln!("=== delegate_indexed TLA+ ===\n{}", output.spec);
+        eprintln!("=== delegate_indexed CFG ===\n{}", output.config);
+        assert!(
+            matches!(result, tla_checker::checker::CheckResult::Ok(_)),
+            "delegate_indexed NoDeadlock should pass, got {:?}\n\nSpec:\n{}",
+            result,
+            output.spec
+        );
+    }
+
     #[test]
     fn e2e_unreachable_terminal_fail() {
         let (result, output) = check_tla(
