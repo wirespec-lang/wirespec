@@ -1720,4 +1720,53 @@ state machine Connection {
             result
         );
     }
+
+    #[test]
+    fn test_nested_delegate_rejected() {
+        let src = r#"
+state machine Grandchild {
+    state A {}
+    state B [terminal]
+    initial A
+    transition A -> B { on go }
+}
+
+state machine Child {
+    state X { gc: Grandchild }
+    state Y [terminal]
+    initial X
+    transition X -> X {
+        on forward_gc(ev: u8)
+        delegate src.gc <- ev
+    }
+    transition X -> Y { on done }
+}
+
+state machine Parent {
+    state Running { child: Child }
+    state Closed [terminal]
+    initial Running
+    transition Running -> Running {
+        on forward(ev: u8)
+        delegate src.child <- ev
+    }
+    transition Running -> Closed { on shutdown }
+}
+"#;
+        let ast = parse(src).unwrap();
+        let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
+        let parent = sem
+            .state_machines
+            .iter()
+            .find(|s| s.name == "Parent")
+            .unwrap();
+        let result = generate_tlaplus(parent, &sem.state_machines, None);
+        assert!(result.is_err(), "nested delegates should be rejected");
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("nested delegate"),
+            "error should mention nested delegates: {}",
+            err
+        );
+    }
 }

@@ -695,7 +695,7 @@ fn emit_child_dispatch(out: &mut String, child: &ChildSmInfo) {
             .events
             .iter()
             .position(|e| e.event_id == trans.event_id)
-            .unwrap_or(0);
+            .expect("child SM event not found in events list — sema should guarantee this");
         cases.push(format!(
             "child_state = \"{}\" /\\ ev = {} -> \"{}\"",
             trans.src_state_name, event_ordinal, trans.dst_state_name
@@ -752,6 +752,11 @@ fn emit_transitions(out: &mut String, sm: &SemanticStateMachine, children: &[Chi
             let trans = first_trans;
 
             // Check if this is a delegate transition
+            // NOTE: child_state_changed is modeled as a separate TLA+ step (not atomic with
+            // the delegate transition). This is more permissive than the Rust/C backends which
+            // fire child_state_changed atomically within the same dispatch. The 2-step model
+            // is sound for safety and liveness properties: any property that holds in the
+            // 2-step model also holds in the atomic model.
             if let Some(ref delegate) = trans.delegate {
                 let field_name = extract_delegate_field_name(&delegate.target);
                 let index_expr = extract_delegate_index(&delegate.target);
@@ -979,6 +984,9 @@ fn emit_dst_state(
     let dst_state = sm.states.iter().find(|s| s.name == trans.dst_state_name);
     if let Some(dst) = dst_state {
         if actions_override_defaults(dst, &trans.actions) {
+            // Empty children slice is acceptable here: delegate transitions don't have
+            // action blocks that override defaults, so child field types are not resolved
+            // through this path. If this changes, thread children through.
             let all_fields = collect_all_fields(sm, &[]);
             let record = build_inline_record(dst, &all_fields, &trans.actions);
             out.push_str(&format!("{}/\\ sm' = {}\n", indent, record));
@@ -1008,6 +1016,9 @@ fn emit_dst_state_with_indent(
     let dst_state = sm.states.iter().find(|s| s.name == trans.dst_state_name);
     if let Some(dst) = dst_state {
         if actions_override_defaults(dst, &trans.actions) {
+            // Empty children slice is acceptable here: delegate transitions don't have
+            // action blocks that override defaults, so child field types are not resolved
+            // through this path. If this changes, thread children through.
             let all_fields = collect_all_fields(sm, &[]);
             let record = build_inline_record(dst, &all_fields, &trans.actions);
             out.push_str(&format!("{}/\\ sm' = {}\n", indent, record));
