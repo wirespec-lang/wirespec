@@ -893,8 +893,6 @@ fn codegen_indexed_delegate_has_bounds_check() {
     "#;
     let (_, source) = generate_c(src);
 
-    // The generated dispatch code should have a bounds check before indexing into
-    // the paths array, returning WIRESPEC_ERR_BOUNDS on out-of-range index.
     assert!(
         source.contains("WIRESPEC_ERR_BOUNDS"),
         "indexed delegate should emit a bounds check using WIRESPEC_ERR_BOUNDS. Got:\n{source}"
@@ -928,8 +926,6 @@ fn codegen_fill_action_comment_documents_safety() {
     "#;
     let (_, source) = generate_c(src);
 
-    // Fill loop should contain a comment explaining that bounds are
-    // validated at compile time by sema
     assert!(
         source.contains("validated") || source.contains("compile time"),
         "fill loop should have a safety comment about compile-time validation. Got:\n{source}"
@@ -938,10 +934,6 @@ fn codegen_fill_action_comment_documents_safety() {
 
 #[test]
 fn codegen_subscript_expr_documents_bounds_at_call_site() {
-    // The SemanticExpr::Subscript in expr.rs generates bare array[index],
-    // but bounds checking is done at the call site in source.rs.
-    // Verify this is documented in the generated code via the indexed delegate
-    // bounds check (which IS a call site that uses subscript expressions).
     let src = r#"
         state machine PathState {
             state Active {}
@@ -963,7 +955,6 @@ fn codegen_subscript_expr_documents_bounds_at_call_site() {
     "#;
     let (_, source) = generate_c(src);
 
-    // Verify that the bounds check appears BEFORE the array indexing
     let bounds_pos = source.find("WIRESPEC_ERR_BOUNDS");
     let index_pos = source.find("paths[_idx]");
     assert!(
