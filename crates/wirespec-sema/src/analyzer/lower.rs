@@ -1,400 +1,10 @@
-// crates/wirespec-sema/src/analyzer.rs
-//!
-//! Core semantic analyzer for wirespec.
-//! Takes an `AstModule` and a `ComplianceProfile` and produces a `SemanticModule`.
-//!
-//! Two-pass approach:
-//! - Pass 1: register all top-level names in the TypeRegistry
-//! - Pass 2: lower each AST item to Semantic IR
+// crates/wirespec-sema/src/analyzer/lower.rs
+//! Pass 2: AST → Semantic IR lowering.
 
-use wirespec_syntax::ast::*;
-
-use crate::error::*;
-use crate::expr::*;
-use crate::ir::*;
-use crate::profile::ComplianceProfile;
-use crate::resolve::*;
-use crate::types::*;
-use crate::validate::*;
-
-/// Entry point: analyze an AST module and produce semantic IR.
-///
-/// `external_types` provides names and declaration kinds from previously-compiled
-/// modules. These are registered in the `TypeRegistry` before Pass 1 so that
-/// imported types resolve correctly.
-pub fn analyze(
-    ast: &AstModule,
-    profile: ComplianceProfile,
-    external_types: &std::collections::HashMap<String, DeclKind>,
-) -> SemaResult<SemanticModule> {
-    let mut analyzer = Analyzer::new(profile);
-    analyzer.register_external_types(external_types);
-    analyzer.run(ast)
-}
-
-struct Analyzer {
-    registry: TypeRegistry,
-    profile: ComplianceProfile,
-    errors: Vec<SemaError>,
-    warnings: Vec<SemaWarning>,
-    /// External type names and kinds from previously-compiled modules.
-    external_types: std::collections::HashMap<String, DeclKind>,
-    /// ASN.1 extern declarations collected during Pass 1.
-    asn1_externs: Vec<Asn1ExternDecl>,
-    /// Pending ASN.1 hint from the most recent `resolve_type_expr` call.
-    pending_asn1_hint: Option<Asn1Hint>,
-}
+use super::*;
 
 impl Analyzer {
-    fn new(profile: ComplianceProfile) -> Self {
-        // Default endianness is Big; will be overridden by @endian annotation
-        Self {
-            registry: TypeRegistry::new(Endianness::Big),
-            profile,
-            errors: Vec::new(),
-            warnings: Vec::new(),
-            external_types: std::collections::HashMap::new(),
-            asn1_externs: Vec::new(),
-            pending_asn1_hint: None,
-        }
-    }
-
-    fn register_external_types(&mut self, ext: &std::collections::HashMap<String, DeclKind>) {
-        self.external_types = ext.clone();
-    }
-
-    fn first_error(&mut self) -> SemaResult<()> {
-        if self.errors.is_empty() {
-            Ok(())
-        } else {
-            Err(self.errors.remove(0))
-        }
-    }
-
-    fn run(&mut self, ast: &AstModule) -> SemaResult<SemanticModule> {
-        // Determine module name
-        let module_name = ast
-            .module_decl
-            .as_ref()
-            .map(|m| m.name.clone())
-            .unwrap_or_default();
-
-        // Determine endianness from @endian annotation
-        let endianness = self.parse_endianness(ast);
-        self.registry = TypeRegistry::new(endianness);
-
-        // Register external types (from previously-compiled modules)
-        for (name, kind) in &self.external_types {
-            self.registry.register_external(name, *kind);
-        }
-
-        // ── Pass 1: register all declarations ──
-        self.register_all(ast)?;
-
-        // ── Pass 2: lower each item ──
-        let mut consts = Vec::new();
-        let mut enums = Vec::new();
-        let mut varints = Vec::new();
-        let mut packets = Vec::new();
-        let mut frames = Vec::new();
-        let mut capsules = Vec::new();
-        let mut state_machines = Vec::new();
-        let mut static_asserts = Vec::new();
-        let mut item_order = Vec::new();
-        let mut assert_index: usize = 0;
-
-        for item in &ast.items {
-            match item {
-                AstTopItem::Const(c) => {
-                    let sem = self.lower_const(c)?;
-                    item_order.push(sem.const_id.clone());
-                    consts.push(sem);
-                }
-                AstTopItem::Enum(e) => {
-                    let sem = self.lower_enum_decl(e, false)?;
-                    item_order.push(sem.enum_id.clone());
-                    enums.push(sem);
-                }
-                AstTopItem::Flags(f) => {
-                    let sem = self.lower_flags_decl(f)?;
-                    item_order.push(sem.enum_id.clone());
-                    enums.push(sem);
-                }
-                AstTopItem::Type(td) => match &td.body {
-                    AstTypeDeclBody::Alias { .. } => {
-                        // Type aliases are resolved through the registry; no IR node
-                    }
-                    AstTypeDeclBody::Fields { fields } => {
-                        let sem = self.lower_varint_prefix_match(
-                            &td.name,
-                            fields,
-                            &td.annotations,
-                            td.span,
-                        )?;
-                        item_order.push(sem.varint_id.clone());
-                        varints.push(sem);
-                    }
-                },
-                AstTopItem::ContinuationVarInt(cv) => {
-                    let sem = self.lower_continuation_varint(cv);
-                    item_order.push(sem.varint_id.clone());
-                    varints.push(sem);
-                }
-                AstTopItem::Packet(p) => {
-                    let sem = self.lower_packet(p)?;
-                    item_order.push(sem.packet_id.clone());
-                    packets.push(sem);
-                }
-                AstTopItem::Frame(f) => {
-                    let sem = self.lower_frame(f)?;
-                    item_order.push(sem.frame_id.clone());
-                    frames.push(sem);
-                }
-                AstTopItem::Capsule(c) => {
-                    let sem = self.lower_capsule(c)?;
-                    item_order.push(sem.capsule_id.clone());
-                    capsules.push(sem);
-                }
-                AstTopItem::StateMachine(sm) => {
-                    let sem = self.lower_state_machine(sm)?;
-                    item_order.push(sem.sm_id.clone());
-                    state_machines.push(sem);
-                }
-                AstTopItem::StaticAssert(sa) => {
-                    let expr = self.lower_expr(&sa.expr, &[], &[]);
-                    let id = format!("assert:{}", assert_index);
-                    assert_index += 1;
-                    static_asserts.push(SemanticStaticAssert {
-                        assert_id: id.clone(),
-                        expr,
-                        span: sa.span,
-                    });
-                    item_order.push(id);
-                }
-                AstTopItem::ExternAsn1(_) => {
-                    // Already registered in Pass 1
-                }
-            }
-        }
-
-        self.first_error()?;
-
-        // S4: Delegate acyclicity — detect cyclic SM delegation chains
-        {
-            use std::collections::{HashMap, HashSet, VecDeque};
-            let mut edges: HashMap<&str, HashSet<&str>> = HashMap::new();
-            let mut all_names: HashSet<&str> = HashSet::new();
-            for sm in &state_machines {
-                all_names.insert(&sm.name);
-                for state in &sm.states {
-                    for field in &state.fields {
-                        if let Some(ref child) = field.child_sm_name {
-                            edges
-                                .entry(sm.name.as_str())
-                                .or_default()
-                                .insert(child.as_str());
-                        }
-                    }
-                }
-            }
-            let mut in_deg: HashMap<&str, usize> = all_names.iter().map(|&n| (n, 0)).collect();
-            for targets in edges.values() {
-                for &t in targets {
-                    if let Some(d) = in_deg.get_mut(t) {
-                        *d += 1;
-                    }
-                }
-            }
-            let mut queue: VecDeque<&str> = in_deg
-                .iter()
-                .filter(|&(_, &d)| d == 0)
-                .map(|(&n, _)| n)
-                .collect();
-            let mut count = 0;
-            while let Some(node) = queue.pop_front() {
-                count += 1;
-                if let Some(targets) = edges.get(node) {
-                    for &t in targets {
-                        if let Some(d) = in_deg.get_mut(t) {
-                            *d -= 1;
-                            if *d == 0 {
-                                queue.push_back(t);
-                            }
-                        }
-                    }
-                }
-            }
-            if count < all_names.len() {
-                let cycle: Vec<&str> = in_deg
-                    .iter()
-                    .filter(|&(_, &d)| d > 0)
-                    .map(|(&n, _)| n)
-                    .collect();
-                return Err(SemaError::new(
-                    ErrorKind::CyclicDependency,
-                    format!(
-                        "cyclic delegate dependency detected: {}",
-                        cycle.join(" -> ")
-                    ),
-                )
-                .with_hint("state machines cannot form a circular delegation chain"));
-            }
-        }
-
-        Ok(SemanticModule {
-            schema_version: "semantic-ir/v1".to_string(),
-            compliance_profile: self.profile.as_str().to_string(),
-            module_name,
-            module_endianness: endianness,
-            imports: Vec::new(),
-            varints,
-            consts,
-            enums,
-            packets,
-            frames,
-            capsules,
-            state_machines,
-            static_asserts,
-            asn1_externs: self.asn1_externs.clone(),
-            item_order,
-            warnings: std::mem::take(&mut self.warnings),
-        })
-    }
-
-    // ── Endianness ──
-
-    fn parse_endianness(&self, ast: &AstModule) -> Endianness {
-        // Check module-level annotations
-        for ann in &ast.annotations {
-            if ann.name == "endian"
-                && let Some(AstAnnotationArg::Identifier(val)) = ann.args.first()
-            {
-                return match val.as_str() {
-                    "little" => Endianness::Little,
-                    _ => Endianness::Big,
-                };
-            }
-        }
-        // Check item-level annotations (pre-module)
-        for item in &ast.items {
-            if let AstTopItem::Packet(p) = item {
-                for ann in &p.annotations {
-                    if ann.name == "endian"
-                        && let Some(AstAnnotationArg::Identifier(val)) = ann.args.first()
-                    {
-                        return match val.as_str() {
-                            "little" => Endianness::Little,
-                            _ => Endianness::Big,
-                        };
-                    }
-                }
-            }
-        }
-        Endianness::Big
-    }
-
-    // ── Pass 1: registration ──
-
-    fn check_reserved(name: &str) -> SemaResult<()> {
-        const RESERVED_IDENTIFIERS: &[&str] = &[
-            "bool",
-            "null",
-            "fill",
-            "remaining",
-            "in_state",
-            "all",
-            "child_state_changed",
-            "src",
-            "dst",
-        ];
-        if RESERVED_IDENTIFIERS.contains(&name) {
-            return Err(SemaError::new(
-                ErrorKind::ReservedIdentifier,
-                format!("'{name}' is a reserved identifier"),
-            ));
-        }
-        Ok(())
-    }
-
-    fn try_register(&mut self, name: &str, kind: DeclKind) -> SemaResult<()> {
-        Self::check_reserved(name)?;
-        self.registry
-            .register(name, kind)
-            .map_err(|msg| SemaError::new(ErrorKind::DuplicateDefinition, msg))
-    }
-
-    fn register_all(&mut self, ast: &AstModule) -> SemaResult<()> {
-        for item in &ast.items {
-            match item {
-                AstTopItem::Const(c) => {
-                    let val = match &c.value {
-                        AstLiteralValue::Int(v) => *v,
-                        AstLiteralValue::Bool(b) => {
-                            if *b {
-                                1
-                            } else {
-                                0
-                            }
-                        }
-                        AstLiteralValue::String(_) => 0,
-                        AstLiteralValue::Null => 0,
-                    };
-                    self.try_register(&c.name, DeclKind::Const)?;
-                    self.registry.register_const(&c.name, val);
-                }
-                AstTopItem::Enum(e) => {
-                    self.try_register(&e.name, DeclKind::Enum)?;
-                }
-                AstTopItem::Flags(f) => {
-                    self.try_register(&f.name, DeclKind::Flags)?;
-                }
-                AstTopItem::Type(td) => match &td.body {
-                    AstTypeDeclBody::Alias { target } => {
-                        Self::check_reserved(&td.name)?;
-                        let target_name = type_expr_name(target);
-                        self.registry
-                            .register_alias(&td.name, &target_name)
-                            .map_err(|msg| SemaError::new(ErrorKind::DuplicateDefinition, msg))?;
-                    }
-                    AstTypeDeclBody::Fields { .. } => {
-                        // VarInt pattern
-                        self.try_register(&td.name, DeclKind::VarInt)?;
-                    }
-                },
-                AstTopItem::ContinuationVarInt(cv) => {
-                    self.try_register(&cv.name, DeclKind::VarInt)?;
-                }
-                AstTopItem::Packet(p) => {
-                    self.try_register(&p.name, DeclKind::Packet)?;
-                }
-                AstTopItem::Frame(f) => {
-                    self.try_register(&f.name, DeclKind::Frame)?;
-                }
-                AstTopItem::Capsule(c) => {
-                    self.try_register(&c.name, DeclKind::Capsule)?;
-                }
-                AstTopItem::StateMachine(sm) => {
-                    self.try_register(&sm.name, DeclKind::StateMachine)?;
-                }
-                AstTopItem::StaticAssert(_) => {
-                    // Nothing to register
-                }
-                AstTopItem::ExternAsn1(e) => {
-                    self.asn1_externs.push(Asn1ExternDecl {
-                        path: e.path.clone(),
-                        rust_module: e.rust_module.clone(),
-                        type_names: e.type_names.clone(),
-                        span: e.span,
-                    });
-                }
-            }
-        }
-        Ok(())
-    }
-
-    // ── Pass 2: lowering ──
-
-    fn lower_const(&mut self, c: &AstConstDecl) -> SemaResult<SemanticConst> {
+    pub(super) fn lower_const(&mut self, c: &AstConstDecl) -> SemaResult<SemanticConst> {
         let ty = self.resolve_named_type(&c.type_name, c.span)?;
         let value = match &c.value {
             AstLiteralValue::Int(v) => SemanticLiteral::Int(*v),
@@ -411,7 +21,11 @@ impl Analyzer {
         })
     }
 
-    fn lower_enum_decl(&mut self, e: &AstEnumDecl, is_flags: bool) -> SemaResult<SemanticEnum> {
+    pub(super) fn lower_enum_decl(
+        &mut self,
+        e: &AstEnumDecl,
+        is_flags: bool,
+    ) -> SemaResult<SemanticEnum> {
         let underlying_type = self.resolve_named_type(&e.underlying_type, e.span)?;
         // Validate that enum underlying type is an integer primitive
         if !is_integer_underlying(&underlying_type) {
@@ -487,7 +101,7 @@ impl Analyzer {
         })
     }
 
-    fn lower_flags_decl(&mut self, f: &AstFlagsDecl) -> SemaResult<SemanticEnum> {
+    pub(super) fn lower_flags_decl(&mut self, f: &AstFlagsDecl) -> SemaResult<SemanticEnum> {
         let underlying_type = self.resolve_named_type(&f.underlying_type, f.span)?;
         // Validate that flags underlying type is an integer primitive
         if !is_integer_underlying(&underlying_type) {
@@ -563,7 +177,7 @@ impl Analyzer {
         })
     }
 
-    fn lower_varint_prefix_match(
+    pub(super) fn lower_varint_prefix_match(
         &mut self,
         name: &str,
         fields: &[AstFieldDef],
@@ -662,7 +276,10 @@ impl Analyzer {
         })
     }
 
-    fn lower_continuation_varint(&self, cv: &AstContinuationVarIntDecl) -> SemanticVarInt {
+    pub(super) fn lower_continuation_varint(
+        &self,
+        cv: &AstContinuationVarIntDecl,
+    ) -> SemanticVarInt {
         let byte_order = match cv.byte_order.as_str() {
             "little" => Endianness::Little,
             _ => Endianness::Big,
@@ -682,7 +299,7 @@ impl Analyzer {
         }
     }
 
-    fn lower_packet(&mut self, p: &AstPacketDecl) -> SemaResult<SemanticPacket> {
+    pub(super) fn lower_packet(&mut self, p: &AstPacketDecl) -> SemaResult<SemanticPacket> {
         let packet_id = format!("packet:{}", p.name);
         let scope_id = packet_id.clone();
 
@@ -794,7 +411,7 @@ impl Analyzer {
         })
     }
 
-    fn lower_frame(&mut self, f: &AstFrameDecl) -> SemaResult<SemanticFrame> {
+    pub(super) fn lower_frame(&mut self, f: &AstFrameDecl) -> SemaResult<SemanticFrame> {
         let frame_id = format!("frame:{}", f.name);
         let tag_type = self.resolve_named_type(&f.tag_type, f.span)?;
 
@@ -843,7 +460,7 @@ impl Analyzer {
         })
     }
 
-    fn lower_capsule(&mut self, c: &AstCapsuleDecl) -> SemaResult<SemanticCapsule> {
+    pub(super) fn lower_capsule(&mut self, c: &AstCapsuleDecl) -> SemaResult<SemanticCapsule> {
         let capsule_id = format!("capsule:{}", c.name);
         let scope_id = capsule_id.clone();
 
@@ -981,7 +598,7 @@ impl Analyzer {
         })
     }
 
-    fn lower_variant_scope(
+    pub(super) fn lower_variant_scope(
         &mut self,
         branch: &AstFrameBranch,
         owner_id: &str,
@@ -1104,7 +721,7 @@ impl Analyzer {
         })
     }
 
-    fn lower_field(
+    pub(super) fn lower_field(
         &mut self,
         field: &AstFieldDef,
         scope_id: &str,
@@ -1200,7 +817,7 @@ impl Analyzer {
 
     /// Validate that bytes[length:]/bytes[length_or_remaining:] and array count
     /// expressions that reference a field use an integer-like type (spec §4.1).
-    fn validate_integer_like_size_ref(
+    pub(super) fn validate_integer_like_size_ref(
         ast_type_expr: &AstTypeExpr,
         lowered_fields: &[SemanticField],
     ) -> SemaResult<()> {
@@ -1262,7 +879,7 @@ impl Analyzer {
         }
     }
 
-    fn lower_derived(
+    pub(super) fn lower_derived(
         &mut self,
         d: &AstDerivedField,
         scope_id: &str,
@@ -1281,7 +898,7 @@ impl Analyzer {
         })
     }
 
-    fn lower_require(
+    pub(super) fn lower_require(
         &mut self,
         r: &AstRequireClause,
         scope_id: &str,
@@ -1299,7 +916,7 @@ impl Analyzer {
 
     // ── Type resolution ──
 
-    fn resolve_named_type(
+    pub(super) fn resolve_named_type(
         &mut self,
         name: &str,
         span: Option<wirespec_syntax::span::Span>,
@@ -1375,7 +992,7 @@ impl Analyzer {
         }
     }
 
-    fn resolve_type_expr(
+    pub(super) fn resolve_type_expr(
         &mut self,
         texpr: &AstTypeExpr,
     ) -> SemaResult<(SemanticType, FieldPresence)> {
@@ -1524,7 +1141,7 @@ impl Analyzer {
 
     // ── Expression lowering ──
 
-    fn lower_expr(
+    pub(super) fn lower_expr(
         &self,
         expr: &AstExpr,
         declared: &[String],
@@ -1690,7 +1307,7 @@ impl Analyzer {
 
     // ── State machine ──
 
-    fn lower_state_machine(
+    pub(super) fn lower_state_machine(
         &mut self,
         sm: &AstStateMachineDecl,
     ) -> SemaResult<SemanticStateMachine> {
@@ -2280,7 +1897,7 @@ impl Analyzer {
         })
     }
 
-    fn lower_verify_decl(vd: &AstVerifyDecl) -> SemaResult<SemanticVerifyDecl> {
+    pub(super) fn lower_verify_decl(vd: &AstVerifyDecl) -> SemaResult<SemanticVerifyDecl> {
         match vd {
             AstVerifyDecl::BuiltIn { name, .. } => match name.as_str() {
                 "NoDeadlock" => Ok(SemanticVerifyDecl::NoDeadlock),
@@ -2355,7 +1972,10 @@ impl Analyzer {
     /// Resolve a type expression used in state fields (simplified: only Named types).
     /// Unlike `resolve_named_type`, this allows `DeclKind::StateMachine` references
     /// (child SM fields in parent SM states).
-    fn resolve_state_field_type(&mut self, texpr: &AstTypeExpr) -> SemaResult<SemanticType> {
+    pub(super) fn resolve_state_field_type(
+        &mut self,
+        texpr: &AstTypeExpr,
+    ) -> SemaResult<SemanticType> {
         match texpr {
             AstTypeExpr::Named { name, span } => {
                 // Try resolve_named_type first; if it fails because the type is a
@@ -2412,333 +2032,5 @@ impl Analyzer {
                 Ok(ty)
             }
         }
-    }
-}
-
-/// Convert bare NameRef/ValueRef nodes that match event parameter names into
-/// `TransitionPeerRef { peer: EventParam }` so the C backend emits
-/// `event->{event_snake}.{param}` instead of `sm->{state}.{param}`.
-fn resolve_event_params(expr: &mut SemanticExpr, param_names: &[String]) {
-    match expr {
-        SemanticExpr::ValueRef { reference }
-            if reference.kind == ValueRefKind::Field
-                && param_names.contains(&reference.value_id) =>
-        {
-            let name = reference.value_id.clone();
-            *expr = SemanticExpr::TransitionPeerRef {
-                reference: TransitionPeerRef {
-                    peer: TransitionPeerKind::EventParam,
-                    event_param_id: None,
-                    path: vec![name],
-                },
-            };
-        }
-        SemanticExpr::Binary { left, right, .. } => {
-            resolve_event_params(left, param_names);
-            resolve_event_params(right, param_names);
-        }
-        SemanticExpr::Unary { operand, .. } => {
-            resolve_event_params(operand, param_names);
-        }
-        SemanticExpr::Subscript { base, index } => {
-            resolve_event_params(base, param_names);
-            resolve_event_params(index, param_names);
-        }
-        SemanticExpr::StateConstructor { args, .. } => {
-            for arg in args {
-                resolve_event_params(arg, param_names);
-            }
-        }
-        SemanticExpr::Fill { value, count } => {
-            resolve_event_params(value, param_names);
-            resolve_event_params(count, param_names);
-        }
-        SemanticExpr::InState { expr: inner, .. } => {
-            resolve_event_params(inner, param_names);
-        }
-        SemanticExpr::All { collection, .. } => {
-            resolve_event_params(collection, param_names);
-        }
-        SemanticExpr::Slice { base, start, end } => {
-            resolve_event_params(base, param_names);
-            resolve_event_params(start, param_names);
-            resolve_event_params(end, param_names);
-        }
-        SemanticExpr::Coalesce { expr: e, default } => {
-            resolve_event_params(e, param_names);
-            resolve_event_params(default, param_names);
-        }
-        _ => {}
-    }
-}
-
-/// Resolve empty `sm_name`/`sm_id` in InState/All expressions by looking up
-/// the referenced field's child SM type from the source states.
-fn resolve_guard_sm_names(expr: &mut SemanticExpr, states: &[SemanticState]) {
-    match expr {
-        SemanticExpr::InState {
-            expr: inner,
-            sm_id,
-            sm_name,
-            ..
-        } if sm_name.is_empty() => {
-            // Try to resolve from the inner expression's field reference
-            if let Some(child_sm) = extract_child_sm_name(inner, states) {
-                *sm_name = child_sm.clone();
-                *sm_id = format!("sm:{child_sm}");
-            }
-            resolve_guard_sm_names(inner, states);
-        }
-        SemanticExpr::All {
-            collection,
-            sm_id,
-            sm_name,
-            ..
-        } if sm_name.is_empty() => {
-            // For All, the collection is typically a Slice whose base is a field ref
-            let field_expr = match collection.as_ref() {
-                SemanticExpr::Slice { base, .. } => Some(base.as_ref()),
-                _ => None,
-            };
-            if let Some(fe) = field_expr
-                && let Some(child_sm) = extract_child_sm_name(fe, states)
-            {
-                *sm_name = child_sm.clone();
-                *sm_id = format!("sm:{child_sm}");
-            }
-            resolve_guard_sm_names(collection, states);
-        }
-        SemanticExpr::Binary { left, right, .. } => {
-            resolve_guard_sm_names(left, states);
-            resolve_guard_sm_names(right, states);
-        }
-        SemanticExpr::Unary { operand, .. } => {
-            resolve_guard_sm_names(operand, states);
-        }
-        _ => {}
-    }
-}
-
-/// Extract the child SM name from a field reference expression by looking
-/// up the field in the state definitions.
-fn extract_child_sm_name(expr: &SemanticExpr, states: &[SemanticState]) -> Option<String> {
-    if let SemanticExpr::TransitionPeerRef { reference } = expr
-        && let Some(field_name) = reference.path.first()
-    {
-        // Search all states for this field
-        for state in states {
-            for field in &state.fields {
-                if &field.name == field_name {
-                    return field.child_sm_name.clone();
-                }
-            }
-        }
-    }
-    None
-}
-
-// ── Helper functions ──
-
-fn binop_to_string(op: &BinOp) -> String {
-    match op {
-        BinOp::Add => "+",
-        BinOp::Sub => "-",
-        BinOp::Mul => "*",
-        BinOp::Div => "/",
-        BinOp::Mod => "%",
-        BinOp::BitAnd => "&",
-        BinOp::BitOr => "|",
-        BinOp::BitXor => "^",
-        BinOp::Shl => "<<",
-        BinOp::Shr => ">>",
-        BinOp::Eq => "==",
-        BinOp::Ne => "!=",
-        BinOp::Lt => "<",
-        BinOp::Le => "<=",
-        BinOp::Gt => ">",
-        BinOp::Ge => ">=",
-        BinOp::And => "and",
-        BinOp::Or => "or",
-    }
-    .to_string()
-}
-
-fn unaryop_to_string(op: &UnaryOp) -> String {
-    match op {
-        UnaryOp::Not => "!",
-        UnaryOp::Neg => "-",
-    }
-    .to_string()
-}
-
-/// Check if a SemanticType is an integer primitive suitable as an enum/flags underlying type.
-fn is_integer_underlying(ty: &SemanticType) -> bool {
-    matches!(
-        ty,
-        SemanticType::Primitive {
-            wire: PrimitiveWireType::U8
-                | PrimitiveWireType::U16
-                | PrimitiveWireType::U24
-                | PrimitiveWireType::U32
-                | PrimitiveWireType::U64
-                | PrimitiveWireType::I8
-                | PrimitiveWireType::I16
-                | PrimitiveWireType::I32
-                | PrimitiveWireType::I64,
-            ..
-        }
-    )
-}
-
-fn extract_derive_traits(annotations: &[AstAnnotation]) -> Vec<DeriveTrait> {
-    let mut traits = Vec::new();
-    for ann in annotations {
-        if ann.name == "derive" {
-            for arg in &ann.args {
-                if let AstAnnotationArg::Identifier(name) = arg {
-                    match name.as_str() {
-                        "debug" => traits.push(DeriveTrait::Debug),
-                        "compare" => traits.push(DeriveTrait::Compare),
-                        _ => {}
-                    }
-                }
-            }
-        }
-    }
-    traits
-}
-
-fn lower_pattern(pat: &AstPattern) -> SemanticPattern {
-    match pat {
-        AstPattern::Value { value, .. } => SemanticPattern::Exact { value: *value },
-        AstPattern::RangeInclusive { start, end, .. } => SemanticPattern::RangeInclusive {
-            start: *start,
-            end: *end,
-        },
-        AstPattern::Wildcard { .. } => SemanticPattern::Wildcard,
-    }
-}
-
-/// Extract the "name" string from a type expression for alias registration.
-fn type_expr_name(texpr: &AstTypeExpr) -> String {
-    match texpr {
-        AstTypeExpr::Named { name, .. } => name.clone(),
-        AstTypeExpr::Bits { width, .. } => format!("bits[{}]", width),
-        AstTypeExpr::Bytes { .. } => "bytes".to_string(),
-        AstTypeExpr::Array { element_type, .. } => {
-            format!("[{}]", type_expr_name(element_type))
-        }
-        AstTypeExpr::Optional { inner_type, .. } => type_expr_name(inner_type),
-        AstTypeExpr::Match { .. } => "match".to_string(),
-        AstTypeExpr::Asn1 { type_name, .. } => format!("asn1({})", type_name),
-    }
-}
-
-/// Extract base name from an expression (for MemberAccess)
-fn extract_base_name(expr: &AstExpr) -> String {
-    match expr {
-        AstExpr::NameRef { name, .. } => name.clone(),
-        AstExpr::MemberAccess { base, field, .. } => {
-            format!("{}.{}", extract_base_name(base), field)
-        }
-        _ => "_".to_string(),
-    }
-}
-
-/// Recursively collect all NameRef names from a type expression (for forward ref checking).
-fn collect_type_expr_refs(texpr: &AstTypeExpr, out: &mut Vec<String>) {
-    match texpr {
-        AstTypeExpr::Named { .. } => {
-            // Named types are resolved through the registry, not field refs
-        }
-        AstTypeExpr::Bits { .. } => {}
-        AstTypeExpr::Bytes { size_expr, .. } => {
-            if let Some(expr) = size_expr {
-                collect_expr_refs(expr, out);
-            }
-        }
-        AstTypeExpr::Array {
-            element_type,
-            count,
-            within_expr,
-            ..
-        } => {
-            collect_type_expr_refs(element_type, out);
-            match count {
-                AstArrayCount::Expr(e) => collect_expr_refs(e, out),
-                AstArrayCount::Fill => {}
-            }
-            if let Some(w) = within_expr {
-                collect_expr_refs(w, out);
-            }
-        }
-        AstTypeExpr::Optional {
-            condition,
-            inner_type,
-            ..
-        } => {
-            collect_expr_refs(condition, out);
-            collect_type_expr_refs(inner_type, out);
-        }
-        AstTypeExpr::Match { branches, .. } => {
-            for b in branches {
-                collect_type_expr_refs(&b.result_type, out);
-            }
-        }
-        AstTypeExpr::Asn1 { length, .. } => {
-            if let Asn1Length::Expr(expr) = length {
-                collect_expr_refs(expr, out);
-            }
-        }
-    }
-}
-
-/// Recursively collect all NameRef names from an expression.
-fn collect_expr_refs(expr: &AstExpr, out: &mut Vec<String>) {
-    match expr {
-        AstExpr::NameRef { name, .. } => {
-            out.push(name.clone());
-        }
-        AstExpr::Binary { left, right, .. } => {
-            collect_expr_refs(left, out);
-            collect_expr_refs(right, out);
-        }
-        AstExpr::Unary { operand, .. } => {
-            collect_expr_refs(operand, out);
-        }
-        AstExpr::MemberAccess { base, .. } => {
-            collect_expr_refs(base, out);
-        }
-        AstExpr::Coalesce { expr, default, .. } => {
-            collect_expr_refs(expr, out);
-            collect_expr_refs(default, out);
-        }
-        AstExpr::Subscript { base, index, .. } => {
-            collect_expr_refs(base, out);
-            collect_expr_refs(index, out);
-        }
-        AstExpr::Fill { value, count, .. } => {
-            collect_expr_refs(value, out);
-            collect_expr_refs(count, out);
-        }
-        AstExpr::Slice {
-            base, start, end, ..
-        } => {
-            collect_expr_refs(base, out);
-            collect_expr_refs(start, out);
-            collect_expr_refs(end, out);
-        }
-        AstExpr::InState { expr, .. } => {
-            collect_expr_refs(expr, out);
-        }
-        AstExpr::All { collection, .. } => {
-            collect_expr_refs(collection, out);
-        }
-        AstExpr::StateConstructor { args, .. } => {
-            for a in args {
-                collect_expr_refs(a, out);
-            }
-        }
-        AstExpr::Int { .. } | AstExpr::Bool { .. } | AstExpr::Null { .. } => {}
     }
 }
