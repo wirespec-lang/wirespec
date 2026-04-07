@@ -122,7 +122,7 @@ VS Code extension with syntax highlighting, completion, hover, and diagnostics: 
 | ~~v0.1.0~~ | Wire formats, state machines, C/Rust codegen |
 | ~~v0.2.0~~ | ASN.1 / rasn integration |
 | ~~v0.3.0~~ | TLA+ bounded verification |
-| v0.4.0 | Delegate SM TLA+ support, crates.io publish |
+| ~~v0.4.0~~ | Delegate SM TLA+ support, crates.io publish |
 
 ## License
 
