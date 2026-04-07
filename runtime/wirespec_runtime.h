@@ -365,7 +365,7 @@ static inline uint16_t wirespec_internet_checksum(
 static inline uint16_t wirespec_internet_checksum_compute(
     uint8_t *buf, size_t len, size_t cksum_offset)
 {
-    if (cksum_offset + 2 > len) return 0;
+    if (cksum_offset > len || len - cksum_offset < 2) return 0;
     /* Zero the checksum field */
     buf[cksum_offset] = 0;
     buf[cksum_offset + 1] = 0;
@@ -441,7 +441,7 @@ static inline uint32_t wirespec_crc32_verify(
 static inline uint32_t wirespec_crc32_compute(
     uint8_t *buf, size_t len, size_t cksum_offset)
 {
-    if (cksum_offset + 4 > len) return 0;
+    if (cksum_offset > len || len - cksum_offset < 4) return 0;
     memset(buf + cksum_offset, 0, 4);
     return wirespec_crc32_verify(buf, len, cksum_offset, 4);
 }
@@ -509,7 +509,7 @@ static inline uint32_t wirespec_crc32c_verify(
 static inline uint32_t wirespec_crc32c_compute(
     uint8_t *buf, size_t len, size_t cksum_offset)
 {
-    if (cksum_offset + 4 > len) return 0;
+    if (cksum_offset > len || len - cksum_offset < 4) return 0;
     memset(buf + cksum_offset, 0, 4);
     return wirespec_crc32c_verify(buf, len, cksum_offset, 4);
 }
@@ -543,7 +543,7 @@ static inline uint16_t wirespec_fletcher16_verify(
 static inline uint16_t wirespec_fletcher16_compute(
     uint8_t *buf, size_t len, size_t cksum_offset)
 {
-    if (cksum_offset + 2 > len) return 0;
+    if (cksum_offset > len || len - cksum_offset < 2) return 0;
     buf[cksum_offset] = 0;
     buf[cksum_offset + 1] = 0;
     return wirespec_fletcher16_verify(buf, len, cksum_offset, 2);
