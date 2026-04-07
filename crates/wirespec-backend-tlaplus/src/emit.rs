@@ -157,6 +157,11 @@ pub fn emit_spec(
     // Init predicate
     emit_init(&mut out, sm, &children);
 
+    // Child dispatch operators
+    for child in &children {
+        emit_child_dispatch(&mut out, child);
+    }
+
     // Transition actions
     emit_transitions(&mut out, sm, &children);
 
@@ -671,8 +676,72 @@ fn compute_transition_groups(sm: &SemanticStateMachine) -> Vec<TransitionGroup> 
     groups
 }
 
+/// Emit the dispatch operator for a child state machine.
+/// Maps (child_state, event_ordinal) pairs to new child states.
+fn emit_child_dispatch(out: &mut String, child: &ChildSmInfo) {
+    let child_sm = &child.child_sm;
+    out.push_str(&format!(
+        "\\* Dispatch operator for child SM {}\n",
+        child_sm.name
+    ));
+    out.push_str(&format!("{}Dispatch(child_state, ev) ==\n", child_sm.name));
+
+    // Map each transition to a CASE arm, using event ordinal
+    // Events are numbered by their order in child_sm.events
+    let mut cases: Vec<String> = Vec::new();
+    for trans in &child_sm.transitions {
+        // Find the event ordinal
+        let event_ordinal = child_sm
+            .events
+            .iter()
+            .position(|e| e.event_id == trans.event_id)
+            .unwrap_or(0);
+        cases.push(format!(
+            "child_state = \"{}\" /\\ ev = {} -> \"{}\"",
+            trans.src_state_name, event_ordinal, trans.dst_state_name
+        ));
+    }
+
+    if cases.is_empty() {
+        out.push_str("    \"INVALID\"\n\n");
+    } else {
+        for (i, case) in cases.iter().enumerate() {
+            if i == 0 {
+                out.push_str(&format!("    CASE {}\n", case));
+            } else {
+                out.push_str(&format!("      [] {}\n", case));
+            }
+        }
+        out.push_str("      [] OTHER -> \"INVALID\"\n\n");
+    }
+}
+
+/// Extract the child field name from a delegate target expression.
+fn extract_delegate_field_name(target: &SemanticExpr) -> Option<String> {
+    match target {
+        SemanticExpr::TransitionPeerRef { reference } => {
+            if reference.peer == TransitionPeerKind::Src {
+                reference.path.first().cloned()
+            } else {
+                None
+            }
+        }
+        SemanticExpr::Subscript { base, .. } => extract_delegate_field_name(base),
+        _ => None,
+    }
+}
+
+/// Check if a delegate target expression has an index subscript.
+fn extract_delegate_index(target: &SemanticExpr) -> Option<Box<SemanticExpr>> {
+    if let SemanticExpr::Subscript { index, .. } = target {
+        Some(index.clone())
+    } else {
+        None
+    }
+}
+
 /// Emit transition actions, handling guarded groups as disjunctions.
-fn emit_transitions(out: &mut String, sm: &SemanticStateMachine, _children: &[ChildSmInfo]) {
+fn emit_transitions(out: &mut String, sm: &SemanticStateMachine, children: &[ChildSmInfo]) {
     let groups = compute_transition_groups(sm);
 
     for group in &groups {
@@ -681,6 +750,63 @@ fn emit_transitions(out: &mut String, sm: &SemanticStateMachine, _children: &[Ch
         if group.indices.len() == 1 {
             // Single transition -- emit normally
             let trans = first_trans;
+
+            // Check if this is a delegate transition
+            if let Some(ref delegate) = trans.delegate {
+                let field_name = extract_delegate_field_name(&delegate.target);
+                let index_expr = extract_delegate_index(&delegate.target);
+                if let Some(ref fname) = field_name
+                    && let Some(child) = children.iter().find(|c| c.field_name == *fname)
+                {
+                    // Comment
+                    out.push_str(&format!(
+                        "\\* delegate transition {} -> {} {{ on {} }}\n",
+                        trans.src_state_name, trans.dst_state_name, trans.event_name
+                    ));
+
+                    out.push_str(&format!("{} ==\n", group.action_name));
+
+                    // Source state guard
+                    out.push_str(&format!("    /\\ sm.tag = \"{}\"\n", trans.src_state_name));
+
+                    if child.is_array {
+                        // Array child: existentially quantify over index and event
+                        let idx_var = if let Some(ref ie) = index_expr {
+                            expr_to_tla(ie)
+                        } else {
+                            "idx".to_string()
+                        };
+                        out.push_str(&format!(
+                            "    /\\ \\E {} \\in 1..Len(sm.{}), ev \\in BoundedNat:\n",
+                            idx_var, fname
+                        ));
+                        out.push_str(&format!(
+                            "        /\\ LET new_child == {}Dispatch(sm.{}[{}], ev)\n",
+                            child.child_sm.name, fname, idx_var
+                        ));
+                        out.push_str("           IN /\\ new_child /= \"INVALID\"\n");
+                        out.push_str(&format!(
+                            "              /\\ sm' = [sm EXCEPT !.{}[{}] = new_child]\n",
+                            fname, idx_var
+                        ));
+                    } else {
+                        // Scalar child: existentially quantify over event
+                        out.push_str("    /\\ \\E ev \\in BoundedNat:\n");
+                        out.push_str(&format!(
+                            "        /\\ LET new_child == {}Dispatch(sm.{}, ev)\n",
+                            child.child_sm.name, fname
+                        ));
+                        out.push_str("           IN /\\ new_child /= \"INVALID\"\n");
+                        out.push_str(&format!(
+                            "              /\\ sm' = [sm EXCEPT !.{} = new_child]\n",
+                            fname
+                        ));
+                    }
+
+                    out.push('\n');
+                    continue;
+                }
+            }
 
             // Comment
             out.push_str(&format!(
