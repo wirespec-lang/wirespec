@@ -275,10 +275,6 @@ fn emit_module(
     }
 }
 
-// TODO: ASN.1 preprocessing currently only scans the entry .wspec file for
-// `extern asn1` declarations. Imported modules that also reference ASN.1 files
-// are not discovered here. Fixing this would require either a multi-pass
-// pipeline or moving ASN.1 discovery into the main compilation loop.
 fn preprocess_asn1(
     input: &std::path::Path,
     include_paths: &[PathBuf],
@@ -295,73 +291,78 @@ fn preprocess_asn1(
         use crate::asn1_compile;
         use crate::pipeline::{Asn1ModuleInfo, Asn1ModuleMap};
 
-        // Read and parse the .wspec source to find extern asn1 declarations
-        let source = match std::fs::read_to_string(input) {
-            Ok(s) => s,
-            Err(_) => return Asn1ModuleMap::default(), // will fail later in compile()
-        };
-        let ast = match wirespec_syntax::parse(&source) {
-            Ok(a) => a,
+        // Resolve all transitive dependencies so we discover extern asn1
+        // declarations in imported modules, not just the entry file.
+        let resolved = match crate::resolve::resolve(input, include_paths) {
+            Ok(r) => r,
             Err(_) => return Asn1ModuleMap::default(), // will fail later in compile()
         };
 
-        let wspec_dir = input.parent().unwrap_or(std::path::Path::new("."));
         let mut map = Asn1ModuleMap::default();
 
-        for item in &ast.items {
-            if let wirespec_syntax::ast::AstTopItem::ExternAsn1(ext) = item {
-                // Skip if user already provided use clause
-                if ext.rust_module.is_some() {
-                    continue;
-                }
+        for module in &resolved {
+            let wspec_dir = module.path.parent().unwrap_or(std::path::Path::new("."));
 
-                // Resolve .asn1 path
-                let asn1_path = resolve_asn1_path(&ext.path, wspec_dir, include_paths);
-                let asn1_path = match asn1_path {
-                    Some(p) => p,
-                    None => {
-                        eprintln!("error: ASN.1 file '{}' not found", ext.path);
-                        process::exit(1);
+            for item in &module.ast.items {
+                if let wirespec_syntax::ast::AstTopItem::ExternAsn1(ext) = item {
+                    // Skip if user already provided use clause
+                    if ext.rust_module.is_some() {
+                        continue;
                     }
-                };
 
-                // Compile with rasn-compiler
-                let result = match asn1_compile::compile_asn1(&asn1_path) {
-                    Ok(r) => r,
-                    Err(e) => {
+                    // Skip if we already processed this ASN.1 file (shared dep)
+                    if map.modules.contains_key(&ext.path) {
+                        continue;
+                    }
+
+                    // Resolve .asn1 path
+                    let asn1_path = resolve_asn1_path(&ext.path, wspec_dir, include_paths);
+                    let asn1_path = match asn1_path {
+                        Some(p) => p,
+                        None => {
+                            eprintln!("error: ASN.1 file '{}' not found", ext.path);
+                            process::exit(1);
+                        }
+                    };
+
+                    // Compile with rasn-compiler
+                    let result = match asn1_compile::compile_asn1(&asn1_path) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            eprintln!("error: {}", e);
+                            process::exit(1);
+                        }
+                    };
+
+                    // Validate declared types
+                    if let Err(e) =
+                        asn1_compile::validate_types(&ext.type_names, &result.type_names, &ext.path)
+                    {
                         eprintln!("error: {}", e);
                         process::exit(1);
                     }
-                };
 
-                // Validate declared types
-                if let Err(e) =
-                    asn1_compile::validate_types(&ext.type_names, &result.type_names, &ext.path)
-                {
-                    eprintln!("error: {}", e);
-                    process::exit(1);
-                }
+                    // Write generated ASN.1 Rust file to output directory
+                    if let Err(e) = std::fs::create_dir_all(output_dir) {
+                        eprintln!("error: cannot create output directory: {e}");
+                        process::exit(1);
+                    }
+                    let out_file = output_dir.join(format!("{}.rs", result.module_name));
+                    if let Err(e) = std::fs::write(&out_file, &result.source) {
+                        eprintln!("error: cannot write {}: {e}", out_file.display());
+                        process::exit(1);
+                    }
+                    eprintln!("  wrote {}", out_file.display());
 
-                // Write generated ASN.1 Rust file to output directory
-                if let Err(e) = std::fs::create_dir_all(output_dir) {
-                    eprintln!("error: cannot create output directory: {e}");
-                    process::exit(1);
+                    // Store in map for pipeline injection
+                    map.modules.insert(
+                        ext.path.clone(),
+                        Asn1ModuleInfo {
+                            module_name: result.module_name.clone(),
+                            source: result.source,
+                        },
+                    );
                 }
-                let out_file = output_dir.join(format!("{}.rs", result.module_name));
-                if let Err(e) = std::fs::write(&out_file, &result.source) {
-                    eprintln!("error: cannot write {}: {e}", out_file.display());
-                    process::exit(1);
-                }
-                eprintln!("  wrote {}", out_file.display());
-
-                // Store in map for pipeline injection
-                map.modules.insert(
-                    ext.path.clone(),
-                    Asn1ModuleInfo {
-                        module_name: result.module_name.clone(),
-                        source: result.source,
-                    },
-                );
             }
         }
 
