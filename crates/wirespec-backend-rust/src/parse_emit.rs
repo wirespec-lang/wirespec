@@ -282,7 +282,11 @@ fn emit_bitgroup_parse(
         if let Some(ref mbg) = f.bitgroup_member
             && mbg.group_id == group_id
         {
-            let mask = (1u64 << mbg.member_width_bits) - 1;
+            let mask = if mbg.member_width_bits >= 64 {
+                u64::MAX
+            } else {
+                (1u64 << mbg.member_width_bits) - 1
+            };
             let shift = mbg.member_offset_bits;
             let target_type = wire_type_to_rust(&f.wire_type);
             let field_name = rust_ident(&f.name);
@@ -321,15 +325,31 @@ fn emit_array_parse(
         emit_array_element_read_indexed(out, f, arr, indent, "_i", cursor_var);
         out.push_str(&format!("{indent}}}\n"));
     } else {
+        // [T; fill] — parse until cursor exhausted
+        // If within_expr is set, create a sub-cursor bounded by that expression
+        let (actual_cursor, needs_close) = if let Some(ref within_expr) = arr.within_expr {
+            let within_str =
+                expr_to_rust_with_field_aliases(within_expr, &ExprContext::Parse, field_aliases);
+            out.push_str(&format!(
+                "{indent}let mut _arr_sub = {cursor_var}.sub_cursor({within_str} as usize)?;\n"
+            ));
+            ("_arr_sub", true)
+        } else {
+            (cursor_var, false)
+        };
+        let _ = needs_close; // used only for clarity
+
         out.push_str(&format!(
             "{indent}let mut {field_name} = std::array::from_fn(|_| Default::default());\n"
         ));
         out.push_str(&format!("{indent}let mut {count_name}: usize = 0;\n"));
-        out.push_str(&format!("{indent}while {cursor_var}.remaining() > 0 {{\n"));
+        out.push_str(&format!(
+            "{indent}while {actual_cursor}.remaining() > 0 {{\n"
+        ));
         out.push_str(&format!(
             "{indent}    if {count_name} >= {max_elems} {{ return Err(Error::Capacity); }}\n"
         ));
-        emit_array_element_read_indexed(out, f, arr, indent, &count_name, cursor_var);
+        emit_array_element_read_indexed(out, f, arr, indent, &count_name, actual_cursor);
         out.push_str(&format!("{indent}    {count_name} += 1;\n"));
         out.push_str(&format!("{indent}}}\n"));
     }

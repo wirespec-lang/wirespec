@@ -1234,3 +1234,53 @@ fn fuzz_many_fields_no_panic() {
     let input = format!("packet BigPacket {{ {fields} }}");
     let _ = wirespec_syntax::parse(&input);
 }
+
+// ══════════════════════════════════════════════════════════════════════
+// C1: Parser integer cast overflow validation
+// ══════════════════════════════════════════════════════════════════════
+
+#[test]
+fn bits_width_overflow_u16() {
+    // bits[65537] should fail — 65537 > u16::MAX, would silently truncate to 1
+    let src = "packet Foo { x: bits[65537] }";
+    let result = wirespec_syntax::parse(src);
+    assert!(result.is_err(), "bits[65537] should produce a parse error");
+}
+
+#[test]
+fn bits_width_zero() {
+    // bits[0] should fail — width must be >= 1
+    let src = "packet Foo { x: bits[0] }";
+    let result = wirespec_syntax::parse(src);
+    assert!(result.is_err(), "bits[0] should produce a parse error");
+}
+
+#[test]
+fn bits_width_max_u16_ok() {
+    // bits[65535] should be accepted — max u16 value
+    let src = "packet Foo { x: bits[65535] }";
+    let result = wirespec_syntax::parse(src);
+    assert!(result.is_ok(), "bits[65535] should parse successfully");
+}
+
+#[test]
+fn varint_value_bits_overflow() {
+    // value_bits: 256 should fail — 256 > u8::MAX
+    // Test the continuation varint directly:
+    let src2 = "continuation varint BigVarInt { value_bits: 256, max_bytes: 8 }";
+    let result = wirespec_syntax::parse(src2);
+    assert!(
+        result.is_err(),
+        "value_bits: 256 should produce a parse error"
+    );
+}
+
+#[test]
+fn varint_max_bytes_overflow() {
+    let src = "continuation varint BigVarInt { value_bits: 7, max_bytes: 256 }";
+    let result = wirespec_syntax::parse(src);
+    assert!(
+        result.is_err(),
+        "max_bytes: 256 should produce a parse error"
+    );
+}

@@ -622,10 +622,24 @@ impl Parser {
                     continuation_bit = val;
                 }
                 "value_bits" => {
-                    value_bits = self.parse_integer()? as u8;
+                    let raw = self.parse_integer()?;
+                    if raw < 0 || raw > u8::MAX as i64 {
+                        return Err(self.error(format!(
+                            "value_bits {raw} out of range (must be 0..{})",
+                            u8::MAX
+                        )));
+                    }
+                    value_bits = raw as u8;
                 }
                 "max_bytes" => {
-                    max_bytes = self.parse_integer()? as u8;
+                    let raw = self.parse_integer()?;
+                    if raw < 0 || raw > u8::MAX as i64 {
+                        return Err(self.error(format!(
+                            "max_bytes {raw} out of range (must be 0..{})",
+                            u8::MAX
+                        )));
+                    }
+                    max_bytes = raw as u8;
                 }
                 "byte_order" => {
                     let (val, _) = self.expect_name()?;
@@ -1539,7 +1553,14 @@ impl Parser {
         let start = self.span();
         self.expect(&TokenKind::Bits)?;
         self.expect(&TokenKind::LBracket)?;
-        let width = self.parse_integer()? as u16;
+        let raw = self.parse_integer()?;
+        if raw < 1 || raw > u16::MAX as i64 {
+            return Err(self.error(format!(
+                "bits width {raw} out of range (must be 1..{})",
+                u16::MAX
+            )));
+        }
+        let width = raw as u16;
         self.expect(&TokenKind::RBracket)?;
         Ok(AstTypeExpr::Bits {
             width,

@@ -307,7 +307,11 @@ fn emit_bitgroup_parse(
         if let Some(ref mbg) = f.bitgroup_member
             && mbg.group_id == group_id
         {
-            let mask = (1u64 << mbg.member_width_bits) - 1;
+            let mask = if mbg.member_width_bits >= 64 {
+                u64::MAX
+            } else {
+                (1u64 << mbg.member_width_bits) - 1
+            };
             let shift = mbg.member_offset_bits;
             let ctype = wire_type_to_c(&f.wire_type, "");
             // Use the simplest unsigned type for the cast

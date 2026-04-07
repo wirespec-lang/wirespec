@@ -99,7 +99,15 @@ pub fn expr_to_c(expr: &CodecExpr, ctx: &ExprContext) -> String {
                 }
             }
             LiteralValue::Bool(b) => if *b { "true" } else { "false" }.into(),
-            LiteralValue::String(s) => format!("\"{s}\""),
+            LiteralValue::String(s) => {
+                let escaped = s
+                    .replace('\\', "\\\\")
+                    .replace('"', "\\\"")
+                    .replace('\n', "\\n")
+                    .replace('\r', "\\r")
+                    .replace('\t', "\\t");
+                format!("\"{escaped}\"")
+            }
             LiteralValue::Null => "0".into(),
         },
         CodecExpr::Binary { op, left, right } => {
@@ -261,7 +269,15 @@ pub fn sema_expr_to_c(expr: &SemanticExpr, ctx: &SmExprContext) -> String {
                 }
             }
             SemanticLiteral::Bool(b) => if *b { "true" } else { "false" }.into(),
-            SemanticLiteral::String(s) => format!("\"{s}\""),
+            SemanticLiteral::String(s) => {
+                let escaped = s
+                    .replace('\\', "\\\\")
+                    .replace('"', "\\\"")
+                    .replace('\n', "\\n")
+                    .replace('\r', "\\r")
+                    .replace('\t', "\\t");
+                format!("\"{escaped}\"")
+            }
             SemanticLiteral::Null => "0".into(),
         },
         SemanticExpr::Binary { op, left, right } => {

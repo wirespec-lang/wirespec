@@ -60,7 +60,15 @@ fn expr_to_rust_with_aliases(
                 }
             }
             LiteralValue::Bool(b) => if *b { "true" } else { "false" }.into(),
-            LiteralValue::String(s) => format!("\"{s}\""),
+            LiteralValue::String(s) => {
+                let escaped = s
+                    .replace('\\', "\\\\")
+                    .replace('"', "\\\"")
+                    .replace('\n', "\\n")
+                    .replace('\r', "\\r")
+                    .replace('\t', "\\t");
+                format!("\"{escaped}\"")
+            }
             LiteralValue::Null => "None".into(),
         },
         CodecExpr::Binary { op, left, right } => {
