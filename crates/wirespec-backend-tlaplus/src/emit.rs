@@ -4,6 +4,57 @@ use wirespec_sema::expr::*;
 use wirespec_sema::ir::*;
 use wirespec_sema::types::*;
 
+/// Information about a child state machine referenced via a delegate field.
+struct ChildSmInfo {
+    field_name: String,
+    child_sm: SemanticStateMachine,
+    is_array: bool,
+    array_count: Option<u32>,
+}
+
+/// Resolve child SM references from state fields.
+fn resolve_child_sms(
+    sm: &SemanticStateMachine,
+    all_sms: &[SemanticStateMachine],
+) -> Vec<ChildSmInfo> {
+    let mut result: Vec<ChildSmInfo> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for state in &sm.states {
+        for field in &state.fields {
+            if let Some(ref child_name) = field.child_sm_name {
+                if !seen.insert(field.name.clone()) {
+                    continue; // Already processed this field
+                }
+                if let Some(child_sm) = all_sms.iter().find(|s| &s.name == child_name) {
+                    let (is_array, array_count) = match &field.ty {
+                        SemanticType::Array { count_expr, .. } => {
+                            let count = count_expr.as_ref().and_then(|e| {
+                                if let SemanticExpr::Literal {
+                                    value: SemanticLiteral::Int(n),
+                                } = e.as_ref()
+                                {
+                                    Some(*n as u32)
+                                } else {
+                                    None
+                                }
+                            });
+                            (true, count)
+                        }
+                        _ => (false, None),
+                    };
+                    result.push(ChildSmInfo {
+                        field_name: field.name.clone(),
+                        child_sm: child_sm.clone(),
+                        is_array,
+                        array_count,
+                    });
+                }
+            }
+        }
+    }
+    result
+}
+
 /// Convert a name to PascalCase for TLA+ action names.
 fn to_pascal_case(s: &str) -> String {
     s.split('_')
@@ -21,14 +72,17 @@ fn to_pascal_case(s: &str) -> String {
 pub fn emit_spec(
     sm: &SemanticStateMachine,
     _bound: u32,
-    _all_sms: &[SemanticStateMachine],
+    all_sms: &[SemanticStateMachine],
 ) -> String {
     let name = &sm.name;
     let mut out = String::new();
 
+    // Resolve child SMs
+    let children = resolve_child_sms(sm, all_sms);
+
     // Module header
     out.push_str(&format!("---- MODULE {} ----\n", name));
-    out.push_str("EXTENDS Integers, TLC\n\n");
+    out.push_str("EXTENDS Integers, Sequences, TLC\n\n");
 
     // Bound constant
     out.push_str("\\* Value domains (bounded for model checking)\n");
@@ -36,13 +90,35 @@ pub fn emit_spec(
     out.push_str("ASSUME Bound \\in Nat /\\ Bound > 0\n\n");
 
     // Collect all fields across all states (union)
-    let all_fields = collect_all_fields(sm);
+    let all_fields = collect_all_fields(sm, &children);
 
     // Value domain definitions
     emit_value_domains(&mut out, &all_fields);
 
     // Null marker
     out.push_str("NullVal == \"@@null\"\n\n");
+
+    // Child SM state tag sets
+    for child in &children {
+        let child_state_names: Vec<&str> = child
+            .child_sm
+            .states
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect();
+        out.push_str(&format!(
+            "{}StateTag == {{{}}}\n",
+            child.child_sm.name,
+            child_state_names
+                .iter()
+                .map(|s| format!("\"{}\"", s))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    if !children.is_empty() {
+        out.push('\n');
+    }
 
     // State tags
     let state_names: Vec<&str> = sm.states.iter().map(|s| s.name.as_str()).collect();
@@ -73,16 +149,16 @@ pub fn emit_spec(
     out.push_str("VARIABLE sm\n\n");
 
     // TypeOK invariant
-    emit_type_ok(&mut out, &all_fields);
+    emit_type_ok(&mut out, &all_fields, &children);
 
     // Mk helpers
-    emit_mk_helpers(&mut out, sm, &all_fields);
+    emit_mk_helpers(&mut out, sm, &all_fields, &children);
 
     // Init predicate
-    emit_init(&mut out, sm);
+    emit_init(&mut out, sm, &children);
 
     // Transition actions
-    emit_transitions(&mut out, sm);
+    emit_transitions(&mut out, sm, &children);
 
     // Next
     let groups = compute_transition_groups(sm);
@@ -229,14 +305,57 @@ pub fn emit_config(
     out
 }
 
+/// Sentinel type used to mark a field as a child SM state tag (string domain).
+/// We use `SemanticType::PacketRef` with a special `packet_id` prefix "child_sm_tag:"
+/// to distinguish child SM fields from regular fields in downstream helpers.
+const CHILD_SM_TAG_PREFIX: &str = "child_sm_tag:";
+
+/// Sentinel type used to mark a field as an array of child SM state tags.
+const CHILD_SM_ARRAY_TAG_PREFIX: &str = "child_sm_array_tag:";
+
 /// Collect all unique (field_name, field_type) pairs across all states.
-fn collect_all_fields(sm: &SemanticStateMachine) -> Vec<(String, SemanticType)> {
+/// Child SM fields are represented with a special PacketRef marker type.
+fn collect_all_fields(
+    sm: &SemanticStateMachine,
+    children: &[ChildSmInfo],
+) -> Vec<(String, SemanticType)> {
     let mut fields: Vec<(String, SemanticType)> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     for state in &sm.states {
         for field in &state.fields {
             if seen.insert(field.name.clone()) {
-                fields.push((field.name.clone(), field.ty.clone()));
+                // Check if this field is a child SM field
+                if let Some(child) = children.iter().find(|c| c.field_name == field.name) {
+                    if child.is_array {
+                        // Use array marker
+                        fields.push((
+                            field.name.clone(),
+                            SemanticType::PacketRef {
+                                packet_id: format!(
+                                    "{}{}:{}",
+                                    CHILD_SM_ARRAY_TAG_PREFIX,
+                                    child.child_sm.name,
+                                    child.array_count.unwrap_or(0)
+                                ),
+                                name: child.child_sm.name.clone(),
+                            },
+                        ));
+                    } else {
+                        // Use scalar marker
+                        fields.push((
+                            field.name.clone(),
+                            SemanticType::PacketRef {
+                                packet_id: format!(
+                                    "{}{}",
+                                    CHILD_SM_TAG_PREFIX, child.child_sm.name
+                                ),
+                                name: child.child_sm.name.clone(),
+                            },
+                        ));
+                    }
+                } else {
+                    fields.push((field.name.clone(), field.ty.clone()));
+                }
             }
         }
     }
@@ -323,15 +442,32 @@ fn type_to_tla_domain(ty: &SemanticType) -> String {
 }
 
 /// Emit TypeOK invariant.
-fn emit_type_ok(out: &mut String, fields: &[(String, SemanticType)]) {
+fn emit_type_ok(out: &mut String, fields: &[(String, SemanticType)], children: &[ChildSmInfo]) {
     out.push_str("TypeOK ==\n");
     out.push_str("    /\\ sm.tag \\in StateTag\n");
     for (name, ty) in fields {
-        let domain = type_to_tla_domain(ty);
-        out.push_str(&format!(
-            "    /\\ sm.{} \\in {} \\cup {{NullVal}}\n",
-            name, domain
-        ));
+        if let Some(child) = children.iter().find(|c| c.field_name == *name) {
+            if child.is_array {
+                // Array of child state tags: validate each element
+                let tag_set = format!("{}StateTag", child.child_sm.name);
+                out.push_str(&format!(
+                    "    /\\ \\A i \\in DOMAIN sm.{} : sm.{}[i] \\in {}\n",
+                    name, name, tag_set
+                ));
+            } else {
+                let tag_set = format!("{}StateTag", child.child_sm.name);
+                out.push_str(&format!(
+                    "    /\\ sm.{} \\in {} \\cup {{NullVal}}\n",
+                    name, tag_set
+                ));
+            }
+        } else {
+            let domain = type_to_tla_domain(ty);
+            out.push_str(&format!(
+                "    /\\ sm.{} \\in {} \\cup {{NullVal}}\n",
+                name, domain
+            ));
+        }
     }
     out.push('\n');
 }
@@ -341,15 +477,18 @@ fn emit_mk_helpers(
     out: &mut String,
     sm: &SemanticStateMachine,
     all_fields: &[(String, SemanticType)],
+    children: &[ChildSmInfo],
 ) {
     for state in &sm.states {
         let mk_name = format!("Mk{}", state.name);
 
-        // Parameters: fields of this state without default values
+        // Parameters: fields of this state without default values and not child SM fields
         let params: Vec<String> = state
             .fields
             .iter()
-            .filter(|f| f.default_value.is_none())
+            .filter(|f| {
+                f.default_value.is_none() && !children.iter().any(|c| c.field_name == f.name)
+            })
             .map(|f| format!("{}_v", f.name))
             .collect();
 
@@ -365,6 +504,33 @@ fn emit_mk_helpers(
         let mut record_parts: Vec<String> = vec![format!("tag |-> \"{}\"", state.name)];
         for (fname, _) in all_fields {
             let state_field = state.fields.iter().find(|f| &f.name == fname);
+
+            // Check if this is a child SM field
+            if let Some(child) = children.iter().find(|c| c.field_name == *fname) {
+                if state_field.is_some() {
+                    // Field belongs to this state — use child SM initial state
+                    let child_initial = child
+                        .child_sm
+                        .states
+                        .iter()
+                        .find(|s| s.state_id == child.child_sm.initial_state_id)
+                        .map(|s| s.name.as_str())
+                        .unwrap_or("UNKNOWN");
+                    if child.is_array {
+                        let count = child.array_count.unwrap_or(0);
+                        record_parts.push(format!(
+                            "{} |-> [i \\in 1..{} |-> \"{}\"]",
+                            fname, count, child_initial
+                        ));
+                    } else {
+                        record_parts.push(format!("{} |-> \"{}\"", fname, child_initial));
+                    }
+                } else {
+                    record_parts.push(format!("{} |-> NullVal", fname));
+                }
+                continue;
+            }
+
             let value = if let Some(sf) = state_field {
                 if let Some(ref default) = sf.default_value {
                     literal_to_tla(default)
@@ -393,7 +559,7 @@ fn literal_to_tla(lit: &SemanticLiteral) -> String {
 }
 
 /// Emit Init predicate.
-fn emit_init(out: &mut String, sm: &SemanticStateMachine) {
+fn emit_init(out: &mut String, sm: &SemanticStateMachine, children: &[ChildSmInfo]) {
     // Find initial state by ID
     let initial_state = sm
         .states
@@ -404,10 +570,11 @@ fn emit_init(out: &mut String, sm: &SemanticStateMachine) {
     out.push_str("Init ==\n");
 
     // Fields without defaults need quantification over their domains
+    // Exclude child SM fields (they get their initial state automatically)
     let unbound_fields: Vec<&SemanticStateField> = initial_state
         .fields
         .iter()
-        .filter(|f| f.default_value.is_none())
+        .filter(|f| f.default_value.is_none() && !children.iter().any(|c| c.field_name == f.name))
         .collect();
 
     if unbound_fields.is_empty() {
@@ -505,7 +672,7 @@ fn compute_transition_groups(sm: &SemanticStateMachine) -> Vec<TransitionGroup> 
 }
 
 /// Emit transition actions, handling guarded groups as disjunctions.
-fn emit_transitions(out: &mut String, sm: &SemanticStateMachine) {
+fn emit_transitions(out: &mut String, sm: &SemanticStateMachine, _children: &[ChildSmInfo]) {
     let groups = compute_transition_groups(sm);
 
     for group in &groups {
@@ -681,7 +848,7 @@ fn emit_dst_state(
     let dst_state = sm.states.iter().find(|s| s.name == trans.dst_state_name);
     if let Some(dst) = dst_state {
         if actions_override_defaults(dst, &trans.actions) {
-            let all_fields = collect_all_fields(sm);
+            let all_fields = collect_all_fields(sm, &[]);
             let record = build_inline_record(dst, &all_fields, &trans.actions);
             out.push_str(&format!("{}/\\ sm' = {}\n", indent, record));
         } else {
@@ -710,7 +877,7 @@ fn emit_dst_state_with_indent(
     let dst_state = sm.states.iter().find(|s| s.name == trans.dst_state_name);
     if let Some(dst) = dst_state {
         if actions_override_defaults(dst, &trans.actions) {
-            let all_fields = collect_all_fields(sm);
+            let all_fields = collect_all_fields(sm, &[]);
             let record = build_inline_record(dst, &all_fields, &trans.actions);
             out.push_str(&format!("{}/\\ sm' = {}\n", indent, record));
         } else {

@@ -1172,6 +1172,52 @@ State 1: <Initial predicate>
         );
     }
 
+    // ── delegate SM tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_delegate_child_state_in_spec() {
+        let src = r#"
+state machine Child {
+    state Idle {}
+    state Active {}
+    state Done [terminal]
+    initial Idle
+    transition Idle -> Active { on activate }
+    transition Active -> Done { on finish }
+}
+
+state machine Parent {
+    state Running { child: Child }
+    state Closed [terminal]
+    initial Running
+    transition Running -> Running {
+        on forward(ev: u8)
+        delegate src.child <- ev
+    }
+    transition Running -> Closed { on shutdown }
+}
+"#;
+        let ast = parse(src).unwrap();
+        let sem = analyze(&ast, ComplianceProfile::default(), &Default::default()).unwrap();
+        let parent = sem
+            .state_machines
+            .iter()
+            .find(|s| s.name == "Parent")
+            .unwrap();
+        let output = generate_tlaplus(parent, &sem.state_machines, None).unwrap();
+        eprintln!("=== delegate child state spec ===\n{}", output.spec);
+        assert!(
+            output.spec.contains("ChildStateTag"),
+            "should define ChildStateTag set: {}",
+            output.spec
+        );
+        assert!(
+            output.spec.contains("\"Idle\""),
+            "init should set child to Idle: {}",
+            output.spec
+        );
+    }
+
     #[test]
     fn e2e_unreachable_terminal_fail() {
         let (result, output) = check_tla(
