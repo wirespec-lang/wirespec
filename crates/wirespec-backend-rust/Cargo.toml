@@ -11,10 +11,10 @@ description = "Rust backend for wirespec"
 readme = "README.md"
 
 [dependencies]
-wirespec-backend-api = { version = "0.3.0", path = "../wirespec-backend-api" }
-wirespec-codec = { version = "0.3.0", path = "../wirespec-codec" }
-wirespec-sema = { version = "0.3.0", path = "../wirespec-sema" }
+wirespec-backend-api = { version = "0.4.0", path = "../wirespec-backend-api" }
+wirespec-codec = { version = "0.4.0", path = "../wirespec-codec" }
+wirespec-sema = { version = "0.4.0", path = "../wirespec-sema" }
 
 [dev-dependencies]
-wirespec-syntax = { version = "0.3.0", path = "../wirespec-syntax" }
-wirespec-layout = { version = "0.3.0", path = "../wirespec-layout" }
+wirespec-syntax = { version = "0.4.0", path = "../wirespec-syntax" }
+wirespec-layout = { version = "0.4.0", path = "../wirespec-layout" }

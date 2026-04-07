@@ -1857,21 +1857,21 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 
 [[package]]
 name = "wirespec"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "wirespec-driver",
 ]
 
 [[package]]
 name = "wirespec-backend-api"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "wirespec-codec",
 ]
 
 [[package]]
 name = "wirespec-backend-c"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "wirespec-backend-api",
  "wirespec-codec",
@@ -1882,7 +1882,7 @@ dependencies = [
 
 [[package]]
 name = "wirespec-backend-rust"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "wirespec-backend-api",
  "wirespec-codec",
@@ -1893,7 +1893,7 @@ dependencies = [
 
 [[package]]
 name = "wirespec-backend-tlaplus"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "tla-checker",
  "wirespec-sema",
@@ -1902,7 +1902,7 @@ dependencies = [
 
 [[package]]
 name = "wirespec-codec"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "wirespec-layout",
  "wirespec-sema",
@@ -1911,7 +1911,7 @@ dependencies = [
 
 [[package]]
 name = "wirespec-driver"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "rasn-compiler",
  "tempfile",
@@ -1929,7 +1929,7 @@ dependencies = [
 
 [[package]]
 name = "wirespec-layout"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "wirespec-sema",
  "wirespec-syntax",
@@ -1937,7 +1937,7 @@ dependencies = [
 
 [[package]]
 name = "wirespec-lsp"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "tokio",
  "tower-lsp",
@@ -1947,18 +1947,18 @@ dependencies = [
 
 [[package]]
 name = "wirespec-rt"
-version = "0.3.0"
+version = "0.4.0"
 
 [[package]]
 name = "wirespec-sema"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "wirespec-syntax",
 ]
 
 [[package]]
 name = "wirespec-syntax"
-version = "0.3.0"
+version = "0.4.0"
 
 [[package]]
 name = "wit-bindgen"
