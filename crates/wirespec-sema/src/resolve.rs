@@ -55,12 +55,22 @@ impl TypeRegistry {
         if self.declarations.contains_key(name) {
             return Err(format!("duplicate definition: '{name}'"));
         }
+        if self.aliases.contains_key(name) {
+            return Err(format!("duplicate definition: '{name}'"));
+        }
         self.declarations.insert(name.to_string(), kind);
         Ok(())
     }
 
-    pub fn register_alias(&mut self, alias: &str, target: &str) {
+    pub fn register_alias(&mut self, alias: &str, target: &str) -> Result<(), String> {
+        if self.declarations.contains_key(alias) {
+            return Err(format!("duplicate definition: '{alias}'"));
+        }
+        if self.aliases.contains_key(alias) {
+            return Err(format!("duplicate definition: '{alias}'"));
+        }
         self.aliases.insert(alias.to_string(), target.to_string());
+        Ok(())
     }
 
     pub fn register_const(&mut self, name: &str, value: i64) {

@@ -67,6 +67,9 @@ pub fn main() {
         "check" => cmd_check(&args[2..]),
         "verify" => cmd_verify(&args[2..]),
         "--help" | "-h" => print_usage(),
+        "--version" | "-V" => {
+            println!("wirespec {}", env!("CARGO_PKG_VERSION"));
+        }
         other => {
             eprintln!("error: unknown command: {other}");
             eprintln!();
@@ -834,7 +837,8 @@ fn print_usage() {
     eprintln!("  verify     Generate TLA+ and verify state machines");
     eprintln!();
     eprintln!("Options:");
-    eprintln!("  -h, --help    Show this help message");
+    eprintln!("  -h, --help       Show this help message");
+    eprintln!("  -V, --version    Show version information");
     eprintln!();
     eprintln!("Run 'wirespec <command> --help' for command-specific options.");
 }

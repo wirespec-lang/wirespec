@@ -94,6 +94,8 @@ pub fn bitgroup_read_fn(total_bits: u16, endianness: Endianness) -> &'static str
         (9..=16, Endianness::Big) => "wirespec_cursor_read_u16be",
         (17..=32, Endianness::Little) => "wirespec_cursor_read_u32le",
         (17..=32, Endianness::Big) => "wirespec_cursor_read_u32be",
+        (33..=64, Endianness::Little) => "wirespec_cursor_read_u64le",
+        (33..=64, Endianness::Big) => "wirespec_cursor_read_u64be",
         _ => unreachable!("unexpected bitgroup size for read: {}", total_bits),
     }
 }
@@ -106,6 +108,8 @@ pub fn bitgroup_write_fn(total_bits: u16, endianness: Endianness) -> &'static st
         (9..=16, Endianness::Big) => "wirespec_write_u16be",
         (17..=32, Endianness::Little) => "wirespec_write_u32le",
         (17..=32, Endianness::Big) => "wirespec_write_u32be",
+        (33..=64, Endianness::Little) => "wirespec_write_u64le",
+        (33..=64, Endianness::Big) => "wirespec_write_u64be",
         _ => unreachable!("unexpected bitgroup size for write: {}", total_bits),
     }
 }

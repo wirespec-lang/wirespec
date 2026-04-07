@@ -58,7 +58,7 @@ fn registry_unknown_type() {
 #[test]
 fn registry_alias_resolution() {
     let mut reg = TypeRegistry::new(Endianness::Little);
-    reg.register_alias("AttHandle", "u16le");
+    reg.register_alias("AttHandle", "u16le").unwrap();
     let resolved = reg.resolve_type_name("AttHandle").unwrap();
     assert_eq!(
         resolved,

@@ -195,7 +195,11 @@ fn emit_bitgroup_serialize(
         if let Some(ref mbg) = f.bitgroup_member
             && mbg.group_id == group_id
         {
-            let mask = (1u64 << mbg.member_width_bits) - 1;
+            let mask = if mbg.member_width_bits >= 64 {
+                u64::MAX
+            } else {
+                (1u64 << mbg.member_width_bits) - 1
+            };
             let shift = mbg.member_offset_bits;
             let cast_type = container_type;
             out.push_str(&format!(
@@ -410,7 +414,11 @@ fn emit_variant_field_serialize(
                     if let Some(ref mbg) = af.bitgroup_member
                         && mbg.group_id == group_id
                     {
-                        let mask = (1u64 << mbg.member_width_bits) - 1;
+                        let mask = if mbg.member_width_bits >= 64 {
+                            u64::MAX
+                        } else {
+                            (1u64 << mbg.member_width_bits) - 1
+                        };
                         let shift = mbg.member_offset_bits;
                         out.push_str(&format!(
                                     "{indent}    {var_name} |= (({container_type})({val_prefix}{} & 0x{mask:x})) << {shift};\n",

@@ -234,7 +234,7 @@ static inline wirespec_result_t wirespec_cursor_expect_empty(
 static inline wirespec_result_t wirespec_write_u8(
     uint8_t *buf, size_t cap, size_t *pos, uint8_t val)
 {
-    if (cap - *pos < 1) return WIRESPEC_ERR_SHORT_BUFFER;
+    if (*pos > cap || cap - *pos < 1) return WIRESPEC_ERR_SHORT_BUFFER;
     buf[(*pos)++] = val;
     return WIRESPEC_OK;
 }
@@ -242,7 +242,7 @@ static inline wirespec_result_t wirespec_write_u8(
 static inline wirespec_result_t wirespec_write_u16be(
     uint8_t *buf, size_t cap, size_t *pos, uint16_t val)
 {
-    if (cap - *pos < 2) return WIRESPEC_ERR_SHORT_BUFFER;
+    if (*pos > cap || cap - *pos < 2) return WIRESPEC_ERR_SHORT_BUFFER;
     buf[(*pos)++] = (uint8_t)(val >> 8);
     buf[(*pos)++] = (uint8_t)val;
     return WIRESPEC_OK;
@@ -251,7 +251,7 @@ static inline wirespec_result_t wirespec_write_u16be(
 static inline wirespec_result_t wirespec_write_u24be(
     uint8_t *buf, size_t cap, size_t *pos, uint32_t val)
 {
-    if (cap - *pos < 3) return WIRESPEC_ERR_SHORT_BUFFER;
+    if (*pos > cap || cap - *pos < 3) return WIRESPEC_ERR_SHORT_BUFFER;
     buf[(*pos)++] = (uint8_t)(val >> 16);
     buf[(*pos)++] = (uint8_t)(val >> 8);
     buf[(*pos)++] = (uint8_t)val;
@@ -261,7 +261,7 @@ static inline wirespec_result_t wirespec_write_u24be(
 static inline wirespec_result_t wirespec_write_u24le(
     uint8_t *buf, size_t cap, size_t *pos, uint32_t val)
 {
-    if (cap - *pos < 3) return WIRESPEC_ERR_SHORT_BUFFER;
+    if (*pos > cap || cap - *pos < 3) return WIRESPEC_ERR_SHORT_BUFFER;
     buf[(*pos)++] = (uint8_t)val;
     buf[(*pos)++] = (uint8_t)(val >> 8);
     buf[(*pos)++] = (uint8_t)(val >> 16);
@@ -271,7 +271,7 @@ static inline wirespec_result_t wirespec_write_u24le(
 static inline wirespec_result_t wirespec_write_u32be(
     uint8_t *buf, size_t cap, size_t *pos, uint32_t val)
 {
-    if (cap - *pos < 4) return WIRESPEC_ERR_SHORT_BUFFER;
+    if (*pos > cap || cap - *pos < 4) return WIRESPEC_ERR_SHORT_BUFFER;
     buf[(*pos)++] = (uint8_t)(val >> 24);
     buf[(*pos)++] = (uint8_t)(val >> 16);
     buf[(*pos)++] = (uint8_t)(val >> 8);
@@ -282,7 +282,7 @@ static inline wirespec_result_t wirespec_write_u32be(
 static inline wirespec_result_t wirespec_write_u64be(
     uint8_t *buf, size_t cap, size_t *pos, uint64_t val)
 {
-    if (cap - *pos < 8) return WIRESPEC_ERR_SHORT_BUFFER;
+    if (*pos > cap || cap - *pos < 8) return WIRESPEC_ERR_SHORT_BUFFER;
     buf[(*pos)++] = (uint8_t)(val >> 56);
     buf[(*pos)++] = (uint8_t)(val >> 48);
     buf[(*pos)++] = (uint8_t)(val >> 40);
@@ -297,7 +297,7 @@ static inline wirespec_result_t wirespec_write_u64be(
 static inline wirespec_result_t wirespec_write_u16le(
     uint8_t *buf, size_t cap, size_t *pos, uint16_t val)
 {
-    if (cap - *pos < 2) return WIRESPEC_ERR_SHORT_BUFFER;
+    if (*pos > cap || cap - *pos < 2) return WIRESPEC_ERR_SHORT_BUFFER;
     buf[(*pos)++] = (uint8_t)val;
     buf[(*pos)++] = (uint8_t)(val >> 8);
     return WIRESPEC_OK;
@@ -306,7 +306,7 @@ static inline wirespec_result_t wirespec_write_u16le(
 static inline wirespec_result_t wirespec_write_u32le(
     uint8_t *buf, size_t cap, size_t *pos, uint32_t val)
 {
-    if (cap - *pos < 4) return WIRESPEC_ERR_SHORT_BUFFER;
+    if (*pos > cap || cap - *pos < 4) return WIRESPEC_ERR_SHORT_BUFFER;
     buf[(*pos)++] = (uint8_t)val;
     buf[(*pos)++] = (uint8_t)(val >> 8);
     buf[(*pos)++] = (uint8_t)(val >> 16);
@@ -317,7 +317,7 @@ static inline wirespec_result_t wirespec_write_u32le(
 static inline wirespec_result_t wirespec_write_u64le(
     uint8_t *buf, size_t cap, size_t *pos, uint64_t val)
 {
-    if (cap - *pos < 8) return WIRESPEC_ERR_SHORT_BUFFER;
+    if (*pos > cap || cap - *pos < 8) return WIRESPEC_ERR_SHORT_BUFFER;
     buf[(*pos)++] = (uint8_t)val;
     buf[(*pos)++] = (uint8_t)(val >> 8);
     buf[(*pos)++] = (uint8_t)(val >> 16);
@@ -333,7 +333,7 @@ static inline wirespec_result_t wirespec_write_bytes(
     uint8_t *buf, size_t cap, size_t *pos,
     const uint8_t *data, size_t len)
 {
-    if (cap - *pos < len) return WIRESPEC_ERR_SHORT_BUFFER;
+    if (*pos > cap || cap - *pos < len) return WIRESPEC_ERR_SHORT_BUFFER;
     memcpy(buf + *pos, data, len);
     *pos += len;
     return WIRESPEC_OK;
@@ -360,20 +360,19 @@ static inline uint16_t wirespec_internet_checksum(
 }
 
 /* Compute Internet checksum for serialization: zero the checksum field,
-   compute, and patch. Returns the computed checksum value. */
+   compute, and patch. Returns the computed checksum value.
+   Returns 0 if cksum_offset is out of bounds. */
 static inline uint16_t wirespec_internet_checksum_compute(
     uint8_t *buf, size_t len, size_t cksum_offset)
 {
+    if (cksum_offset > len || len - cksum_offset < 2) return 0;
     /* Zero the checksum field */
-    uint8_t saved0 = buf[cksum_offset];
-    uint8_t saved1 = buf[cksum_offset + 1];
     buf[cksum_offset] = 0;
     buf[cksum_offset + 1] = 0;
     uint16_t cksum = wirespec_internet_checksum(buf, len);
     /* Patch checksum into buffer (big-endian) */
     buf[cksum_offset] = (uint8_t)(cksum >> 8);
     buf[cksum_offset + 1] = (uint8_t)(cksum & 0xFF);
-    (void)saved0; (void)saved1;
     return cksum;
 }
 
@@ -437,10 +436,12 @@ static inline uint32_t wirespec_crc32_verify(
     return crc ^ 0xFFFFFFFF;
 }
 
-/* Compute: zero field, compute skipping it, return raw value (caller patches byte order) */
+/* Compute: zero field, compute skipping it, return raw value (caller patches byte order).
+   Returns 0 if cksum_offset is out of bounds. */
 static inline uint32_t wirespec_crc32_compute(
     uint8_t *buf, size_t len, size_t cksum_offset)
 {
+    if (cksum_offset > len || len - cksum_offset < 4) return 0;
     memset(buf + cksum_offset, 0, 4);
     return wirespec_crc32_verify(buf, len, cksum_offset, 4);
 }
@@ -504,9 +505,11 @@ static inline uint32_t wirespec_crc32c_verify(
     return crc ^ 0xFFFFFFFF;
 }
 
+/* Returns 0 if cksum_offset is out of bounds. */
 static inline uint32_t wirespec_crc32c_compute(
     uint8_t *buf, size_t len, size_t cksum_offset)
 {
+    if (cksum_offset > len || len - cksum_offset < 4) return 0;
     memset(buf + cksum_offset, 0, 4);
     return wirespec_crc32c_verify(buf, len, cksum_offset, 4);
 }
@@ -536,9 +539,11 @@ static inline uint16_t wirespec_fletcher16_verify(
     return (uint16_t)((sum2 << 8) | sum1);
 }
 
+/* Returns 0 if cksum_offset is out of bounds. */
 static inline uint16_t wirespec_fletcher16_compute(
     uint8_t *buf, size_t len, size_t cksum_offset)
 {
+    if (cksum_offset > len || len - cksum_offset < 2) return 0;
     buf[cksum_offset] = 0;
     buf[cksum_offset + 1] = 0;
     return wirespec_fletcher16_verify(buf, len, cksum_offset, 2);

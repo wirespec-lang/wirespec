@@ -250,3 +250,63 @@ fn ok_sm_all_non_terminal_have_transitions() {
     }"#;
     assert!(check(src).is_ok());
 }
+
+// ══════════════════════════════════════════════════════════════════════
+// C4: Type alias / packet name collision
+// ══════════════════════════════════════════════════════════════════════
+
+#[test]
+fn error_type_alias_packet_name_collision() {
+    let src = "type Foo = u8\npacket Foo { x: u8 }";
+    let result = check(src);
+    assert!(
+        result.is_err(),
+        "type alias and packet with same name should fail"
+    );
+    assert_eq!(result.unwrap_err().kind, ErrorKind::DuplicateDefinition);
+}
+
+#[test]
+fn error_packet_type_alias_name_collision() {
+    // Reverse order: packet first, then alias
+    let src = "packet Foo { x: u8 }\ntype Foo = u8";
+    let result = check(src);
+    assert!(
+        result.is_err(),
+        "packet and type alias with same name should fail"
+    );
+    assert_eq!(result.unwrap_err().kind, ErrorKind::DuplicateDefinition);
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// C5: enum u24 member value range check
+// ══════════════════════════════════════════════════════════════════════
+
+#[test]
+fn error_enum_u24_value_out_of_range() {
+    let src = "enum Foo: u24 { TooBig = 16777216 }";
+    let result = check(src);
+    assert!(
+        result.is_err(),
+        "enum u24 member with value 16777216 should fail"
+    );
+    assert_eq!(result.unwrap_err().kind, ErrorKind::TypeMismatch);
+}
+
+#[test]
+fn ok_enum_u24_value_at_max() {
+    let src = "enum Foo: u24 { MaxVal = 16777215 }";
+    assert!(
+        check(src).is_ok(),
+        "enum u24 member with value 16777215 should pass"
+    );
+}
+
+#[test]
+fn ok_enum_u24_value_zero() {
+    let src = "enum Foo: u24 { Zero = 0 }";
+    assert!(
+        check(src).is_ok(),
+        "enum u24 member with value 0 should pass"
+    );
+}

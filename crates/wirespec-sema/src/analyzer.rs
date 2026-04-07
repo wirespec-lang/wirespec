@@ -352,7 +352,9 @@ impl Analyzer {
                     AstTypeDeclBody::Alias { target } => {
                         Self::check_reserved(&td.name)?;
                         let target_name = type_expr_name(target);
-                        self.registry.register_alias(&td.name, &target_name);
+                        self.registry
+                            .register_alias(&td.name, &target_name)
+                            .map_err(|msg| SemaError::new(ErrorKind::DuplicateDefinition, msg))?;
                     }
                     AstTypeDeclBody::Fields { .. } => {
                         // VarInt pattern
@@ -440,6 +442,7 @@ impl Analyzer {
             SemanticType::Primitive { wire, .. } => match wire {
                 PrimitiveWireType::U8 => Some(u8::MAX as i128),
                 PrimitiveWireType::U16 => Some(u16::MAX as i128),
+                PrimitiveWireType::U24 => Some(0x00FF_FFFFi128),
                 PrimitiveWireType::U32 => Some(u32::MAX as i128),
                 PrimitiveWireType::U64 => Some(u64::MAX as i128),
                 PrimitiveWireType::I8 => Some(i8::MAX as i128),
@@ -515,6 +518,7 @@ impl Analyzer {
             SemanticType::Primitive { wire, .. } => match wire {
                 PrimitiveWireType::U8 => Some(u8::MAX as i128),
                 PrimitiveWireType::U16 => Some(u16::MAX as i128),
+                PrimitiveWireType::U24 => Some(0x00FF_FFFFi128),
                 PrimitiveWireType::U32 => Some(u32::MAX as i128),
                 PrimitiveWireType::U64 => Some(u64::MAX as i128),
                 PrimitiveWireType::I8 => Some(i8::MAX as i128),

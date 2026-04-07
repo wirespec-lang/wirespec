@@ -244,7 +244,11 @@ fn emit_bitgroup_serialize(
         if let Some(ref mbg) = f.bitgroup_member
             && mbg.group_id == group_id
         {
-            let mask = (1u64 << mbg.member_width_bits) - 1;
+            let mask = if mbg.member_width_bits >= 64 {
+                u64::MAX
+            } else {
+                (1u64 << mbg.member_width_bits) - 1
+            };
             let shift = mbg.member_offset_bits;
             let field_ref = prefixed_field(val_prefix, &f.name);
             out.push_str(&format!(
@@ -661,7 +665,11 @@ fn emit_variant_field_serialize(
                     if let Some(ref mbg) = af.bitgroup_member
                         && mbg.group_id == bg.group_id
                     {
-                        let mask = (1u64 << mbg.member_width_bits) - 1;
+                        let mask = if mbg.member_width_bits >= 64 {
+                            u64::MAX
+                        } else {
+                            (1u64 << mbg.member_width_bits) - 1
+                        };
                         let shift = mbg.member_offset_bits;
                         let member_name = rust_ident(&af.name);
                         out.push_str(&format!(
