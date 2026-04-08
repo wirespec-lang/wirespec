@@ -1,0 +1,6 @@
+TestSchema DEFINITIONS AUTOMATIC TAGS ::= BEGIN
+  SimpleMessage ::= SEQUENCE {
+    id INTEGER (0..255),
+    active BOOLEAN
+  }
+END
