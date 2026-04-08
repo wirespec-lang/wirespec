@@ -1,0 +1,9 @@
+module asn1c_test
+
+@endian big
+
+packet AsN1Wrapper {
+    version: u8,
+    payload_length: u16,
+    payload: bytes[length: payload_length],
+}
