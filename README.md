@@ -113,7 +113,11 @@ QUIC, TLS 1.3, MQTT, BLE, IPv4, TCP, Ethernet, V2X (ASN.1/UPER) — all defined 
 
 ## Editor Support
 
-VS Code extension with syntax highlighting, completion, hover, and diagnostics: [wirespec-language-tools](https://github.com/wirespec-lang/wirespec-language-tools)
+VS Code extension with syntax highlighting, completion, hover, diagnostics, and go-to-definition: [wirespec-language-tools](https://github.com/wirespec-lang/wirespec-language-tools)
+
+```bash
+cargo install wirespec-lsp
+```
 
 ## Roadmap
 
