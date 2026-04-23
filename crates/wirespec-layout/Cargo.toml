@@ -11,5 +11,5 @@ description = "Layout IR for wirespec"
 readme = "README.md"
 
 [dependencies]
-wirespec-sema = { version = "0.4.1", path = "../wirespec-sema" }
-wirespec-syntax = { version = "0.4.1", path = "../wirespec-syntax" }
+wirespec-sema = { version = "0.4.2", path = "../wirespec-sema" }
+wirespec-syntax = { version = "0.4.2", path = "../wirespec-syntax" }

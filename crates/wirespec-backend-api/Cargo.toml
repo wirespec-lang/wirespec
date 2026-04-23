@@ -11,4 +11,4 @@ description = "Backend trait and common lowering contracts for wirespec"
 readme = "README.md"
 
 [dependencies]
-wirespec-codec = { version = "0.4.1", path = "../wirespec-codec" }
+wirespec-codec = { version = "0.4.2", path = "../wirespec-codec" }

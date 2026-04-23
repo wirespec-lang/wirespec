@@ -588,7 +588,7 @@ fn cmd_verify(args: &[String]) {
 
 fn run_builtin_check(tla_spec: &str, tla_config: &str, sm_name: &str, bound: u32) {
     use tla_checker::ast::{Env, Expr};
-    use tla_checker::checker::{CheckResult, CheckerConfig, check};
+    use tla_checker::checker::{CheckResult, CheckerConfig, PrepareSpecError, check};
     use tla_checker::config::{apply_config, parse_cfg};
     use tla_checker::parser::parse as parse_tla;
 
@@ -714,12 +714,29 @@ fn run_builtin_check(tla_spec: &str, tla_config: &str, sm_name: &str, bound: u32
             eprintln!("  error: Invariant evaluation error: {:?}", e);
             process::exit(1);
         }
-        CheckResult::AssumeViolation(idx) => {
-            eprintln!("  error: ASSUME violation (index {})", idx);
-            process::exit(1);
-        }
-        CheckResult::AssumeError(idx, e) => {
-            eprintln!("  error: ASSUME evaluation error (index {}): {:?}", idx, e);
+        CheckResult::PrepareError(e) => {
+            match e {
+                PrepareSpecError::AssumeViolation(idx) => {
+                    eprintln!("  error: ASSUME violation (index {})", idx);
+                }
+                PrepareSpecError::AssumeError(idx, err) => {
+                    eprintln!(
+                        "  error: ASSUME evaluation error (index {}): {:?}",
+                        idx, err
+                    );
+                }
+                PrepareSpecError::MissingConstants(names) => {
+                    let names: Vec<&str> = names.iter().map(|n| n.as_ref()).collect();
+                    eprintln!(
+                        "  error: missing constants for {}: {}",
+                        sm_name,
+                        names.join(", ")
+                    );
+                }
+                PrepareSpecError::InstanceError(err) => {
+                    eprintln!("  error: instance error: {:?}", err);
+                }
+            }
             process::exit(1);
         }
         CheckResult::MaxStatesExceeded(stats) => {
@@ -738,15 +755,6 @@ fn run_builtin_check(tla_spec: &str, tla_config: &str, sm_name: &str, bound: u32
         }
         CheckResult::NoInitialStates => {
             eprintln!("  error: no initial states for {}", sm_name);
-            process::exit(1);
-        }
-        CheckResult::MissingConstants(names) => {
-            let names: Vec<&str> = names.iter().map(|n| n.as_ref()).collect();
-            eprintln!(
-                "  error: missing constants for {}: {}",
-                sm_name,
-                names.join(", ")
-            );
             process::exit(1);
         }
     }

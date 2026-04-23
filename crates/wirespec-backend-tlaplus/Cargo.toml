@@ -11,8 +11,8 @@ description = "TLA+ code generation backend for wirespec state machines"
 readme = "README.md"
 
 [dependencies]
-wirespec-sema = { version = "0.4.1", path = "../wirespec-sema" }
+wirespec-sema = { version = "0.4.2", path = "../wirespec-sema" }
 
 [dev-dependencies]
-wirespec-syntax = { version = "0.4.1", path = "../wirespec-syntax" }
-tla-checker = "0.3"
+wirespec-syntax = { version = "0.4.2", path = "../wirespec-syntax" }
+tla-checker = "0.3.9"

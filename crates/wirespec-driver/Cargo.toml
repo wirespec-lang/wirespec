@@ -1,6 +1,6 @@
 [package]
 name = "wirespec-driver"
-version = "0.4.1"
+version = "0.4.2"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -14,17 +14,17 @@ readme = "README.md"
 asn1 = ["dep:rasn-compiler"]
 
 [dependencies]
-wirespec-syntax = { version = "0.4.1", path = "../wirespec-syntax" }
-wirespec-sema = { version = "0.4.1", path = "../wirespec-sema" }
-wirespec-layout = { version = "0.4.1", path = "../wirespec-layout" }
-wirespec-codec = { version = "0.4.1", path = "../wirespec-codec" }
-wirespec-backend-api = { version = "0.4.1", path = "../wirespec-backend-api" }
-wirespec-backend-c = { version = "0.4.1", path = "../wirespec-backend-c" }
-wirespec-backend-rust = { version = "0.4.1", path = "../wirespec-backend-rust" }
-wirespec-backend-tlaplus = { version = "0.4.1", path = "../wirespec-backend-tlaplus" }
+wirespec-syntax = { version = "0.4.2", path = "../wirespec-syntax" }
+wirespec-sema = { version = "0.4.2", path = "../wirespec-sema" }
+wirespec-layout = { version = "0.4.2", path = "../wirespec-layout" }
+wirespec-codec = { version = "0.4.2", path = "../wirespec-codec" }
+wirespec-backend-api = { version = "0.4.2", path = "../wirespec-backend-api" }
+wirespec-backend-c = { version = "0.4.2", path = "../wirespec-backend-c" }
+wirespec-backend-rust = { version = "0.4.2", path = "../wirespec-backend-rust" }
+wirespec-backend-tlaplus = { version = "0.4.2", path = "../wirespec-backend-tlaplus" }
 rasn-compiler = { version = "0.16", optional = true }
-tla-checker = "0.3"
+tla-checker = "0.3.9"
 
 [dev-dependencies]
 tempfile = "3"
-wirespec-rt = { version = "0.4.1", path = "../wirespec-rt" }
+wirespec-rt = { version = "0.4.2", path = "../wirespec-rt" }
