@@ -22,7 +22,7 @@ jobs:
           cargo +nightly fuzz run fuzz_parser -- -max_total_time=${{ inputs.duration }}
       - name: Upload corpus
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fuzz-corpus
           path: fuzz/corpus/
