@@ -15,4 +15,4 @@ wirespec-sema = { version = "0.4.2", path = "../wirespec-sema" }
 
 [dev-dependencies]
 wirespec-syntax = { version = "0.4.2", path = "../wirespec-syntax" }
-tla-checker = "0.3.9"
+tla-checker = "0.3.11"
